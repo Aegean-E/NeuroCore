@@ -46,13 +46,41 @@ class FlowRunner:
 
     async def run(self, initial_input: dict):
         """Executes the flow in order, passing data between nodes."""
-        current_data = initial_input
+        node_outputs = {}
         
         for node_id in self.execution_order:
             node_meta = self.nodes[node_id]
             module_id = node_meta['moduleId']
             node_type_id = node_meta['nodeTypeId']
             
+            # 1. Determine Input Data (DAG Logic)
+            incoming_edges = [c for c in self.connections if c['to'] == node_id]
+            
+            if not incoming_edges:
+                # Source node: receives global initial input
+                node_input = initial_input
+            else:
+                # Gather outputs from parents
+                parent_outputs = []
+                for edge in incoming_edges:
+                    p_out = node_outputs.get(edge['from'])
+                    if p_out is not None:
+                        parent_outputs.append(p_out)
+                
+                if not parent_outputs:
+                    # Branch stopped (condition failed upstream) or no data
+                    node_outputs[node_id] = None
+                    continue
+                
+                # Merge inputs from multiple parents
+                node_input = {}
+                for po in parent_outputs:
+                    if isinstance(po, dict):
+                        node_input.update(po)
+                    else:
+                        # Fallback for non-dict outputs
+                        node_input = po
+
             try:
                 cache_key = f"{module_id}.{node_type_id}"
                 
@@ -65,20 +93,36 @@ class FlowRunner:
 
                 executor_class = self._executor_cache[cache_key]
                 if not executor_class:
-                    raise ImportError(f"Executor class for '{node_type_id}' not found in '{module_id}'.")
-                
-                executor = executor_class()
+                    # Fallback: Pass through if no executor found (e.g. missing module)
+                    node_outputs[node_id] = node_input
+                    continue
 
+                executor = executor_class()
                 node_config = node_meta.get('config', {})
-                processed_data = await executor.receive(current_data, config=node_config)
-                current_data = await executor.send(processed_data)
+                
+                processed_data = await executor.receive(node_input, config=node_config)
+                
+                # If receive returns None (e.g. Condition failed), we stop this branch
+                if processed_data is None:
+                    node_outputs[node_id] = None
+                    continue
+
+                output = await executor.send(processed_data)
+                node_outputs[node_id] = output
 
             except (ImportError, AttributeError) as e:
                 print(f"Warning: Could not find or use node logic for {module_id}/{node_type_id}. Error: {e}. Passing data through.")
+                node_outputs[node_id] = node_input
             except Exception as e:
                 error_msg = f"Execution failed at node '{node_meta['name']}': {e}"
                 print(f"Error in FlowRunner: {error_msg}")
                 # Return a structured error that the chat UI can display
                 return {"error": error_msg}
             
-        return current_data
+        # Return the output of the last executed node in the list that isn't None
+        for node_id in reversed(self.execution_order):
+            out = node_outputs.get(node_id)
+            if out is not None:
+                return out
+                
+        return {}

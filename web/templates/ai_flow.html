@@ -408,31 +408,47 @@
 
             const nodeElement = document.createElement('div');
             nodeElement.id = nodeId;
-            nodeElement.className = 'absolute bg-slate-800 border border-slate-700 p-4 rounded-xl shadow-2xl cursor-move w-48';
-            nodeElement.style.left = `${x}px`;
-            nodeElement.style.top = `${y}px`;
-            nodeElement.innerHTML = `
-                <div class="flex justify-between items-start mb-3">
-                    <div class="flex items-center">
-                        ${iconPath ? `<svg class="w-4 h-4 text-slate-400 mr-2 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="${iconPath}"></path></svg>` : ''}
-                        <div class="font-bold text-xs uppercase text-slate-200 pointer-events-none">${name}</div>
+            
+            // Special handling for comment nodes
+            if (nodeTypeId === 'comment_node') {
+                const width = existingConfig.width || 200;
+                const height = existingConfig.height || 100;
+                nodeElement.className = 'absolute bg-yellow-900/40 border-2 border-dashed border-yellow-600/50 p-2 rounded-xl shadow-lg flex flex-col cursor-move';
+                nodeElement.style.left = `${x}px`;
+                nodeElement.style.top = `${y}px`;
+                nodeElement.style.width = `${width}px`;
+                nodeElement.style.height = `${height}px`;
+                nodeElement.innerHTML = `
+                    <textarea class="flex-grow w-full h-full bg-transparent text-yellow-200 text-sm p-2 resize-none focus:outline-none custom-scrollbar" placeholder="Type your comment...">${existingConfig.text || ''}</textarea>
+                    <div class="comment-resize-handle absolute bottom-0 right-0 w-4 h-4 cursor-se-resize"></div>
+                `;
+            } else {
+                nodeElement.className = 'absolute bg-slate-800 border border-slate-700 p-4 rounded-xl shadow-2xl cursor-move w-48';
+                nodeElement.style.left = `${x}px`;
+                nodeElement.style.top = `${y}px`;
+                nodeElement.innerHTML = `
+                    <div class="flex justify-between items-start mb-3">
+                        <div class="flex items-center">
+                            ${iconPath ? `<svg class="w-4 h-4 text-slate-400 mr-2 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="${iconPath}"></path></svg>` : ''}
+                            <div class="font-bold text-xs uppercase text-slate-200 pointer-events-none">${name}</div>
+                        </div>
+                        ${isConfigurable ? `
+                        <button class="text-slate-400 hover:text-blue-400 transition-colors config-btn" title="Configure Node">
+                            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
+                        </button>` : ''}
                     </div>
-                    ${isConfigurable ? `
-                    <button class="text-slate-400 hover:text-blue-400 transition-colors config-btn" title="Configure Node">
-                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
-                    </button>` : ''}
-                </div>
-                <div class="flex justify-between items-center text-xs text-slate-300">
-                    <div class="input-area flex items-center space-x-2 p-1 -m-1 rounded-md hover:bg-slate-700 transition-colors cursor-pointer">
-                        <div class="w-2.5 h-2.5 bg-blue-500 rounded-full input-dot" title="Input"></div>
-                        <span>Input</span>
+                    <div class="flex justify-between items-center text-xs text-slate-300">
+                        <div class="input-area flex items-center space-x-2 p-1 -m-1 rounded-md hover:bg-slate-700 transition-colors cursor-pointer">
+                            <div class="w-2.5 h-2.5 bg-blue-500 rounded-full input-dot" title="Input"></div>
+                            <span>Input</span>
+                        </div>
+                        <div class="output-area flex items-center space-x-2 p-1 -m-1 rounded-md hover:bg-slate-700 transition-colors cursor-pointer">
+                            <span>Output</span>
+                            <div class="w-2.5 h-2.5 bg-emerald-500 rounded-full output-dot" title="Output"></div>
+                        </div>
                     </div>
-                    <div class="output-area flex items-center space-x-2 p-1 -m-1 rounded-md hover:bg-slate-700 transition-colors cursor-pointer">
-                        <span>Output</span>
-                        <div class="w-2.5 h-2.5 bg-emerald-500 rounded-full output-dot" title="Output"></div>
-                    </div>
-                </div>
-            `;
+                `;
+            }
             
             const nodeData = { id: nodeId, moduleId: moduleId, nodeTypeId: nodeTypeId, name: name, x: x, y: y, config: existingConfig };
             nodes.push(nodeData);
@@ -440,6 +456,41 @@
             let isDragging = false;
             const bin = document.getElementById('canvas-bin');
             
+            // Logic specific to comment nodes
+            if (nodeTypeId === 'comment_node') {
+                const textarea = nodeElement.querySelector('textarea');
+                textarea.addEventListener('input', () => {
+                    nodeData.config.text = textarea.value;
+                });
+                // Prevent node drag when interacting with textarea
+                textarea.addEventListener('mousedown', (e) => e.stopPropagation());
+
+                const resizeHandle = nodeElement.querySelector('.comment-resize-handle');
+                resizeHandle.addEventListener('mousedown', (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    
+                    const startX = e.clientX;
+                    const startY = e.clientY;
+                    const startWidth = parseInt(document.defaultView.getComputedStyle(nodeElement).width, 10);
+                    const startHeight = parseInt(document.defaultView.getComputedStyle(nodeElement).height, 10);
+
+                    function doResize(e) {
+                        const newWidth = startWidth + (e.clientX - startX) / zoom;
+                        const newHeight = startHeight + (e.clientY - startY) / zoom;
+                        if (newWidth > 100) { nodeElement.style.width = newWidth + 'px'; nodeData.config.width = newWidth; }
+                        if (newHeight > 50) { nodeElement.style.height = newHeight + 'px'; nodeData.config.height = newHeight; }
+                    }
+
+                    function stopResize() {
+                        document.removeEventListener('mousemove', doResize);
+                        document.removeEventListener('mouseup', stopResize);
+                    }
+                    document.addEventListener('mousemove', doResize);
+                    document.addEventListener('mouseup', stopResize);
+                });
+            }
+
             // Config Button Logic
             const configBtn = nodeElement.querySelector('.config-btn');
             if (configBtn) {
@@ -450,7 +501,10 @@
             }
 
             nodeElement.onmousedown = (e) => {
-                if (e.target.closest('.input-area') || e.target.closest('.output-area') || e.target.closest('.config-btn')) return;
+                // Check for specific interactive elements before starting drag
+                if (e.target.closest('.input-area') || e.target.closest('.output-area') || e.target.closest('.config-btn') || e.target.tagName.toLowerCase() === 'textarea' || e.target.classList.contains('comment-resize-handle')) {
+                    return;
+                }
                 isDragging = true;
 
                 document.onmousemove = (e) => {
@@ -504,50 +558,54 @@
             // --- Connection Logic ---
             const inputArea = nodeElement.querySelector('.input-area');
             const outputArea = nodeElement.querySelector('.output-area');
-            const outputDot = nodeElement.querySelector('.output-dot');
+            
+            // Only add connection logic for non-comment nodes
+            if (inputArea && outputArea) {
+                const outputDot = nodeElement.querySelector('.output-dot');
 
-            outputArea.onclick = (e) => {
-                e.stopPropagation();
-                if (isDrawingConnection) {
-                    clearConnectionState();
-                    return;
-                }
-                isDrawingConnection = true;
-                connectionStart.node = nodeData;
-                connectionStart.element = outputDot;
-                outputDot.classList.add('connecting');
+                outputArea.onclick = (e) => {
+                    e.stopPropagation();
+                    if (isDrawingConnection) {
+                        clearConnectionState();
+                        return;
+                    }
+                    isDrawingConnection = true;
+                    connectionStart.node = nodeData;
+                    connectionStart.element = outputDot;
+                    outputDot.classList.add('connecting');
 
-                const canvasRect = canvas.getBoundingClientRect();
-                const fromDotRect = connectionStart.element.getBoundingClientRect();
-                const startX = (fromDotRect.left + fromDotRect.width / 2 - canvasRect.left - panX) / zoom;
-                const startY = (fromDotRect.top + fromDotRect.height / 2 - canvasRect.top - panY) / zoom;
+                    const canvasRect = canvas.getBoundingClientRect();
+                    const fromDotRect = connectionStart.element.getBoundingClientRect();
+                    const startX = (fromDotRect.left + fromDotRect.width / 2 - canvasRect.left - panX) / zoom;
+                    const startY = (fromDotRect.top + fromDotRect.height / 2 - canvasRect.top - panY) / zoom;
 
-                activeDrawingLine = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-                activeDrawingLine.setAttribute('stroke', '#3b82f6');
-                activeDrawingLine.setAttribute('stroke-width', '2');
-                activeDrawingLine.setAttribute('fill', 'none');
-                activeDrawingLine.setAttribute('stroke-dasharray', '5,5');
-                activeDrawingLine.style.pointerEvents = 'none';
-                svg.appendChild(activeDrawingLine);
+                    activeDrawingLine = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+                    activeDrawingLine.setAttribute('stroke', '#3b82f6');
+                    activeDrawingLine.setAttribute('stroke-width', '2');
+                    activeDrawingLine.setAttribute('fill', 'none');
+                    activeDrawingLine.setAttribute('stroke-dasharray', '5,5');
+                    activeDrawingLine.style.pointerEvents = 'none';
+                    svg.appendChild(activeDrawingLine);
 
-                document.onmousemove = (move_e) => {
-                    if (!isDrawingConnection) return;
-                    const endX = (move_e.clientX - canvasRect.left - panX) / zoom;
-                    const endY = (move_e.clientY - canvasRect.top - panY) / zoom;
-                    const d = `M ${startX} ${startY} C ${startX + 50} ${startY}, ${endX - 50} ${endY}, ${endX} ${endY}`;
-                    activeDrawingLine.setAttribute('d', d);
+                    document.onmousemove = (move_e) => {
+                        if (!isDrawingConnection) return;
+                        const endX = (move_e.clientX - canvasRect.left - panX) / zoom;
+                        const endY = (move_e.clientY - canvasRect.top - panY) / zoom;
+                        const d = `M ${startX} ${startY} C ${startX + 50} ${startY}, ${endX - 50} ${endY}, ${endX} ${endY}`;
+                        activeDrawingLine.setAttribute('d', d);
+                    };
                 };
-            };
 
-            inputArea.onclick = (e) => {
-                e.stopPropagation();
-                if (isDrawingConnection) {
-                    const inputDot = nodeElement.querySelector('.input-dot');
-                    const connectionEnd = { node: nodeData, element: inputDot };
-                    createConnection(connectionStart, connectionEnd);
-                    clearConnectionState();
+                inputArea.onclick = (e) => {
+                    e.stopPropagation();
+                    if (isDrawingConnection) {
+                        const inputDot = nodeElement.querySelector('.input-dot');
+                        const connectionEnd = { node: nodeData, element: inputDot };
+                        createConnection(connectionStart, connectionEnd);
+                        clearConnectionState();
+                    }
                 }
-            };
+            }
 
             nodeAndSvgContainer.appendChild(nodeElement);
         }
