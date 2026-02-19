@@ -1,3 +1,4 @@
+import os
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
@@ -16,6 +17,8 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="NeuroCore", description="Modular LLM API Core", lifespan=lifespan)
 
+# Ensure static directory exists to prevent startup errors
+os.makedirs("web/static", exist_ok=True)
 app.mount("/static", StaticFiles(directory="web/static"), name="static")
 app.include_router(core_router)
 

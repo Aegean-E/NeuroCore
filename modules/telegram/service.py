@@ -145,7 +145,9 @@ class TelegramService:
                     local_filename = f"{file_id}_{os.path.basename(file_path_remote)}"
                     local_path = os.path.join(temp_dir, local_filename)
                     
-                    if self.bridge.download_file(file_path_remote, local_path):
+                    # Run blocking download in a separate thread to avoid freezing the event loop
+                    loop = asyncio.get_running_loop()
+                    if await loop.run_in_executor(None, self.bridge.download_file, file_path_remote, local_path):
                         with open(local_path, "rb") as img_file:
                             b64_data = base64.b64encode(img_file.read()).decode('utf-8')
                         
