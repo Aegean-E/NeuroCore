@@ -163,6 +163,43 @@
     </div>
     {% endif %}
 
+    {% if module.id == 'telegram' and module.enabled %}
+    <div class="bg-slate-900 rounded-xl border border-slate-800 p-6 mt-6">
+        <h3 class="font-semibold text-lg mb-4">Telegram Bridge Settings</h3>
+        <form hx-post="/telegram/settings/save" 
+              hx-swap="none"
+              hx-on::after-request="const btn = this.querySelector('button[type=submit]'); const orig = btn.innerText; btn.innerText = 'Saved!'; btn.classList.remove('bg-blue-600', 'hover:bg-blue-500'); btn.classList.add('bg-emerald-600', 'hover:bg-emerald-500'); setTimeout(() => { btn.innerText = orig; btn.classList.add('bg-blue-600', 'hover:bg-blue-500'); btn.classList.remove('bg-emerald-600', 'hover:bg-emerald-500'); }, 2000);">
+            
+            <div class="grid grid-cols-1 gap-6">
+                <div>
+                    <label class="block text-sm font-medium text-slate-400 mb-2">Bot Token</label>
+                    <input type="password" name="bot_token" value="{{ module.config.bot_token }}" placeholder="123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11"
+                           class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-slate-400 mb-2">Chat ID</label>
+                    <input type="number" name="chat_id" value="{{ module.config.chat_id }}" placeholder="123456789"
+                           class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all">
+                    <p class="text-xs text-slate-500 mt-2">The Chat ID where the bot will send messages.</p>
+                </div>
+            </div>
+            
+            <div class="mt-6 bg-slate-950/50 rounded-lg p-4 border border-slate-700/50">
+                <h4 class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Available Commands</h4>
+                <ul class="text-sm text-slate-300 space-y-1 font-mono">
+                    <li><span class="text-blue-400">/new_session</span> - Start a fresh conversation</li>
+                    <li><span class="text-blue-400">/delete_session</span> - Delete current history</li>
+                    <li><span class="text-blue-400">/help</span> - Show command list</li>
+                </ul>
+            </div>
+
+            <div class="mt-4 flex justify-end">
+                <button type="submit" class="bg-blue-600 hover:bg-blue-500 text-white px-6 py-2 rounded-lg text-sm font-semibold transition-colors">Save Telegram Settings</button>
+            </div>
+        </form>
+    </div>
+    {% endif %}
+
     {% if module.id == 'memory_browser' and module.enabled %}
     <div class="mt-8">
         <div class="bg-slate-900 rounded-xl border border-slate-800 overflow-hidden h-[700px] shadow-inner" 

@@ -115,7 +115,7 @@
 
         <!-- AI Flow Area -->
         <div id="canvas" 
-             class="flex-grow canvas-grid relative">
+             class="flex-grow canvas-grid relative overflow-hidden">
             <svg id="canvas-svg" class="absolute inset-0 w-full h-full pointer-events-none"></svg>
             <div id="canvas-bin" class="absolute bottom-5 right-5 w-20 h-20 bg-red-900/50 border-2 border-dashed border-red-700 rounded-full flex items-center justify-center text-red-500 opacity-50 transition-all pointer-events-none z-20">
                 <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
@@ -408,26 +408,26 @@
 
             const nodeElement = document.createElement('div');
             nodeElement.id = nodeId;
-            nodeElement.className = 'absolute bg-slate-950 border border-slate-800 p-4 rounded-xl shadow-2xl cursor-move w-48';
+            nodeElement.className = 'absolute bg-slate-800 border border-slate-700 p-4 rounded-xl shadow-2xl cursor-move w-48';
             nodeElement.style.left = `${x}px`;
             nodeElement.style.top = `${y}px`;
             nodeElement.innerHTML = `
                 <div class="flex justify-between items-start mb-3">
                     <div class="flex items-center">
-                        ${iconPath ? `<svg class="w-4 h-4 text-slate-500 mr-2 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="${iconPath}"></path></svg>` : ''}
-                        <div class="font-bold text-xs uppercase text-slate-500 pointer-events-none">${name}</div>
+                        ${iconPath ? `<svg class="w-4 h-4 text-slate-400 mr-2 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="${iconPath}"></path></svg>` : ''}
+                        <div class="font-bold text-xs uppercase text-slate-200 pointer-events-none">${name}</div>
                     </div>
                     ${isConfigurable ? `
-                    <button class="text-slate-600 hover:text-blue-400 transition-colors config-btn" title="Configure Node">
+                    <button class="text-slate-400 hover:text-blue-400 transition-colors config-btn" title="Configure Node">
                         <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
                     </button>` : ''}
                 </div>
-                <div class="flex justify-between items-center text-xs text-slate-400">
-                    <div class="input-area flex items-center space-x-2 p-1 -m-1 rounded-md hover:bg-slate-800 transition-colors cursor-pointer">
+                <div class="flex justify-between items-center text-xs text-slate-300">
+                    <div class="input-area flex items-center space-x-2 p-1 -m-1 rounded-md hover:bg-slate-700 transition-colors cursor-pointer">
                         <div class="w-2.5 h-2.5 bg-blue-500 rounded-full input-dot" title="Input"></div>
                         <span>Input</span>
                     </div>
-                    <div class="output-area flex items-center space-x-2 p-1 -m-1 rounded-md hover:bg-slate-800 transition-colors cursor-pointer">
+                    <div class="output-area flex items-center space-x-2 p-1 -m-1 rounded-md hover:bg-slate-700 transition-colors cursor-pointer">
                         <span>Output</span>
                         <div class="w-2.5 h-2.5 bg-emerald-500 rounded-full output-dot" title="Output"></div>
                     </div>
@@ -591,7 +591,7 @@
             nodes = [];
             connections = [];
             selectedConnection = null;
-            nodeAndSvgContainer.querySelectorAll('.absolute.bg-slate-950').forEach(el => el.remove());
+            nodeAndSvgContainer.querySelectorAll('.absolute.bg-slate-800').forEach(el => el.remove());
             drawConnections();
             nextNodeId = 0;
             document.querySelector('#save-flow-form input[name="name"]').value = '';

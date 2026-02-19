@@ -26,12 +26,19 @@ NeuroCore is built on the principles of **Speed**, **Simplicity**, and **Modular
     *   **Singleton Nodes**: Enforce architectural patterns by restricting certain nodes (like Chat Input/Output) to a single instance per flow.
     *   **Flow Management**: Create, save, rename, and switch between multiple AI flows to handle different tasks.
 *   **💬 Built-in Chat UI**: A clean, modern chat interface for direct interaction with your configured AI flow.
+    *   **Multimodal Support**: Upload images to interact with vision-capable models.
     *   **Session Management**: Create, rename, and delete chat sessions to organize your conversations.
+    *   **Auto-Renaming**: Sessions are automatically titled based on the conversation context.
 *   **📚 Long-Term Memory**: Integrated vector database (FAISS + SQLite) for persistent AI memory.
     *   **Automatic Storage**: Background processing saves user and assistant interactions.
-    *   **Memory Arbiter**: Intelligent filtering based on confidence scores and memory types (Facts, Rules, Beliefs) to ensure high-quality retention.
+    *   **Smart Extraction**: Uses an Arbiter model to extract specific facts and preferences, filtering out noise.
+    *   **Semantic Consolidation**: Intelligent merging of redundant memories to prevent database bloat and maintain coherence.
     *   **Memory Browser**: A dedicated UI to search, filter, and delete stored memories.
     *   **Context Injection**: Automatically retrieves relevant memories during conversations.
+*   **📱 Telegram Integration**: Connect your AI flow to Telegram for remote access.
+    *   **Chat Remotely**: Interact with your AI agent from anywhere via the Telegram app.
+    *   **Vision Support**: Send photos to Telegram to analyze images using vision-capable models.
+    *   **Command Control**: Manage sessions (`/new_session`, `/delete_session`) directly from the chat.
 *   **⚙️ Dynamic Configuration**: Manage LLM API endpoints, models, and other parameters through a simple, tabbed settings UI.
 *   **✅ Robust Testing**: A comprehensive test suite using `pytest` to ensure code quality and stability.
 
@@ -92,10 +99,11 @@ Follow these steps to get NeuroCore up and running on your local machine.
     ```json
     {
         "llm_api_url": "http://localhost:1234/v1",
+        "llm_api_key": "",
         "default_model": "local-model",
-        "temperature": 0.7,
-        "max_tokens": 2048,
-        "active_ai_flow": null
+        "embedding_api_url": "",
+        "embedding_model": "",
+        "active_ai_flow": "default-flow-001"
     }
     ```
 

@@ -58,6 +58,9 @@ async def get_module_details(request: Request, module_id: str, module_manager: M
     elif module_id == 'chat':
         for key in ['auto_rename_turns']:
             config_display.pop(key, None)
+    elif module_id == 'telegram':
+        for key in ['bot_token', 'chat_id']:
+            config_display.pop(key, None)
         
     formatted_config = json.dumps(config_display, indent=4)
     
@@ -112,6 +115,13 @@ async def save_module_config(request: Request, module_id: str, config_json: str 
             if current_module:
                 current_config = current_module.get('config', {})
                 for key in ['auto_rename_turns']:
+                    if key in current_config:
+                        new_config[key] = current_config[key]
+        elif module_id == 'telegram':
+            current_module = module_manager.modules.get(module_id)
+            if current_module:
+                current_config = current_module.get('config', {})
+                for key in ['bot_token', 'chat_id']:
                     if key in current_config:
                         new_config[key] = current_config[key]
                     
