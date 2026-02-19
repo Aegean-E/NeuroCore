@@ -22,6 +22,7 @@
             <nav>
                 <ul class="flex space-x-6 text-sm font-medium text-slate-400">
                     <li><a href="/" class="hover:text-blue-400 transition-colors">Dashboard</a></li>
+                    <li><a href="/modules" class="hover:text-blue-400 transition-colors">Modules</a></li>
                     <li><a href="/settings" class="hover:text-blue-400 transition-colors">Settings</a></li>
                 </ul>
             </nav>
@@ -39,11 +40,11 @@
                 <p class="text-slate-600 text-sm italic px-2">No modules loaded</p>
                 {% else %}
                 {% for module in modules %}
-                <button hx-get="/{{ module }}/gui" 
+                <button hx-get="/{{ module.id }}/gui" 
                         hx-target="#module-content" 
                         class="w-full text-left px-3 py-2 rounded-lg hover:bg-slate-800 text-slate-300 hover:text-white transition-all text-sm flex items-center group">
                     <span class="w-2 h-2 rounded-full bg-emerald-500 mr-3 group-hover:scale-125 transition-transform"></span>
-                    {{ module|capitalize }}
+                    {{ module.name }}
                 </button>
                 {% endfor %}
                 {% endif %}

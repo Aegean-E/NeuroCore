@@ -1,6 +1,7 @@
-from fastapi import APIRouter, Request, Form
+from fastapi import APIRouter, Request, Form, Depends
 from fastapi.responses import HTMLResponse
-from core.llm import llm
+from core.llm import LLMBridge
+from core.dependencies import get_llm_bridge
 
 router = APIRouter()
 
@@ -11,7 +12,7 @@ async def chat_gui(request: Request):
         <div class="border-b border-slate-800 pb-4 mb-4 flex justify-between items-center">
             <div>
                 <h2 class="text-xl font-semibold">AI Assistant</h2>
-                <p class="text-sm text-slate-500">Connected to LM Studio</p>
+                <p class="text-sm text-slate-500">Connected to LLM API</p>
             </div>
         </div>
         
@@ -32,13 +33,16 @@ async def chat_gui(request: Request):
     """
 
 @router.post("/send", response_class=HTMLResponse)
-async def send_message(message: str = Form(...)):
+async def send_message(
+    message: str = Form(...),
+    llm: LLMBridge = Depends(get_llm_bridge)
+):
     # Call LM Studio API
     messages = [{"role": "user", "content": message}]
     response = await llm.chat_completion(messages)
     
     if "error" in response:
-        ai_response = f"Error connecting to LM Studio: {response['error']}"
+        ai_response = f"Error connecting to LLM API: {response['error']}"
     else:
         ai_response = response.get("choices", [{}])[0].get("message", {}).get("content", "No response.")
 

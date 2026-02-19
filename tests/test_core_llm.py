@@ -1,6 +1,6 @@
 import pytest
 import asyncio
-from core.llm import LMStudioBridge
+from core.llm import LLMBridge
 
 @pytest.mark.asyncio
 async def test_chat_completion_success(httpx_mock):
@@ -15,7 +15,7 @@ async def test_chat_completion_success(httpx_mock):
         method="POST"
     )
     
-    bridge = LMStudioBridge()
+    bridge = LLMBridge(base_url="http://localhost:1234/v1")
     result = await bridge.chat_completion([{"role": "user", "content": "hi"}])
     
     assert "choices" in result
@@ -29,7 +29,7 @@ async def test_chat_completion_error(httpx_mock):
         method="POST"
     )
     
-    bridge = LMStudioBridge()
+    bridge = LLMBridge(base_url="http://localhost:1234/v1")
     result = await bridge.chat_completion([{"role": "user", "content": "hi"}])
     
     assert "error" in result
