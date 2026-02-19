@@ -1,8 +1,11 @@
-from fastapi import APIRouter, Request
-from fastapi.responses import HTMLResponse
+from fastapi import APIRouter, Request, Form
+from fastapi.responses import HTMLResponse, Response
+from fastapi.templating import Jinja2Templates
+import json
 from .backend import memory_store
 
 router = APIRouter()
+templates = Jinja2Templates(directory="web/templates")
 
 @router.get("/stats", response_class=HTMLResponse)
 async def get_stats(request: Request):
@@ -29,25 +32,36 @@ async def get_stats(request: Request):
     </div>
     """.format(stats.get('total', 0), stats.get('archived', 0), stats.get('user', 0), stats.get('assistant', 0))
     
-    if stats.get('types'):
-        html += """
-        <h4 class="text-sm font-semibold text-slate-400 mb-3 uppercase tracking-wider">Memory Types</h4>
-        <div class="space-y-2">
-        """
-        for type_name, count in stats['types'].items():
-            total = stats.get('total', 1)
-            percent = (count / total) * 100 if total > 0 else 0
-            html += f"""
-            <div class="flex items-center justify-between text-sm">
-                <span class="text-slate-300 w-24">{type_name}</span>
-                <div class="flex-grow mx-3 h-2 bg-slate-800 rounded-full overflow-hidden">
-                    <div class="h-full bg-blue-600 rounded-full" style="width: {percent}%"></div>
-                </div>
-                <span class="text-slate-400 font-mono">{count}</span>
-            </div>
-            """
-        html += "</div>"
-    elif stats.get('total', 0) == 0:
+    if stats.get('total', 0) == 0:
         html = "<p class='text-slate-500 italic'>No memories stored yet.</p>"
         
     return html
+
+@router.post("/settings/recall")
+async def save_recall_settings(request: Request, recall_limit: int = Form(...), recall_min_score: float = Form(...)):
+    module_manager = request.app.state.module_manager
+    memory_module = module_manager.modules.get("memory")
+    if not memory_module:
+        return Response(status_code=404)
+        
+    config = memory_module.get("config", {}).copy()
+    config["recall_limit"] = recall_limit
+    config["recall_min_score"] = recall_min_score
+    
+    module_manager.update_module_config("memory", config)
+    
+    return Response(status_code=200, headers={"HX-Trigger": json.dumps({"showMessage": {"level": "success", "message": "Recall settings saved"}})})
+
+@router.post("/settings/persistence")
+async def save_persistence_settings(request: Request, save_confidence_threshold: float = Form(...)):
+    module_manager = request.app.state.module_manager
+    memory_module = module_manager.modules.get("memory")
+    if not memory_module:
+        return Response(status_code=404)
+        
+    config = memory_module.get("config", {}).copy()
+    config["save_confidence_threshold"] = save_confidence_threshold
+    
+    module_manager.update_module_config("memory", config)
+    
+    return Response(status_code=200, headers={"HX-Trigger": json.dumps({"showMessage": {"level": "success", "message": "Persistence settings saved"}})})

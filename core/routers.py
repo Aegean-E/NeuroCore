@@ -47,8 +47,25 @@ async def get_module_details(request: Request, module_id: str, module_manager: M
     module = module_manager.modules.get(module_id)
     if not module:
         raise HTTPException(status_code=404, detail="Module not found")
-    formatted_config = json.dumps(module.get('config', {}), indent=4)
-    return templates.TemplateResponse(request, "module_details.html", {"module": module, "formatted_config": formatted_config})
+    
+    config_display = module.get('config', {}).copy()
+    if module_id == 'memory':
+        for key in ['save_default_confidence', 'save_confidence_threshold', 'recall_limit', 'recall_min_score']:
+            config_display.pop(key, None)
+    elif module_id == 'llm_module':
+        for key in ['temperature', 'max_tokens']:
+            config_display.pop(key, None)
+        
+    formatted_config = json.dumps(config_display, indent=4)
+    
+    # Check if there are any keys left to display
+    has_visible_config = len(config_display) > 0
+    
+    return templates.TemplateResponse(request, "module_details.html", {
+        "module": module, 
+        "formatted_config": formatted_config,
+        "has_visible_config": has_visible_config
+    })
 
 @router.post("/modules/{module_id}/{action}")
 async def toggle_module(request: Request, module_id: str, action: str, module_manager: ModuleManager = Depends(get_module_manager)):
@@ -71,6 +88,23 @@ async def toggle_module(request: Request, module_id: str, action: str, module_ma
 async def save_module_config(request: Request, module_id: str, config_json: str = Form(...), module_manager: ModuleManager = Depends(get_module_manager)):
     try:
         new_config = json.loads(config_json)
+        
+        # Preserve hidden keys for memory module
+        if module_id == 'memory':
+            current_module = module_manager.modules.get(module_id)
+            if current_module:
+                current_config = current_module.get('config', {})
+                for key in ['save_default_confidence', 'save_confidence_threshold', 'recall_limit', 'recall_min_score']:
+                    if key in current_config:
+                        new_config[key] = current_config[key]
+        elif module_id == 'llm_module':
+            current_module = module_manager.modules.get(module_id)
+            if current_module:
+                current_config = current_module.get('config', {})
+                for key in ['temperature', 'max_tokens']:
+                    if key in current_config:
+                        new_config[key] = current_config[key]
+                    
         module_manager.update_module_config(module_id, new_config)
         return Response(status_code=200, headers={"HX-Trigger": json.dumps({"showMessage": {"level": "success", "message": "Configuration saved"}})})
     except json.JSONDecodeError:
@@ -143,10 +177,9 @@ async def get_settings(request: Request, settings_man: SettingsManager = Depends
     })
 
 @router.post("/settings/save")
-async def save_settings_route(llm_api_url: str = Form(...), llm_api_key: str = Form(""), embedding_api_url: str = Form(""), default_model: str = Form(...), embedding_model: str = Form(""), temperature: float = Form(...), max_tokens: int = Form(...), settings_man: SettingsManager = Depends(get_settings_manager)):
+async def save_settings_route(llm_api_url: str = Form(...), llm_api_key: str = Form(""), embedding_api_url: str = Form(""), default_model: str = Form(...), embedding_model: str = Form(""), settings_man: SettingsManager = Depends(get_settings_manager)):
     settings_man.save_settings({
         "llm_api_url": llm_api_url, "llm_api_key": llm_api_key, "embedding_api_url": embedding_api_url,
-        "default_model": default_model, "embedding_model": embedding_model,
-        "temperature": temperature, "max_tokens": max_tokens
+        "default_model": default_model, "embedding_model": embedding_model
     })
     return Response(status_code=200, headers={"HX-Trigger": json.dumps({"showMessage": {"level": "success", "message": "Settings saved successfully"}})})

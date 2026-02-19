@@ -39,15 +39,21 @@ class FlowManager:
                 "id": flow_id,
                 "name": "Default Chat Flow",
                 "nodes": [
-                    {"id": "node-0", "moduleId": "chat", "nodeTypeId": "chat_input", "name": "Chat Input", "x": 50, "y": 250},
-                    {"id": "node-1", "moduleId": "system_prompt", "nodeTypeId": "system_prompt", "name": "System Prompt", "x": 300, "y": 250, "config": {"system_prompt": "You are NeuroCore, a helpful and intelligent AI assistant."}},
-                    {"id": "node-2", "moduleId": "llm_module", "nodeTypeId": "llm_module", "name": "LLM Core", "x": 550, "y": 250},
-                    {"id": "node-3", "moduleId": "chat", "nodeTypeId": "chat_output", "name": "Chat Output", "x": 800, "y": 250}
+                    {"id": "node-0", "moduleId": "chat", "nodeTypeId": "chat_input", "name": "Chat Input", "x": -97, "y": 248, "config": {}},
+                    {"id": "node-1", "moduleId": "system_prompt", "nodeTypeId": "system_prompt", "name": "System Prompt", "x": 336, "y": 249, "config": {"system_prompt": "You are NeuroCore, a helpful and intelligent AI assistant."}},
+                    {"id": "node-2", "moduleId": "llm_module", "nodeTypeId": "llm_module", "name": "LLM Core", "x": 550, "y": 250, "config": {}},
+                    {"id": "node-3", "moduleId": "chat", "nodeTypeId": "chat_output", "name": "Chat Output", "x": 765, "y": 250, "config": {}},
+                    {"id": "node-4", "moduleId": "memory", "nodeTypeId": "memory_save", "name": "Memory Save", "x": 113, "y": 165, "config": {}},
+                    {"id": "node-5", "moduleId": "memory", "nodeTypeId": "memory_save", "name": "Memory Save", "x": 979, "y": 250, "config": {}},
+                    {"id": "node-6", "moduleId": "memory", "nodeTypeId": "memory_recall", "name": "Memory Recall", "x": 112, "y": 249, "config": {}}
                 ],
                 "connections": [
-                    {"from": "node-0", "to": "node-1"},
                     {"from": "node-1", "to": "node-2"},
-                    {"from": "node-2", "to": "node-3"}
+                    {"from": "node-2", "to": "node-3"},
+                    {"from": "node-0", "to": "node-4"},
+                    {"from": "node-3", "to": "node-5"},
+                    {"from": "node-0", "to": "node-6"},
+                    {"from": "node-6", "to": "node-1"}
                 ],
                 "created_at": datetime.now().isoformat()
             }

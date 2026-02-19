@@ -18,14 +18,14 @@ class LLMBridge:
         base = self.embedding_base_url if use_embedding_url else self.base_url
         return f"{base}/{path.lstrip('/')}"
 
-    async def chat_completion(self, messages, model: str = None, temperature: float = None):
+    async def chat_completion(self, messages, model: str = None, temperature: float = None, max_tokens: int = None):
         """Sends a chat completion request to the LLM API."""
         url = self._get_url("/chat/completions")
         
         # Use settings as a fallback for model and temperature
         final_model = model or settings.get("default_model")
-        final_temperature = temperature if temperature is not None else settings.get("temperature")
-        max_tokens = settings.get("max_tokens")
+        final_temperature = temperature if temperature is not None else settings.get("temperature", 0.7)
+        final_max_tokens = max_tokens if max_tokens is not None else settings.get("max_tokens", 2048)
 
         headers = {}
         if self.api_key:
@@ -35,7 +35,7 @@ class LLMBridge:
             "model": final_model,
             "messages": messages,
             "temperature": final_temperature,
-            "max_tokens": max_tokens,
+            "max_tokens": final_max_tokens,
             "stream": False
         }
         

@@ -18,17 +18,16 @@ async def browser_gui(request: Request):
     # Initial load with default browse parameters
     memories = memory_store.browse(limit=50)
     return templates.TemplateResponse(request, "memory_browser.html", {
-        "memories": memories,
-        "types": sorted(["FACT", "RULE", "IDENTITY", "PREFERENCE", "BELIEF", "PERMISSION"])
+        "memories": memories
     })
 
 @router.get("/list", response_class=HTMLResponse)
 async def list_memories(
     request: Request, 
-    q: str = Query(None), 
-    type: str = Query("ALL")
+    q: str = Query(None),
+    filter_date: str = Query("ALL")
 ):
-    memories = memory_store.browse(search_text=q, mem_type=type, limit=50)
+    memories = memory_store.browse(search_text=q, filter_date=filter_date, limit=50)
     return templates.TemplateResponse(request, "memory_list.html", {"memories": memories})
 
 @router.delete("/delete/{memory_id}", response_class=HTMLResponse)

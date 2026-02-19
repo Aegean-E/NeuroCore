@@ -9,8 +9,6 @@ DEFAULT_SETTINGS = {
     "embedding_api_url": "",
     "default_model": "local-model",
     "embedding_model": "",
-    "temperature": 0.7,
-    "max_tokens": 2048,
     "active_ai_flow": "default-flow-001"
 }
 

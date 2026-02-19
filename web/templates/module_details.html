@@ -29,7 +29,7 @@
     
     <p class="text-slate-400 mb-8">{{ module.description }}</p>
 
-    {% if module.config %}
+    {% if module.config and has_visible_config %}
     <div class="bg-slate-900 rounded-xl border border-slate-800 p-6 mt-6">
         <h3 class="font-semibold text-lg mb-4">Configuration</h3>
         <form hx-post="/modules/{{ module.id }}/config" hx-swap="none"
@@ -42,7 +42,79 @@
     </div>
     {% endif %}
 
+    {% if module.id == 'llm_module' and module.enabled %}
+    <div class="bg-slate-900 rounded-xl border border-slate-800 p-6 mt-6">
+        <h3 class="font-semibold text-lg mb-4">Generation Settings</h3>
+        <form hx-post="/llm_module/settings/generation" 
+              hx-swap="none"
+              hx-on::after-request="const btn = this.querySelector('button[type=submit]'); const orig = btn.innerText; btn.innerText = 'Saved!'; btn.classList.remove('bg-blue-600', 'hover:bg-blue-500'); btn.classList.add('bg-emerald-600', 'hover:bg-emerald-500'); setTimeout(() => { btn.innerText = orig; btn.classList.add('bg-blue-600', 'hover:bg-blue-500'); btn.classList.remove('bg-emerald-600', 'hover:bg-emerald-500'); }, 2000);">
+            
+            <div class="grid grid-cols-2 gap-6">
+                <div>
+                    <label class="block text-sm font-medium text-slate-400 mb-2">Temperature</label>
+                    <input type="number" step="0.1" name="temperature" value="{{ module.config.temperature }}" 
+                           class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-slate-400 mb-2">Max Tokens</label>
+                    <input type="number" name="max_tokens" value="{{ module.config.max_tokens }}" 
+                           class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all">
+                </div>
+            </div>
+            <div class="mt-4 flex justify-end">
+                <button type="submit" class="bg-blue-600 hover:bg-blue-500 text-white px-6 py-2 rounded-lg text-sm font-semibold transition-colors">Save Generation Settings</button>
+            </div>
+        </form>
+    </div>
+    {% endif %}
+
     {% if module.id == 'memory' and module.enabled %}
+    <div class="bg-slate-900 rounded-xl border border-slate-800 p-6 mt-6">
+        <h3 class="font-semibold text-lg mb-4">Persistence Settings</h3>
+        <form hx-post="/memory/settings/persistence" 
+              hx-swap="none"
+              hx-on::after-request="const btn = this.querySelector('button[type=submit]'); const orig = btn.innerText; btn.innerText = 'Saved!'; btn.classList.remove('bg-blue-600', 'hover:bg-blue-500'); btn.classList.add('bg-emerald-600', 'hover:bg-emerald-500'); setTimeout(() => { btn.innerText = orig; btn.classList.add('bg-blue-600', 'hover:bg-blue-500'); btn.classList.remove('bg-emerald-600', 'hover:bg-emerald-500'); }, 2000);">
+            
+            <div>
+                <label class="block text-sm font-medium text-slate-400 mb-2">Save Confidence Threshold</label>
+                <input type="number" name="save_confidence_threshold" value="{{ module.config.save_confidence_threshold }}" step="0.05" min="0.0" max="1.0"
+                       class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all">
+                <p class="text-xs text-slate-500 mt-2">The minimum reliability score (0.0-1.0) required to store a memory. If an upstream node assigns a confidence lower than this, the memory is rejected.</p>
+            </div>
+
+            <div class="mt-4 flex justify-end">
+                <button type="submit" class="bg-blue-600 hover:bg-blue-500 text-white px-6 py-2 rounded-lg text-sm font-semibold transition-colors">Save Persistence Settings</button>
+            </div>
+        </form>
+    </div>
+
+    <div class="bg-slate-900 rounded-xl border border-slate-800 p-6 mt-6">
+        <h3 class="font-semibold text-lg mb-4">Recall Settings</h3>
+        <form hx-post="/memory/settings/recall" 
+              hx-swap="none"
+              hx-on::after-request="const btn = this.querySelector('button[type=submit]'); const orig = btn.innerText; btn.innerText = 'Saved!'; btn.classList.remove('bg-blue-600', 'hover:bg-blue-500'); btn.classList.add('bg-emerald-600', 'hover:bg-emerald-500'); setTimeout(() => { btn.innerText = orig; btn.classList.add('bg-blue-600', 'hover:bg-blue-500'); btn.classList.remove('bg-emerald-600', 'hover:bg-emerald-500'); }, 2000);">
+            
+            <div class="grid grid-cols-2 gap-6">
+                <div>
+                    <label class="block text-sm font-medium text-slate-400 mb-2">Recall Limit</label>
+                    <input type="number" name="recall_limit" value="{{ module.config.recall_limit }}" min="1" max="20"
+                           class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all">
+                    <p class="text-xs text-slate-500 mt-2">Maximum number of memories to retrieve per query.</p>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-slate-400 mb-2">Minimum Score</label>
+                    <input type="number" name="recall_min_score" value="{{ module.config.recall_min_score }}" step="0.05" min="0.0" max="1.0"
+                           class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all">
+                    <p class="text-xs text-slate-500 mt-2">Similarity threshold (0.0 to 1.0). Higher is stricter.</p>
+                </div>
+            </div>
+
+            <div class="mt-4 flex justify-end">
+                <button type="submit" class="bg-blue-600 hover:bg-blue-500 text-white px-6 py-2 rounded-lg text-sm font-semibold transition-colors">Save Recall Settings</button>
+            </div>
+        </form>
+    </div>
+
     <div class="bg-slate-900 rounded-xl border border-slate-800 p-6 mt-6">
         <h3 class="font-semibold text-lg mb-4">Memory Statistics</h3>
         <div hx-get="/memory/stats" hx-trigger="load" class="min-h-[100px] flex items-center justify-center">

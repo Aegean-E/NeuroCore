@@ -6,24 +6,6 @@ from datetime import datetime
 
 from .backend import MemoryStore
 
-DEFAULT_TYPE_PRECEDENCE = {
-    "PERMISSION": 0,
-    "RULE": 1,
-    "IDENTITY": 2,
-    "FACT": 3,
-    "PREFERENCE": 4,
-    "BELIEF": 5,
-}
-
-DEFAULT_CONFIDENCE_MIN = {
-    "PERMISSION": 0.85,
-    "RULE": 0.9,
-    "IDENTITY": 0.8,
-    "PREFERENCE": 0.6,
-    "FACT": 0.7,
-    "BELIEF": 0.5,
-}
-
 class MemoryArbiter:
     """
     Autonomous bridge between Reasoning and MemoryStore.
@@ -34,13 +16,10 @@ class MemoryArbiter:
         self.memory_store = memory_store
         self.embed_fn = embed_fn
         self.config = config or {}
-        self.type_precedence = self.config.get("arbiter_precedence", DEFAULT_TYPE_PRECEDENCE)
-        self.confidence_min = self.config.get("arbiter_confidence_thresholds", DEFAULT_CONFIDENCE_MIN)
 
     def consider(
         self,
         text: str,
-        mem_type: str = "FACT",
         confidence: float = 1.0,
         subject: str = "User",
         source: str = "reasoning",
@@ -50,15 +29,8 @@ class MemoryArbiter:
         Decide whether to promote reasoning into memory.
         Returns memory_id if stored, None otherwise.
         """
-        mem_type = mem_type.upper()
-        
-        # 0. Validate Type
-        if mem_type not in self.type_precedence:
-            # Default to FACT if unknown
-            mem_type = "FACT"
-
         # 1. Confidence Gate
-        min_conf = self.confidence_min.get(mem_type, 0.7)
+        min_conf = float(self.config.get("save_confidence_threshold", 0.75))
         if confidence < min_conf:
             print(f"❌ [Arbiter] Confidence gate failed: {confidence} < {min_conf}")
             return None
@@ -78,15 +50,14 @@ class MemoryArbiter:
             text=text,
             embedding=embedding,
             confidence=confidence,
-            subject=subject,
-            mem_type=mem_type
+            subject=subject
         )
 
         if memory_id == -1:
             print(f"❌ [Arbiter] Duplicate or rejected by backend.")
             return None
 
-        print(f"✅ [Arbiter] Memory saved: {mem_type} (ID: {memory_id})")
+        print(f"✅ [Arbiter] Memory saved (ID: {memory_id})")
         return memory_id
 
     def consider_batch(self, candidates: List[Dict]) -> List[int]:
@@ -97,7 +68,6 @@ class MemoryArbiter:
         for c in candidates:
             mid = self.consider(
                 text=c.get("text", ""),
-                mem_type=c.get("type", "FACT"),
                 confidence=c.get("confidence", 1.0),
                 subject=c.get("subject", "User"),
                 source=c.get("source", "reasoning"),

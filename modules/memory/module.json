@@ -9,24 +9,8 @@
     "config": {
         "recall_limit": 3,
         "recall_min_score": 0.0,
-        "save_default_type": "FACT",
-        "save_default_confidence": 1.0,
-        "arbiter_confidence_thresholds": {
-            "PERMISSION": 0.85,
-            "RULE": 0.9,
-            "IDENTITY": 0.8,
-            "PREFERENCE": 0.6,
-            "FACT": 0.7,
-            "BELIEF": 0.5
-        },
-        "arbiter_precedence": {
-            "PERMISSION": 0,
-            "RULE": 1,
-            "IDENTITY": 2,
-            "FACT": 3,
-            "PREFERENCE": 4,
-            "BELIEF": 5
-        }
+        "save_confidence_threshold": 0.75,
+        "save_default_confidence": 1.0
     },
     "provides_nodes": [
         {

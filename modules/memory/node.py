@@ -89,7 +89,7 @@ class MemorySaveExecutor:
             print(f"Error loading memory config: {e}")
         self.arbiter = MemoryArbiter(memory_store, config=self.config)
 
-    async def _save_background(self, text: str, subject: str = "User", mem_type: str = "FACT", confidence: float = 1.0):
+    async def _save_background(self, text: str, subject: str = "User", confidence: float = 1.0):
         """Handles embedding generation and saving in the background."""
         try:
             llm_bridge = LLMBridge(
@@ -102,7 +102,6 @@ class MemorySaveExecutor:
             if embedding:
                 self.arbiter.consider(
                     text=text,
-                    mem_type=mem_type,
                     confidence=confidence,
                     subject=subject,
                     embedding=embedding
@@ -139,9 +138,6 @@ class MemorySaveExecutor:
                 text_to_save = last_user_msg["content"]
                 subject = "User"
 
-        # Use module configuration
-        mem_type = config.get("mem_type") or self.config.get("save_default_type", "FACT")
-        
         try:
             confidence = float(config.get("confidence") if config.get("confidence") is not None else self.config.get("save_default_confidence", 1.0))
         except (ValueError, TypeError):
@@ -152,7 +148,6 @@ class MemorySaveExecutor:
             asyncio.create_task(self._save_background(
                 text_to_save, 
                 subject=subject, 
-                mem_type=mem_type, 
                 confidence=confidence
             ))
 

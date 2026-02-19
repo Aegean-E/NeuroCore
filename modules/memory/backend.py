@@ -8,6 +8,7 @@ import logging
 from typing import List, Dict, Optional, Tuple, Any
 from contextlib import contextmanager
 import numpy as np
+from datetime import datetime
 
 try:
     import faiss
@@ -152,7 +153,7 @@ class MemoryStore:
         text_lower = " ".join(text.lower().strip().split())
         return hashlib.sha256(text_lower.encode("utf-8")).hexdigest()
 
-    def add_entry(self, text: str, embedding: Optional[List[float]] = None, confidence: float = 1.0, subject: str = "User", mem_type: str = "FACT", created_at: int = None) -> int:
+    def add_entry(self, text: str, embedding: Optional[List[float]] = None, confidence: float = 1.0, subject: str = "User", created_at: int = None) -> int:
         identity = self.compute_identity(text)
         timestamp = created_at if created_at is not None else int(time.time())
         
@@ -169,7 +170,7 @@ class MemoryStore:
                 cur = con.execute("""
                     INSERT INTO memories (identity, type, subject, text, confidence, created_at, embedding)
                     VALUES (?, ?, ?, ?, ?, ?, ?)
-                """, (identity, mem_type, subject, text, confidence, timestamp, embedding_blob))
+                """, (identity, "MEMORY", subject, text, confidence, timestamp, embedding_blob))
                 row_id = cur.lastrowid
 
             if FAISS_AVAILABLE and emb_np is not None and self.faiss_index:
@@ -259,16 +260,25 @@ class MemoryStore:
             rows = con.execute("SELECT id, text, created_at FROM memories WHERE deleted = 0 ORDER BY created_at DESC LIMIT ?", (limit,)).fetchall()
         return [{"id": r[0], "text": r[1], "created_at": r[2]} for r in rows]
 
-    def browse(self, limit: int = 50, offset: int = 0, search_text: str = None, mem_type: str = None) -> List[Dict]:
+    def browse(self, limit: int = 50, offset: int = 0, search_text: str = None, filter_date: str = "ALL") -> List[Dict]:
         """
         Retrieves memories with optional filtering for the Memory Browser UI.
         """
-        query = "SELECT id, type, subject, text, confidence, created_at FROM memories WHERE deleted = 0"
+        query = "SELECT id, subject, text, confidence, created_at FROM memories WHERE deleted = 0"
         params = []
         
-        if mem_type and mem_type != "ALL":
-            query += " AND type = ?"
-            params.append(mem_type)
+        if filter_date == "TODAY":
+            start_ts = int(datetime.now().replace(hour=0, minute=0, second=0, microsecond=0).timestamp())
+            query += " AND created_at >= ?"
+            params.append(start_ts)
+        elif filter_date == "WEEK":
+            start_ts = int(time.time()) - (7 * 24 * 60 * 60)
+            query += " AND created_at >= ?"
+            params.append(start_ts)
+        elif filter_date == "MONTH":
+            start_ts = int(time.time()) - (30 * 24 * 60 * 60)
+            query += " AND created_at >= ?"
+            params.append(start_ts)
             
         if search_text:
             query += " AND text LIKE ?"
@@ -283,11 +293,10 @@ class MemoryStore:
         return [
             {
                 "id": r[0],
-                "type": r[1],
-                "subject": r[2],
-                "text": r[3],
-                "confidence": r[4],
-                "created_at": r[5]
+                "subject": r[1],
+                "text": r[2],
+                "confidence": r[3],
+                "created_at": r[4]
             }
             for r in rows
         ]
@@ -320,10 +329,6 @@ class MemoryStore:
             # Archived
             row = con.execute("SELECT COUNT(*) FROM memories WHERE deleted = 1").fetchone()
             stats['archived'] = row[0] if row else 0
-            
-            # Breakdown by type
-            rows = con.execute("SELECT type, COUNT(*) FROM memories WHERE deleted = 0 GROUP BY type").fetchall()
-            stats['types'] = {r[0]: r[1] for r in rows}
             
         return stats
 
