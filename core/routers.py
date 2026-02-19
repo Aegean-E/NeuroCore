@@ -50,7 +50,7 @@ async def get_module_details(request: Request, module_id: str, module_manager: M
     
     config_display = module.get('config', {}).copy()
     if module_id == 'memory':
-        for key in ['save_default_confidence', 'save_confidence_threshold', 'recall_limit', 'recall_min_score', 'consolidation_threshold', 'auto_consolidation_hours']:
+        for key in ['save_default_confidence', 'save_confidence_threshold', 'recall_limit', 'recall_min_score', 'consolidation_threshold', 'auto_consolidation_hours', 'arbiter_model', 'arbiter_prompt']:
             config_display.pop(key, None)
     elif module_id == 'llm_module':
         for key in ['temperature', 'max_tokens']:
@@ -97,7 +97,7 @@ async def save_module_config(request: Request, module_id: str, config_json: str 
             current_module = module_manager.modules.get(module_id)
             if current_module:
                 current_config = current_module.get('config', {})
-                for key in ['save_default_confidence', 'save_confidence_threshold', 'recall_limit', 'recall_min_score', 'consolidation_threshold', 'auto_consolidation_hours']:
+                for key in ['save_default_confidence', 'save_confidence_threshold', 'recall_limit', 'recall_min_score', 'consolidation_threshold', 'auto_consolidation_hours', 'arbiter_model', 'arbiter_prompt']:
                     if key in current_config:
                         new_config[key] = current_config[key]
         elif module_id == 'llm_module':

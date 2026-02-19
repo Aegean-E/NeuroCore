@@ -9,10 +9,12 @@
     "config": {
         "recall_limit": 3,
         "recall_min_score": 0.8,
-        "save_confidence_threshold": 0.85,
+        "save_confidence_threshold": 0.75,
         "save_default_confidence": 1.0,
         "consolidation_threshold": 0.92,
-        "auto_consolidation_hours": 24
+        "auto_consolidation_hours": 24,
+        "arbiter_model": "",
+        "arbiter_prompt": "Extract concise, self-contained facts from the text below (Subject: {subject}).\nRules:\n1. Return ONLY a JSON list of strings. Example: [\"User lives in Paris\"]\n2. Replace pronouns (it, he, she, they) with specific names/entities to make facts standalone.\n3. Ignore greetings, questions, generic small talk, and general world knowledge (e.g. geography, history, science facts).\n4. Focus on personal details, preferences, specific events, or new instructions.\n5. If no useful facts are found, return [].\n\nText: \"{text}\"\n\nJSON:"
     },
     "provides_nodes": [
         {

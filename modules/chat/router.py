@@ -1,5 +1,6 @@
-from fastapi import APIRouter, Request, Form, Depends, Query
+from fastapi import APIRouter, Request, Form, Depends, Query, UploadFile, File
 from fastapi.responses import HTMLResponse, Response
+import base64
 from core.settings import settings
 from core.dependencies import get_llm_bridge
 from core.llm import LLMBridge
@@ -89,6 +90,7 @@ async def send_message(
     request: Request,
     message: str = Form(...),
     session_id: str = Query(None),
+    image: UploadFile = File(None),
     llm: LLMBridge = Depends(get_llm_bridge)
 ):
     if not session_id:
@@ -98,8 +100,21 @@ async def send_message(
     if not active_session:
         return HTMLResponse("Error: Session not found", status_code=404)
 
+    # Prepare user content (Text or Multimodal)
+    user_content = message
+    if image and image.filename:
+        contents = await image.read()
+        encoded = base64.b64encode(contents).decode("utf-8")
+        mime_type = image.content_type or "image/jpeg"
+        image_url = f"data:{mime_type};base64,{encoded}"
+        
+        user_content = [
+            {"type": "text", "text": message},
+            {"type": "image_url", "image_url": {"url": image_url}}
+        ]
+
     # Add user message to history
-    session_manager.add_message(session_id, "user", message)
+    session_manager.add_message(session_id, "user", user_content)
     # Reload session to get the updated history
     active_session = session_manager.get_session(session_id)
     
@@ -141,7 +156,7 @@ async def send_message(
         try:
             # Construct a prompt to summarize the conversation
             # We use the first user message and the AI response
-            user_text = active_session["history"][0]["content"]
+            user_text = active_session["history"][0]["content"] if isinstance(active_session["history"][0]["content"], str) else "Image/Multimodal Content"
             ai_text = active_session["history"][1]["content"]
             
             # Truncate to avoid huge context if messages are long
@@ -167,7 +182,7 @@ async def send_message(
         request, 
         "chat_message_pair.html", 
         {
-            "user_message": message,
+            "user_message": user_content,
             "ai_response": ai_response
         },
         headers={"HX-Trigger": "sessionsChanged"}

@@ -1,6 +1,16 @@
 <div class="flex flex-col items-end space-y-1">
     <div class="bg-blue-600 p-4 rounded-2xl rounded-tr-none max-w-[80%] text-white shadow-lg">
-        <p class="text-sm">{{ user_message }}</p>
+        {% if user_message is string %}
+            <p class="text-sm">{{ user_message }}</p>
+        {% else %}
+            {% for part in user_message %}
+                {% if part.type == 'text' %}
+                    <p class="text-sm">{{ part.text }}</p>
+                {% elif part.type == 'image_url' %}
+                    <img src="{{ part.image_url.url }}" class="max-w-full h-auto rounded-lg mt-2 max-h-64 border border-blue-400/50">
+                {% endif %}
+            {% endfor %}
+        {% endif %}
     </div>
 </div>
 <div class="bg-slate-800 p-4 rounded-2xl rounded-tl-none max-w-[80%] shadow-lg border border-slate-700/50">

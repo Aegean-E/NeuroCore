@@ -9,6 +9,7 @@ from typing import List, Dict, Optional, Tuple, Any
 from contextlib import contextmanager
 import numpy as np
 from datetime import datetime
+import concurrent.futures
 
 try:
     import faiss
@@ -30,6 +31,7 @@ class MemoryStore:
         self.unsaved_changes = 0
         self.save_threshold = 20  # Save index to disk after 20 changes
         self.last_consolidation_ts = 0 # Track last consolidation time
+        self.executor = concurrent.futures.ThreadPoolExecutor(max_workers=1, thread_name_prefix="MemoryWorker")
         self._init_db()
         
         self.faiss_index = None

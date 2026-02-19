@@ -102,7 +102,7 @@
                     <label class="block text-sm font-medium text-slate-400 mb-2">Save Confidence Threshold</label>
                     <input type="number" name="save_confidence_threshold" value="{{ module.config.save_confidence_threshold }}" step="0.05" min="0.0" max="1.0"
                            class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all">
-                    <p class="text-xs text-slate-500 mt-2">Determines how certain the AI must be before saving a new memory (0.0 to 1.0). Higher values prevent saving uncertain information.</p>
+                    <p class="text-xs text-slate-500 mt-2">Minimum confidence (0.0-1.0) required to save a memory. Default is 0.75. If an Arbiter Model is set, it provides this score.</p>
                 </div>
                 <div>
                     <label class="block text-sm font-medium text-slate-400 mb-2">Consolidation Threshold</label>
@@ -121,6 +121,17 @@
                     <input type="number" name="recall_min_score" value="{{ module.config.recall_min_score }}" step="0.05" min="0.0" max="1.0"
                            class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all">
                     <p class="text-xs text-slate-500 mt-2">Determines how relevant a memory must be to the current topic to be recalled (0.0 to 1.0). Higher values filter out loosely related memories.</p>
+                </div>
+                <div class="col-span-1 md:col-span-2">
+                    <label class="block text-sm font-medium text-slate-400 mb-2">Arbiter Model (Optional)</label>
+                    <input type="text" name="arbiter_model" value="{{ module.config.arbiter_model }}" placeholder="e.g. qwen2.5-0.5b-instruct"
+                           class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all">
+                    <p class="text-xs text-slate-500 mt-2">Model used for memory extraction. If empty, uses the default chat model.</p>
+                </div>
+                <div class="col-span-1 md:col-span-2">
+                    <label class="block text-sm font-medium text-slate-400 mb-2">Arbiter Prompt</label>
+                    <textarea name="arbiter_prompt" rows="4" class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all custom-scrollbar">{{ module.config.arbiter_prompt }}</textarea>
+                    <p class="text-xs text-slate-500 mt-2">The prompt used for extraction. Use <code>{text}</code> and <code>{subject}</code> as placeholders.</p>
                 </div>
             </div>
 

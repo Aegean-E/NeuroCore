@@ -2,6 +2,7 @@ import asyncio
 import json
 import os
 import time
+from functools import partial
 from core.llm import LLMBridge
 from core.settings import settings
 from .backend import memory_store
@@ -75,7 +76,11 @@ class MemoryRecallExecutor:
         except (ValueError, TypeError):
             min_score = 0.0
 
-        results = memory_store.search(embedding, limit=limit)
+        loop = asyncio.get_running_loop()
+        results = await loop.run_in_executor(
+            memory_store.executor, 
+            partial(memory_store.search, embedding, limit=limit)
+        )
         
         # Filter results by minimum score if configured
         results = [r for r in results if r.get('score', 0) >= min_score]
@@ -106,6 +111,7 @@ class MemorySaveExecutor:
 
     async def _save_background(self, text: str, subject: str = "User", confidence: float = 1.0):
         """Handles embedding generation and saving in the background."""
+        await asyncio.sleep(3)
         try:
             llm_bridge = LLMBridge(
                 base_url=settings.get("llm_api_url"), 
@@ -113,14 +119,66 @@ class MemorySaveExecutor:
                 embedding_base_url=settings.get("embedding_api_url"),
                 embedding_model=settings.get("embedding_model")
             )
-            embedding = await llm_bridge.get_embedding(text)
-            if embedding:
-                self.arbiter.consider(
-                    text=text,
-                    confidence=confidence,
-                    subject=subject,
-                    embedding=embedding
+            
+            # Smart Extraction
+            extraction_model = self.config.get("arbiter_model")
+            
+            default_prompt = (
+                "Extract concise, self-contained facts from the text below (Subject: {subject}).\n"
+                "Rules:\n"
+                "1. Return ONLY a JSON list of strings. Example: [\"User lives in Paris\"]\n"
+                "2. Replace pronouns (it, he, she, they) with specific names/entities to make facts standalone.\n"
+                "3. Ignore greetings, questions, generic small talk, and general world knowledge (e.g. geography, history, science facts).\n"
+                "4. Focus on personal details, preferences, specific events, or new instructions.\n"
+                "5. If no useful facts are found, return [].\n\n"
+                "Text: \"{text}\"\n\n"
+                "JSON:"
+            )
+            prompt_template = self.config.get("arbiter_prompt") or default_prompt
+            prompt = prompt_template.replace("{subject}", subject).replace("{text}", text)
+
+            # First attempt
+            model_to_use = extraction_model or settings.get("default_model")
+            response = await llm_bridge.chat_completion(
+                messages=[{"role": "user", "content": prompt}],
+                model=model_to_use,
+                temperature=0.1,
+                max_tokens=512
+            )
+
+            # Fallback if specific arbiter model failed
+            if "error" in response and extraction_model:
+                print(f"⚠️ Memory extraction with '{extraction_model}' failed. Retrying with default model.")
+                response = await llm_bridge.chat_completion(
+                    messages=[{"role": "user", "content": prompt}],
+                    model=settings.get("default_model"),
+                    temperature=0.1,
+                    max_tokens=512
                 )
+            
+            facts = []
+            if "choices" in response:
+                content = response["choices"][0]["message"]["content"]
+                content = content.replace("```json", "").replace("```", "").strip()
+                try:
+                    start = content.find("[")
+                    end = content.rfind("]") + 1
+                    if start != -1 and end != -1:
+                        facts = json.loads(content[start:end])
+                except Exception as e:
+                    print(f"Memory extraction JSON parse failed: {e}")
+
+            for fact in facts:
+                if not isinstance(fact, str): continue
+                
+                embedding = await llm_bridge.get_embedding(fact)
+                if embedding:
+                    await self.arbiter.consider(
+                        text=fact,
+                        confidence=confidence,
+                        subject=subject,
+                        embedding=embedding
+                    )
         except Exception as e:
             print(f"Background memory save failed: {e}")
 
@@ -154,20 +212,17 @@ class MemorySaveExecutor:
                 subject = "User"
 
         # Determine default confidence
-        # We default Assistant memories to 0.5 so they are filtered out by the default 0.85 threshold.
-        # User memories remain at 1.0 (or configured default).
-        base_default = float(self.config.get("save_default_confidence", 1.0))
-        default_conf = min(base_default, 0.5) if subject == "Assistant" else base_default
+        default_conf = float(self.config.get("save_default_confidence", 1.0))
 
         try:
             confidence = float(config.get("confidence") if config.get("confidence") is not None else default_conf)
         except (ValueError, TypeError):
             confidence = default_conf
 
-        if text_to_save and len(text_to_save.strip()) > 10:
+        if text_to_save and len(text_to_save.strip()) > 2:
             # Fire and forget: Don't block the flow for embedding generation
             asyncio.create_task(self._save_background(
-                text_to_save, 
+                text_to_save,
                 subject=subject, 
                 confidence=confidence
             ))

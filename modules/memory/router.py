@@ -3,6 +3,7 @@ from fastapi.responses import HTMLResponse, Response
 from fastapi.templating import Jinja2Templates
 import json
 import time
+import asyncio
 from .backend import memory_store
 from .consolidation import MemoryConsolidator
 
@@ -12,7 +13,8 @@ templates = Jinja2Templates(directory="web/templates")
 @router.get("/stats", response_class=HTMLResponse)
 async def get_stats(request: Request):
     try:
-        stats = memory_store.get_memory_stats()
+        loop = asyncio.get_running_loop()
+        stats = await loop.run_in_executor(memory_store.executor, memory_store.get_memory_stats)
     except Exception as e:
         return f"<div class='text-red-400 text-sm p-4 border border-red-500/50 rounded-lg bg-red-900/20'>Error loading stats: {str(e)}</div>"
     
@@ -59,7 +61,9 @@ async def save_memory_settings(
     recall_min_score: float = Form(None),
     save_confidence_threshold: float = Form(None),
     consolidation_threshold: float = Form(None),
-    auto_consolidation_hours: float = Form(None)
+    auto_consolidation_hours: float = Form(None),
+    arbiter_model: str = Form(None),
+    arbiter_prompt: str = Form(None)
 ):
     module_manager = request.app.state.module_manager
     memory_module = module_manager.modules.get("memory")
@@ -72,6 +76,8 @@ async def save_memory_settings(
     if save_confidence_threshold is not None: config["save_confidence_threshold"] = save_confidence_threshold
     if consolidation_threshold is not None: config["consolidation_threshold"] = consolidation_threshold
     if auto_consolidation_hours is not None: config["auto_consolidation_hours"] = auto_consolidation_hours
+    if arbiter_model is not None: config["arbiter_model"] = arbiter_model
+    if arbiter_prompt is not None: config["arbiter_prompt"] = arbiter_prompt
     
     module_manager.update_module_config("memory", config)
     

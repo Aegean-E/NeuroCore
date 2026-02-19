@@ -3,8 +3,12 @@ import numpy as np
 import logging
 import time
 from datetime import datetime
+import asyncio
+from functools import partial
 
 from .backend import MemoryStore
+from core.llm import LLMBridge
+from core.settings import settings
 
 class MemoryArbiter:
     """
@@ -17,7 +21,7 @@ class MemoryArbiter:
         self.embed_fn = embed_fn
         self.config = config or {}
 
-    def consider(
+    async def consider(
         self,
         text: str,
         confidence: float = 1.0,
@@ -29,8 +33,9 @@ class MemoryArbiter:
         Decide whether to promote reasoning into memory.
         Returns memory_id if stored, None otherwise.
         """
+        
         # 1. Confidence Gate
-        min_conf = float(self.config.get("save_confidence_threshold", 0.85))
+        min_conf = float(self.config.get("save_confidence_threshold", 0.75))
         if confidence < min_conf:
             print(f"❌ [Arbiter] Confidence gate failed: {confidence} < {min_conf}")
             return None
@@ -46,11 +51,16 @@ class MemoryArbiter:
         # For now, we rely on the backend's identity hash to prevent exact semantic duplicates.
 
         # 4. Save
-        memory_id = self.memory_store.add_entry(
-            text=text,
-            embedding=embedding,
-            confidence=confidence,
-            subject=subject
+        loop = asyncio.get_running_loop()
+        memory_id = await loop.run_in_executor(
+            self.memory_store.executor,
+            partial(
+                self.memory_store.add_entry,
+                text=text,
+                embedding=embedding,
+                confidence=confidence,
+                subject=subject
+            )
         )
 
         if memory_id == -1:
@@ -60,13 +70,13 @@ class MemoryArbiter:
         print(f"✅ [Arbiter] Memory saved (ID: {memory_id})")
         return memory_id
 
-    def consider_batch(self, candidates: List[Dict]) -> List[int]:
+    async def consider_batch(self, candidates: List[Dict]) -> List[int]:
         """
         Process a batch of memory candidates.
         """
         promoted_ids = []
         for c in candidates:
-            mid = self.consider(
+            mid = await self.consider(
                 text=c.get("text", ""),
                 confidence=c.get("confidence", 1.0),
                 subject=c.get("subject", "User"),

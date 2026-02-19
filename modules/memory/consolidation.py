@@ -4,6 +4,8 @@ from typing import List, Dict, Tuple
 from core.llm import LLMBridge
 from core.settings import settings
 from .backend import memory_store
+import asyncio
+from functools import partial
 
 class MemoryConsolidator:
     """
@@ -18,12 +20,8 @@ class MemoryConsolidator:
             api_key=settings.get("llm_api_key")
         )
 
-    async def run(self) -> int:
-        """
-        Runs the consolidation process.
-        Returns the number of memories consolidated.
-        """
-        # 1. Fetch all active, un-consolidated memories
+    def _fetch_and_process_candidates(self):
+        """Blocking helper to fetch data and compute similarity matrix."""
         with self.store._connect() as con:
             rows = con.execute("""
                 SELECT id, text, embedding 
@@ -33,7 +31,7 @@ class MemoryConsolidator:
             """).fetchall()
             
         if len(rows) < 2:
-            return 0
+            return [], None
             
         memories = []
         embeddings = []
@@ -54,6 +52,18 @@ class MemoryConsolidator:
         
         # Dot product (N x N)
         sim_matrix = np.dot(matrix_norm, matrix_norm.T)
+        return memories, sim_matrix
+
+    async def run(self) -> int:
+        """
+        Runs the consolidation process.
+        Returns the number of memories consolidated.
+        """
+        loop = asyncio.get_running_loop()
+        memories, sim_matrix = await loop.run_in_executor(self.store.executor, self._fetch_and_process_candidates)
+        
+        if not memories:
+            return 0
         
         consolidated_count = 0
         processed_ids = set()
@@ -87,7 +97,10 @@ class MemoryConsolidator:
                         # Let's assume B is newer (higher ID usually).
                         # We set A's parent to B. A becomes "history". B is the "current".
                         
-                        self.store.set_parent(child_id=mem_a["id"], parent_id=mem_b["id"])
+                        await loop.run_in_executor(
+                            self.store.executor, 
+                            partial(self.store.set_parent, child_id=mem_a["id"], parent_id=mem_b["id"])
+                        )
                         processed_ids.add(mem_a["id"])
                         consolidated_count += 1
                         print(f"🔗 Consolidated: '{mem_a['text'][:30]}...' -> '{mem_b['text'][:30]}...'")
