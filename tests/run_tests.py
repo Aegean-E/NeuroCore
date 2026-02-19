@@ -8,6 +8,11 @@ def run_tests():
     try:
         # Set the working directory to the project root for imports to work
         project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+        # Explicitly add project root to sys.path to ensure modules are discoverable
+        if project_root not in sys.path:
+            sys.path.insert(0, project_root)
+
         os.chdir(project_root)
 
         # Run pytest programmatically to avoid PATH issues

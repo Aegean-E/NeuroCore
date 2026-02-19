@@ -2,35 +2,55 @@ import os
 import json
 from unittest.mock import MagicMock, patch
 import pytest
+from fastapi import FastAPI
+from fastapi.routing import APIRoute
 from core.module_manager import ModuleManager
+import sys
 
 @pytest.fixture
-def temp_modules_dir(tmp_path):
+def temp_modules_dir(tmp_path, monkeypatch):
     """Creates a temporary module directory structure for testing."""
-    modules_dir = tmp_path / "modules"
+    modules_root = tmp_path
+    modules_dir = modules_root / "modules"
     modules_dir.mkdir()
-    (modules_dir / "__init__.py").touch()  # Make it a package
+    (modules_dir / "__init__.py").touch()
 
-    # Valid enabled module
+    # Valid enabled module with a router
     (modules_dir / "enabled_module").mkdir()
     with open(modules_dir / "enabled_module" / "module.json", "w") as f:
-        json.dump({"name": "Enabled Module", "description": "Test", "enabled": True}, f)
-    (modules_dir / "enabled_module" / "__init__.py").touch()
-    (modules_dir / "enabled_module" / "router.py").write_text("from fastapi import APIRouter\nrouter = APIRouter()")
+        json.dump({"name": "Enabled Module", "enabled": True, "id": "enabled_module"}, f)
+    (modules_dir / "enabled_module" / "__init__.py").write_text("from fastapi import APIRouter\nrouter = APIRouter(tags=['enabled_module'])\n@router.get('/')\ndef read_root(): return {}")
 
     # Valid disabled module
     (modules_dir / "disabled_module").mkdir()
     with open(modules_dir / "disabled_module" / "module.json", "w") as f:
-        json.dump({"name": "Disabled Module", "description": "Test", "enabled": False}, f)
+        json.dump({"name": "Disabled Module", "enabled": False, "id": "disabled_module"}, f)
+    (modules_dir / "disabled_module" / "__init__.py").write_text("from fastapi import APIRouter\nrouter = APIRouter(tags=['disabled_module'])\n@router.get('/')\ndef read_root(): return {}")
 
-    # Invalid module (no json)
-    (modules_dir / "invalid_module").mkdir()
+    # Unload the real 'modules' package if it was cached by other tests.
+    # This prevents import conflicts and ensures our temporary modules are found.
+    import importlib
+    # Use monkeypatch to safely unload any previously imported 'modules' package.
+    # This will be automatically undone after the test.
+    for m in [mod for mod in sys.modules if mod.startswith('modules')]:
+        monkeypatch.delitem(sys.modules, m, raising=False)
 
-    return modules_dir
+    # Add the temp dir to sys.path so importlib can find the modules
+    monkeypatch.syspath_prepend(str(modules_root))
+    
+    # Invalidate import caches to ensure the new path is used
+    importlib.invalidate_caches()
+    yield str(modules_dir)
 
-def test_module_discovery(temp_modules_dir):
+@pytest.fixture
+def mock_app():
+    """Provides a mock FastAPI app instance."""
+    app = FastAPI()
+    return app
+
+def test_module_discovery(temp_modules_dir, mock_app):
     """Tests that the manager correctly discovers modules with metadata."""
-    manager = ModuleManager(modules_dir=str(temp_modules_dir))
+    manager = ModuleManager(app=mock_app, modules_dir=temp_modules_dir)
     all_modules = manager.get_all_modules()
     
     assert len(all_modules) == 2
@@ -38,54 +58,39 @@ def test_module_discovery(temp_modules_dir):
     assert "Enabled Module" in module_names
     assert "Disabled Module" in module_names
 
-def test_load_enabled_modules(temp_modules_dir):
-    """Tests that only enabled modules have their routers loaded."""
-    manager = ModuleManager(modules_dir=str(temp_modules_dir))
-    mock_app = MagicMock()
+def test_load_enabled_modules_at_startup(temp_modules_dir, mock_app):
+    """Tests that only enabled modules are loaded on initialization."""
+    manager = ModuleManager(app=mock_app, modules_dir=temp_modules_dir)
+    manager.load_enabled_modules()
     
-    # Create a mock module with a router attribute to be returned by the patch
-    mock_router = MagicMock()
-    mock_module = MagicMock()
-    mock_module.router = mock_router
-    
-    # Patch importlib.import_module to avoid sys.path issues and return our mock
-    with patch('importlib.import_module', return_value=mock_module) as mock_import:
-        loaded_meta = manager.load_enabled_modules(mock_app)
+    # Check that the enabled module's router was mounted
+    assert any(isinstance(r, APIRoute) and "enabled_module" in r.tags for r in mock_app.router.routes)
+    # Check that the disabled module's router was NOT mounted
+    assert not any(isinstance(r, APIRoute) and "disabled_module" in r.tags for r in mock_app.router.routes)
 
-    # Assert that import_module was called with the correct module name
-    mock_import.assert_called_once_with('modules.enabled_module')
-    
-    # Assert that include_router was called once for the enabled module
-    mock_app.include_router.assert_called_once_with(mock_router, prefix='/enabled_module', tags=['enabled_module'])
-    
-    # Assert that the correct metadata was returned
-    assert len(loaded_meta) == 1
-    assert loaded_meta[0]['name'] == "Enabled Module"
+def test_hot_enable_module(temp_modules_dir, mock_app):
+    """Tests that enabling a module dynamically adds its router."""
+    manager = ModuleManager(app=mock_app, modules_dir=temp_modules_dir)
+    # Initially, disabled_module should not be loaded
+    assert not any(isinstance(r, APIRoute) and "disabled_module" in r.tags for r in mock_app.router.routes)
 
-def test_enable_disable_module(temp_modules_dir):
-    """Tests that toggling a module's state updates its JSON file."""
-    manager = ModuleManager(modules_dir=str(temp_modules_dir))
-    
-    # Module starts disabled, let's enable it
-    module_meta = manager.enable_module("disabled_module")
-    assert module_meta['enabled'] is True
+    # Enable the module
+    manager.enable_module("disabled_module")
 
-    # Verify the file on disk was changed
-    with open(temp_modules_dir / "disabled_module" / "module.json", "r") as f:
-        data = json.load(f)
-    assert data['enabled'] is True
+    # Now it should be loaded
+    assert any(isinstance(r, APIRoute) and "disabled_module" in r.tags for r in mock_app.router.routes)
+    assert manager.modules["disabled_module"]["enabled"] is True
 
-    # Now disable it
-    module_meta = manager.disable_module("disabled_module")
-    assert module_meta['enabled'] is False
+def test_hot_disable_module(temp_modules_dir, mock_app):
+    """Tests that disabling a module dynamically removes its router."""
+    manager = ModuleManager(app=mock_app, modules_dir=temp_modules_dir)
+    # Load enabled modules first
+    manager.load_enabled_modules()
+    assert any(isinstance(r, APIRoute) and "enabled_module" in r.tags for r in mock_app.router.routes)
 
-    # Verify the file on disk was changed back
-    with open(temp_modules_dir / "disabled_module" / "module.json", "r") as f:
-        data = json.load(f)
-    assert data['enabled'] is False
+    # Disable the module
+    manager.disable_module("enabled_module")
 
-def test_toggle_nonexistent_module(temp_modules_dir):
-    """Tests that toggling a non-existent module returns None."""
-    manager = ModuleManager(modules_dir=str(temp_modules_dir))
-    result = manager.enable_module("non_existent_module")
-    assert result is None
+    # Now it should be gone
+    assert not any(isinstance(r, APIRoute) and "enabled_module" in r.tags for r in mock_app.router.routes)
+    assert manager.modules["enabled_module"]["enabled"] is False

@@ -1,0 +1,9 @@
+{
+    "name": "LLM Core",
+    "description": "Direct interface to the Large Language Model for completions.",
+    "enabled": true,
+    "id": "llm_module",
+    "is_flow_node": true,
+    "order": 1,
+    "singleton": true
+}

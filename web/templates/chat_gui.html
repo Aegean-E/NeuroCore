@@ -1,0 +1,71 @@
+<div class="flex flex-col h-full">
+    {% if session %}
+        <div class="border-b border-slate-800 pb-4 mb-4 flex justify-between items-center">
+            <div>
+                <h2 class="text-xl font-semibold">{{ session.name }}</h2>
+                <p class="text-sm text-slate-500">Connected to LLM API</p>
+            </div>
+        </div>
+        
+        <div id="chat-messages" class="flex-grow space-y-4 mb-6 custom-scrollbar overflow-y-auto pr-2">
+            {% if session.history %}
+                {% for msg in session.history %}
+                    {% if msg.role == 'user' %}
+                    <div class="flex flex-col items-end space-y-1">
+                        <div class="bg-blue-600 p-4 rounded-2xl rounded-tr-none max-w-[80%] text-white shadow-lg">
+                            <p class="text-sm">{{ msg.content }}</p>
+                        </div>
+                    </div>
+                    {% else %}
+                    <div class="bg-slate-800 p-4 rounded-2xl rounded-tl-none max-w-[80%] shadow-lg border border-slate-700/50">
+                        <div class="text-sm prose prose-invert">{{ msg.content }}</div>
+                    </div>
+                    {% endif %}
+                {% endfor %}
+            {% else %}
+                <div id="empty-chat" class="flex flex-col items-center justify-center h-full opacity-40 space-y-4 py-20">
+                    <svg class="w-16 h-16 text-slate-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"></path></svg>
+                    <p class="italic text-center">Start a conversation with NeuroCore AI</p>
+                </div>
+            {% endif %}
+        </div>
+        
+        <form hx-post="/chat/send?session_id={{ session.id }}" 
+              hx-target="#chat-messages" 
+              hx-swap="beforeend" 
+              hx-indicator="#send-button"
+              hx-on::after-request="this.reset(); document.getElementById('chat-messages').scrollTo({top: document.getElementById('chat-messages').scrollHeight, behavior: 'smooth'})"
+              hx-on::before-request="const e = document.getElementById('empty-chat'); if(e) e.remove();"
+              class="flex space-x-2">
+            <input type="text" name="message" placeholder="Type your message..." autofocus
+                   class="flex-grow bg-slate-900 border border-slate-800 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all placeholder-slate-600">
+            <button id="send-button" type="submit" class="bg-blue-600 hover:bg-blue-500 text-white px-6 py-3 rounded-xl text-sm font-semibold transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center min-w-[80px] shadow-lg shadow-blue-500/20">
+                <span class="htmx-indicator-none">Send</span>
+                <svg class="htmx-indicator animate-spin h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+            </button>
+        </form>
+    {% else %}
+        <div id="empty-chat" class="flex flex-col items-center justify-center h-full opacity-40 space-y-4 py-20">
+            <svg class="w-16 h-16 text-slate-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"></path></svg>
+            <p class="italic text-center">No chat session selected. Create a new one to begin.</p>
+        </div>
+    {% endif %}
+</div>
+<style>
+    .htmx-indicator { display: none; }
+    .htmx-request .htmx-indicator { display: block; }
+    .htmx-request .htmx-indicator-none { display: none; }
+    
+    /* Smooth message appearance */
+    #chat-messages > div {
+        animation: message-appear 0.3s ease-out forwards;
+    }
+    
+    @keyframes message-appear {
+        from { opacity: 0; transform: translateY(10px); }
+        to { opacity: 1; transform: translateY(0); }
+    }
+</style>

@@ -1,58 +1,113 @@
-from fastapi import APIRouter, Request, Form, Depends
-from fastapi.responses import HTMLResponse
-from core.llm import LLMBridge
+from fastapi import APIRouter, Request, Form, Depends, Query
+from fastapi.responses import HTMLResponse, Response
+from core.settings import settings
 from core.dependencies import get_llm_bridge
+from modules.chat.sessions import session_manager
+from fastapi.templating import Jinja2Templates
 
 router = APIRouter()
+templates = Jinja2Templates(directory="web/templates")
 
 @router.get("/gui", response_class=HTMLResponse)
-async def chat_gui(request: Request):
-    return """
-    <div class="flex flex-col h-full">
-        <div class="border-b border-slate-800 pb-4 mb-4 flex justify-between items-center">
-            <div>
-                <h2 class="text-xl font-semibold">AI Assistant</h2>
-                <p class="text-sm text-slate-500">Connected to LLM API</p>
-            </div>
-        </div>
-        
-        <div id="chat-messages" class="flex-grow space-y-4 mb-6 custom-scrollbar overflow-y-auto pr-2">
-            <div class="bg-slate-800 p-4 rounded-2xl rounded-tl-none max-w-[80%]">
-                <p class="text-sm">Hello! I'm NeuroCore. How can I assist you today?</p>
-            </div>
-        </div>
-        
-        <form hx-post="/chat/send" hx-target="#chat-messages" hx-swap="beforeend" hx-on::after-request="this.reset()" class="flex space-x-2">
-            <input type="text" name="message" placeholder="Type your message..." 
-                   class="flex-grow bg-slate-900 border border-slate-800 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all">
-            <button type="submit" class="bg-blue-600 hover:bg-blue-500 text-white px-6 py-3 rounded-xl text-sm font-semibold transition-all">
-                Send
-            </button>
-        </form>
-    </div>
-    """
+async def chat_gui(request: Request, session_id: str = Query(None)):
+    active_session = None
+    if session_id:
+        active_session = session_manager.get_session(session_id)
+    
+    if not active_session:
+        # If no session specified or found, try to use the latest one or create one
+        sessions = session_manager.list_sessions()
+        if sessions:
+            active_session = sessions[0]
+
+    return templates.TemplateResponse(request, "chat_gui.html", {"session": active_session})
+
+@router.get("/sessions", response_class=HTMLResponse)
+async def get_chat_sessions(request: Request):
+    sessions = session_manager.list_sessions()
+    return templates.TemplateResponse(request, "chat_session_list.html", {"sessions": sessions})
+
+@router.post("/sessions/new")
+async def create_new_session():
+    new_session = session_manager.create_session()
+    import json
+    trigger_data = {
+        "sessionsChanged": None,
+        "newSessionCreated": {"id": new_session['id']}
+    }
+    return HTMLResponse(content="", headers={"HX-Trigger": json.dumps(trigger_data)})
+
+@router.post("/sessions/{session_id}/delete")
+async def delete_session(request: Request, session_id: str):
+    session_manager.delete_session(session_id)
+
+    # Get the new chat GUI. By passing session_id=None, chat_gui will pick the latest session,
+    # or create a new one if none are left.
+    response = await chat_gui(request, session_id=None)
+
+    # Add a trigger to the response to tell the session list to update itself.
+    response.headers["HX-Trigger"] = "sessionsChanged"
+    return response
+
+@router.post("/sessions/{session_id}/rename")
+async def rename_session(session_id: str, name: str = Form(...)):
+    session_manager.rename_session(session_id, name)
+    return HTMLResponse(content="", headers={"HX-Trigger": "sessionsChanged"})
 
 @router.post("/send", response_class=HTMLResponse)
 async def send_message(
+    request: Request,
     message: str = Form(...),
-    llm: LLMBridge = Depends(get_llm_bridge)
+    session_id: str = Query(None)
 ):
-    # Call LM Studio API
-    messages = [{"role": "user", "content": message}]
-    response = await llm.chat_completion(messages)
-    
-    if "error" in response:
-        ai_response = f"Error connecting to LLM API: {response['error']}"
-    else:
-        ai_response = response.get("choices", [{}])[0].get("message", {}).get("content", "No response.")
+    if not session_id:
+        return HTMLResponse("Error: No session selected", status_code=400)
 
-    return f"""
-    <div class="flex flex-col items-end space-y-1">
-        <div class="bg-blue-600 p-4 rounded-2xl rounded-tr-none max-w-[80%] text-white">
-            <p class="text-sm">{message}</p>
-        </div>
-    </div>
-    <div class="bg-slate-800 p-4 rounded-2xl rounded-tl-none max-w-[80%] mt-4 animate-in fade-in slide-in-from-left-2 duration-300">
-        <div class="text-sm prose prose-invert">{ai_response}</div>
-    </div>
-    """
+    active_session = session_manager.get_session(session_id)
+    if not active_session:
+        return HTMLResponse("Error: Session not found", status_code=404)
+
+    # Add user message to history
+    session_manager.add_message(session_id, "user", message)
+    # Reload session to get the updated history
+    active_session = session_manager.get_session(session_id)
+    
+    # --- New AI Flow Execution Logic ---
+    from core.flow_runner import FlowRunner
+    from core.flow_manager import flow_manager
+
+    # Use the globally active AI Flow
+    active_flow_id = settings.get("active_ai_flow")
+    active_flow = flow_manager.get_flow(active_flow_id) if active_flow_id else None
+
+    if not active_flow:
+        ai_response = "Error: No active AI Flow is set. Please go to the AI Flow page to create and activate a flow."
+    else:
+        try:
+            runner = FlowRunner(flow_id=active_flow['id'])
+            
+            # The initial input to the flow will be the full chat history.
+            initial_data = {"messages": active_session["history"]}
+            
+            flow_result = await runner.run(initial_data)
+            
+            if "error" in flow_result:
+                ai_response = f"Flow Execution Error: {flow_result['error']}"
+            else:
+                # The final output of the flow is expected to be the AI response content,
+                # typically processed by a "Chat Output" node.
+                ai_response = flow_result.get("content", "Flow finished but produced no valid response content.")
+        except Exception as e:
+            ai_response = f"Critical Error running AI Flow: {e}"
+
+    # Add AI response to history
+    session_manager.add_message(session_id, "assistant", ai_response)
+
+    return templates.TemplateResponse(
+        request, 
+        "chat_message_pair.html", 
+        {
+            "user_message": message,
+            "ai_response": ai_response
+        }
+    )

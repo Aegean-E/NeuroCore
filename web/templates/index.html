@@ -21,30 +21,23 @@
     <!-- Main Layout -->
     <main class="flex-grow container mx-auto flex p-6 space-x-6 h-[calc(100vh-80px)] overflow-hidden">
         
-        <!-- Sidebar (Modules List) -->
+        <!-- Sidebar -->
         <aside class="w-64 flex flex-col space-y-4 border-r border-slate-800 pr-4">
-            <h2 class="text-xs font-semibold text-slate-500 uppercase tracking-wider px-2">Loaded Modules</h2>
-            <div class="flex-grow overflow-y-auto custom-scrollbar space-y-1">
-                {% set other_modules = [] %}
-                {% for module in modules %}
-                    {% if module.id != 'chat' %}
-                        {% set _ = other_modules.append(module) %}
-                    {% endif %}
-                {% endfor %}
-
-                {% if not other_modules %}
-                <p class="text-slate-600 text-sm italic px-2">No other modules loaded</p>
-                {% else %}
-                {% for module in other_modules %}
-                <button hx-get="/{{ module.id }}/gui" 
-                        hx-target="#module-content" 
-                        class="w-full text-left px-3 py-2 rounded-lg hover:bg-slate-800 text-slate-300 hover:text-white transition-all text-sm flex items-center group">
-                    <span class="w-2 h-2 rounded-full bg-emerald-500 mr-3 group-hover:scale-125 transition-transform"></span>
-                    {{ module.name }}
-                </button>
-                {% endfor %}
-                {% endif %}
+            {% if active_module == 'chat' %}
+            <div id="session-list-container" hx-get="/chat/sessions" hx-trigger="load, sessionsChanged from:body" hx-swap="innerHTML" class="flex flex-col h-full relative">
+                <div class="htmx-indicator absolute inset-0 bg-slate-900/50 flex items-center justify-center z-10">
+                    <div class="w-5 h-5 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+                </div>
+                {% include 'chat_session_list.html' %}
             </div>
+            {% else %}
+            <div id="module-list-container"
+                 hx-get="/modules/list"
+                 hx-trigger="load, modulesChanged from:body"
+                 class="flex flex-col flex-grow">
+                <!-- This will be filled by HTMX -->
+            </div>
+            {% endif %}
             
             <!-- Connection Status -->
             <div class="mt-auto p-4 bg-slate-800/50 rounded-xl border border-slate-700/50 space-y-2">
@@ -62,10 +55,15 @@
         </aside>
 
         <!-- Dynamic Content Area -->
-        <section class="flex-grow flex flex-col bg-slate-950/50 rounded-2xl border border-slate-800 shadow-2xl relative">
-            <div id="module-content" class="absolute inset-0 p-6 overflow-y-auto custom-scrollbar"
-                 {% if active_module %} hx-get="/{{ active_module }}/gui" hx-trigger="load" {% endif %}>
-                {% if not active_module %}
+        <section class="flex-grow flex flex-col bg-slate-950/50 rounded-2xl border border-slate-800 shadow-2xl relative overflow-hidden">
+            <div id="module-content" class="absolute inset-0 p-6 overflow-y-auto custom-scrollbar">
+                {% if active_module %}
+                <div hx-get="/{{ active_module }}/gui" hx-trigger="load" hx-swap="outerHTML">
+                    <div class="flex items-center justify-center h-full">
+                        <div class="w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+                    </div>
+                </div>
+                {% else %}
                 <div class="flex flex-col items-center justify-center h-full text-center space-y-4 opacity-50">
                     <svg class="w-16 h-16 text-slate-700" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"></path></svg>
                     <p class="text-slate-500">Select a module from the sidebar to begin</p>
@@ -74,6 +72,57 @@
             </div>
         </section>
     </main>
+
+    <script>
+        // Global Session UI Helpers
+        function toggleConfirm(id, show) {
+            const confirmUi = document.querySelector(`.confirm-${id}`);
+            const actionBtns = document.querySelector(`.action-btns-${id}`);
+            if (confirmUi && actionBtns) {
+                if (show) {
+                    confirmUi.classList.remove('hidden');
+                    actionBtns.classList.add('hidden');
+                } else {
+                    confirmUi.classList.add('hidden');
+                    actionBtns.classList.remove('hidden');
+                }
+            }
+        }
+
+        function toggleRename(id, show) {
+            const nameBtn = document.querySelector(`.session-name-${id}`);
+            const renameForm = document.querySelector(`.rename-form-${id}`);
+            const actionBtns = document.querySelector(`.action-btns-${id}`);
+            const renameConfirm = document.querySelector(`.rename-confirm-${id}`);
+
+            if (nameBtn && renameForm && actionBtns && renameConfirm) {
+                if (show) {
+                    nameBtn.classList.add('hidden');
+                    renameForm.classList.remove('hidden');
+                    actionBtns.classList.add('hidden');
+                    renameConfirm.classList.remove('hidden');
+                    renameForm.querySelector('input').focus();
+                } else {
+                    nameBtn.classList.remove('hidden');
+                    renameForm.classList.add('hidden');
+                    actionBtns.classList.remove('hidden');
+                    renameConfirm.classList.add('hidden');
+                }
+            }
+        }
+
+        function submitRename(id) {
+            htmx.trigger(`.rename-form-${id}`, 'submit');
+        }
+
+        // Handle auto-navigation to new sessions
+        document.body.addEventListener('newSessionCreated', function(evt) {
+            const sessionId = evt.detail.id;
+            if (sessionId) {
+                htmx.ajax('GET', '/chat/gui?session_id=' + sessionId, '#module-content');
+            }
+        });
+    </script>
 
     <!-- Footer -->
     <footer class="p-2 text-center text-[10px] text-slate-700 font-mono tracking-tighter uppercase">

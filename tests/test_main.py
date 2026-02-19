@@ -13,4 +13,4 @@ def test_read_root(client):
     response = client.get("/")
     assert response.status_code == 200
     assert "NeuroCore" in response.text
-    assert "Loaded Modules" in response.text
+    assert 'hx-get="/modules/list"' in response.text

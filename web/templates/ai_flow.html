@@ -1,0 +1,578 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Flow - NeuroCore</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/htmx.org@2.0.2"></script>
+    <style>
+        .canvas-grid {
+            background-image: radial-gradient(circle, #334155 1px, transparent 1px);
+            background-size: 30px 30px;
+        }
+        .connecting {
+            animation: pulse-blue 1.5s infinite;
+        }
+        @keyframes pulse-blue {
+            0%, 100% { box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.4); }
+            50% { box-shadow: 0 0 0 8px rgba(59, 130, 246, 0); }
+        }
+    </style>
+</head>
+<body class="bg-slate-900 text-slate-100 min-h-screen flex flex-col font-sans">
+    
+    {% include 'navbar.html' %}
+
+    <main class="flex-grow flex relative overflow-hidden">
+        <!-- Sidebar -->
+        <aside class="w-72 flex-shrink-0 bg-slate-950/80 backdrop-blur-md border-r border-slate-800 p-4 flex flex-col space-y-4 overflow-y-auto">
+            <div>
+                <h2 class="text-sm font-bold mb-3 uppercase tracking-widest text-slate-500">Available Functions</h2>
+                <div class="space-y-2">
+                    {% for module in modules %}
+                        {% if module.provides_nodes or module.get('is_flow_node') %}
+                            <div class="bg-slate-900/50 rounded-xl border border-slate-800">
+                                <button onclick="toggleModuleFunctions('{{ module.id }}')" class="w-full text-left px-4 py-3 flex justify-between items-center hover:bg-slate-800/50 rounded-t-xl transition-colors">
+                                    <span class="font-semibold text-sm">{{ module.name }}</span>
+                                    <svg id="arrow-{{ module.id }}" class="w-4 h-4 text-slate-500 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
+                                </button>
+                                <div id="functions-{{ module.id }}" class="p-2 space-y-2 hidden border-t border-slate-800">
+                                    {% if module.provides_nodes %}
+                                        {% for node in module.provides_nodes %}
+                                            <div draggable="true" 
+                                                 ondragstart="onDragStart(event, '{{ module.id }}', '{{ node.name }}', '{{ node.id }}')"
+                                                 class="px-3 py-2 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-lg cursor-grab active:cursor-grabbing transition-all text-xs flex items-center">
+                                                <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 mr-2"></span>
+                                                {{ node.name }}
+                                            </div>
+                                        {% endfor %}
+                                    {% elif module.get('is_flow_node') %}
+                                         <div draggable="true" 
+                                              ondragstart="onDragStart(event, '{{ module.id }}', '{{ module.name }}', '{{ module.id }}')"
+                                              class="px-3 py-2 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-lg cursor-grab active:cursor-grabbing transition-all text-xs flex items-center">
+                                             <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 mr-2"></span>
+                                             {{ module.name }}
+                                         </div>
+                                    {% endif %}
+                                </div>
+                            </div>
+                        {% endif %}
+                    {% endfor %}
+                </div>
+            </div>
+            <div class="border-t border-slate-800 pt-4 mt-4">
+                <h2 class="text-sm font-bold mb-3 uppercase tracking-widest text-slate-500">Canvas Controls</h2>
+                <div class="grid grid-cols-2 gap-2">
+                    <button onclick="clearCanvas()" class="w-full bg-slate-700 hover:bg-slate-600 text-white px-4 py-2 rounded-lg text-sm font-semibold transition-all">
+                        Clear
+                    </button>
+                    <button onclick="centerCanvas()" class="w-full bg-slate-700 hover:bg-slate-600 text-white px-4 py-2 rounded-lg text-sm font-semibold transition-all">
+                        Center
+                    </button>
+                </div>
+            </div>
+            <div class="border-t border-slate-800 pt-4 mt-4">
+                <h2 class="text-sm font-bold mb-3 uppercase tracking-widest text-slate-500">Save Current Flow</h2>
+                <form id="save-flow-form" 
+                      hx-post="/ai-flow/save"
+                      hx-target="#saved-flows-list"
+                      hx-swap="innerHTML"
+                      hx-on::before-request="populateHiddenFields(event)">
+                    <input type="text" name="name" placeholder="Enter flow name..." required class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm mb-2 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    <input type="hidden" name="nodes">
+                    <input type="hidden" name="connections">
+                    <button type="submit" class="w-full bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-lg text-sm font-semibold transition-all">
+                        Save Flow
+                    </button>
+                </form>
+            </div>
+            <div id="saved-flows-list" class="border-t border-slate-800 pt-4 mt-4 flex-grow">
+                {% include 'ai_flow_list.html' %}
+            </div>
+        </aside>
+
+        <!-- AI Flow Area -->
+        <div id="canvas" 
+             class="flex-grow canvas-grid relative">
+            <svg id="canvas-svg" class="absolute inset-0 w-full h-full pointer-events-none"></svg>
+            <div id="canvas-bin" class="absolute bottom-5 right-5 w-20 h-20 bg-red-900/50 border-2 border-dashed border-red-700 rounded-full flex items-center justify-center text-red-500 opacity-50 transition-all pointer-events-none z-20">
+                <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+            </div>
+        </div>
+    </main>
+
+    <script>
+    (function() {
+        const canvas = document.getElementById('canvas');
+        // If the canvas element doesn't exist, or if this script has already run on it,
+        // don't re-initialize. This prevents issues with HTMX navigation.
+        if (!canvas || canvas.dataset.initialized === 'true') {
+            return;
+        }
+        canvas.dataset.initialized = 'true';
+
+        // --- Configuration from Server ---
+        const singletonNodeTypeIds = new Set();
+        {% for module in modules %}
+            {% if module.provides_nodes %}
+                {% for node in module.provides_nodes %}
+                    {% if node.singleton %}
+                        singletonNodeTypeIds.add('{{ node.id }}');
+                    {% endif %}
+                {% endfor %}
+            {% elif module.get('is_flow_node') and module.singleton %}
+                singletonNodeTypeIds.add('{{ module.id }}');
+            {% endif %}
+        {% endfor %}
+
+        // --- State Variables ---
+        let nodes = [];
+        let connections = [];
+        let nextNodeId = 0;
+        
+        let panX = 0, panY = 0, zoom = 1;
+        let isPanning = false;
+
+        let isDrawingConnection = false;
+        let connectionStart = { node: null, element: null };
+        let activeDrawingLine = null;
+
+        const svg = document.getElementById('canvas-svg');
+        
+        // Create a container for all transformable elements (nodes and svg lines)
+        const nodeAndSvgContainer = document.createElement('div');
+        nodeAndSvgContainer.id = 'node-container';
+        nodeAndSvgContainer.style.position = 'absolute';
+        nodeAndSvgContainer.style.transformOrigin = '0 0';
+        nodeAndSvgContainer.style.inset = '0'; // Make it fill the parent canvas
+        canvas.appendChild(nodeAndSvgContainer);
+        nodeAndSvgContainer.appendChild(svg);
+
+        // The container must be the target for drag and drop events
+        nodeAndSvgContainer.addEventListener('dragover', onDragOver);
+        nodeAndSvgContainer.addEventListener('drop', onDrop);
+
+        // --- Core Canvas and Interaction Functions ---
+
+        function updateCanvasTransform() {
+            nodeAndSvgContainer.style.transform = `translate(${panX}px, ${panY}px) scale(${zoom})`;
+            canvas.style.backgroundSize = `${30 * zoom}px ${30 * zoom}px`;
+            canvas.style.backgroundPosition = `${panX}px ${panY}px`;
+        }
+
+        function clearConnectionState() {
+            if (connectionStart.element) {
+                connectionStart.element.classList.remove('connecting');
+            }
+            if (activeDrawingLine) {
+                activeDrawingLine.remove();
+                activeDrawingLine = null;
+            }
+            document.onmousemove = null;
+            isDrawingConnection = false;
+            connectionStart = { node: null, element: null };
+        }
+
+        // --- Event Listeners for Pan, Zoom, and Interaction ---
+        canvas.addEventListener('wheel', (event) => {
+            event.preventDefault();
+            const zoomSpeed = 0.1;
+            const oldZoom = zoom;
+            
+            if (event.deltaY < 0) {
+                zoom = Math.min(2, zoom + zoomSpeed); // Zoom in, max 2x
+            } else {
+                zoom = Math.max(0.2, zoom - zoomSpeed); // Zoom out, min 0.2x
+            }
+
+            const rect = canvas.getBoundingClientRect();
+            const mouseX = event.clientX - rect.left;
+            const mouseY = event.clientY - rect.top;
+
+            const contentMouseX = (mouseX - panX) / oldZoom;
+            const contentMouseY = (mouseY - panY) / oldZoom;
+
+            panX = mouseX - contentMouseX * zoom;
+            panY = mouseY - contentMouseY * zoom;
+
+            updateCanvasTransform();
+        });
+
+        canvas.addEventListener('mousedown', (event) => {
+            if (event.button === 1) { // Middle mouse button for panning
+                isPanning = true;
+                canvas.style.cursor = 'grabbing';
+                event.preventDefault();
+            }
+            if (isDrawingConnection && event.target === canvas) {
+                clearConnectionState();
+            }
+        });
+
+        canvas.addEventListener('mousemove', (event) => {
+            if (isPanning) {
+                panX += event.movementX;
+                panY += event.movementY;
+                updateCanvasTransform();
+            }
+        });
+
+        window.addEventListener('mouseup', (event) => {
+            if (isPanning) {
+                isPanning = false;
+                canvas.style.cursor = 'default';
+            }
+        });
+
+        window.populateHiddenFields = function(event) {
+            document.querySelector('#save-flow-form input[name="nodes"]').value = JSON.stringify(nodes);
+            document.querySelector('#save-flow-form input[name="connections"]').value = JSON.stringify(connections);
+        }
+
+        window.onDragStart = function(event, moduleId, nodeName, nodeTypeId) {
+            event.dataTransfer.setData('text/plain', JSON.stringify({ moduleId, nodeName, nodeTypeId }));
+        }
+
+        function onDragOver(event) {
+            event.preventDefault();
+        }
+
+        function onDrop(event) {
+            event.preventDefault();
+            const data = JSON.parse(event.dataTransfer.getData('text/plain'));
+            const rect = canvas.getBoundingClientRect();
+            const x = (event.clientX - rect.left - panX) / zoom;
+            const y = (event.clientY - rect.top - panY) / zoom;
+
+            createNode(data.moduleId, data.nodeName, data.nodeTypeId, x, y);
+        }
+
+        function createNode(moduleId, name, nodeTypeId, x, y, existingId = null) {
+            // Rule: If a node is marked as a singleton, only one can exist in the flow.
+            // We check !existingId to ensure this rule only applies when a user drags a new node.
+            if (!existingId && singletonNodeTypeIds.has(nodeTypeId)) {
+                if (nodes.some(n => n.nodeTypeId === nodeTypeId)) {
+                    alert(`Only one "${name}" node can be added to a flow.`);
+                    return;
+                }
+            }
+
+            let nodeId;
+            if (existingId) {
+                nodeId = existingId;
+                const numericId = parseInt(existingId.split('-')[1]);
+                if (!isNaN(numericId) && numericId >= nextNodeId) {
+                    nextNodeId = numericId + 1;
+                }
+            } else {
+                nodeId = `node-${nextNodeId++}`;
+            }
+
+            const nodeElement = document.createElement('div');
+            nodeElement.id = nodeId;
+            nodeElement.className = 'absolute bg-slate-950 border border-slate-800 p-4 rounded-xl shadow-2xl cursor-move w-48';
+            nodeElement.style.left = `${x}px`;
+            nodeElement.style.top = `${y}px`;
+            nodeElement.innerHTML = `
+                <div class="font-bold text-xs uppercase text-slate-500 mb-3 pointer-events-none">${name}</div>
+                <div class="flex justify-between items-center text-xs text-slate-400">
+                    <div class="input-area flex items-center space-x-2 p-1 -m-1 rounded-md hover:bg-slate-800 transition-colors cursor-pointer">
+                        <div class="w-2.5 h-2.5 bg-blue-500 rounded-full input-dot" title="Input"></div>
+                        <span>Input</span>
+                    </div>
+                    <div class="output-area flex items-center space-x-2 p-1 -m-1 rounded-md hover:bg-slate-800 transition-colors cursor-pointer">
+                        <span>Output</span>
+                        <div class="w-2.5 h-2.5 bg-emerald-500 rounded-full output-dot" title="Output"></div>
+                    </div>
+                </div>
+            `;
+            
+            const nodeData = { id: nodeId, moduleId: moduleId, nodeTypeId: nodeTypeId, name: name, x: x, y: y };
+            nodes.push(nodeData);
+
+            let isDragging = false;
+            const bin = document.getElementById('canvas-bin');
+            nodeElement.onmousedown = (e) => {
+                if (e.target.closest('.input-area') || e.target.closest('.output-area')) return;
+                isDragging = true;
+
+                document.onmousemove = (e) => {
+                    bin.style.opacity = '1';
+                    bin.style.pointerEvents = 'auto';
+
+                    if (!isDragging) return;
+                    let newX = nodeData.x + e.movementX / zoom;
+                    let newY = nodeData.y + e.movementY / zoom;
+                    nodeElement.style.left = `${newX}px`;
+                    nodeElement.style.top = `${newY}px`;
+                    nodeData.x = newX;
+                    nodeData.y = newY;
+                    drawConnections();
+
+                    const binRect = bin.getBoundingClientRect();
+                    if (e.clientX >= binRect.left && e.clientX <= binRect.right &&
+                        e.clientY >= binRect.top && e.clientY <= binRect.bottom) {
+                        bin.classList.add('bg-red-900');
+                        bin.classList.remove('bg-red-900/50');
+                    } else {
+                        bin.classList.remove('bg-red-900');
+                        bin.classList.add('bg-red-900/50');
+                    }
+                };
+
+                document.onmouseup = (e) => {
+                    isDragging = false; 
+                    bin.style.opacity = '0.5';
+                    bin.style.pointerEvents = 'none';
+                    bin.classList.remove('bg-red-900');
+                    bin.classList.add('bg-red-900/50');
+
+                    const binRect = bin.getBoundingClientRect();
+                    if (e.clientX >= binRect.left && e.clientX <= binRect.right &&
+                        e.clientY >= binRect.top && e.clientY <= binRect.bottom) {
+                        deleteNode(nodeData.id);
+                    }
+
+                    document.onmousemove = null; 
+                    document.onmouseup = null; 
+                };
+            };
+
+            nodeElement.addEventListener('dragover', (e) => e.preventDefault());
+            nodeElement.addEventListener('drop', (e) => {
+                e.stopPropagation();
+                onDrop(e);
+            });
+
+            // --- Connection Logic ---
+            const inputArea = nodeElement.querySelector('.input-area');
+            const outputArea = nodeElement.querySelector('.output-area');
+            const outputDot = nodeElement.querySelector('.output-dot');
+
+            outputArea.onclick = (e) => {
+                e.stopPropagation();
+                if (isDrawingConnection) {
+                    clearConnectionState();
+                    return;
+                }
+                isDrawingConnection = true;
+                connectionStart.node = nodeData;
+                connectionStart.element = outputDot;
+                outputDot.classList.add('connecting');
+
+                const canvasRect = canvas.getBoundingClientRect();
+                const fromDotRect = connectionStart.element.getBoundingClientRect();
+                const startX = (fromDotRect.left + fromDotRect.width / 2 - canvasRect.left - panX) / zoom;
+                const startY = (fromDotRect.top + fromDotRect.height / 2 - canvasRect.top - panY) / zoom;
+
+                activeDrawingLine = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+                activeDrawingLine.setAttribute('stroke', '#3b82f6');
+                activeDrawingLine.setAttribute('stroke-width', '2');
+                activeDrawingLine.setAttribute('fill', 'none');
+                activeDrawingLine.setAttribute('stroke-dasharray', '5,5');
+                activeDrawingLine.style.pointerEvents = 'none';
+                svg.appendChild(activeDrawingLine);
+
+                document.onmousemove = (move_e) => {
+                    if (!isDrawingConnection) return;
+                    const endX = (move_e.clientX - canvasRect.left - panX) / zoom;
+                    const endY = (move_e.clientY - canvasRect.top - panY) / zoom;
+                    const d = `M ${startX} ${startY} C ${startX + 50} ${startY}, ${endX - 50} ${endY}, ${endX} ${endY}`;
+                    activeDrawingLine.setAttribute('d', d);
+                };
+            };
+
+            inputArea.onclick = (e) => {
+                e.stopPropagation();
+                if (isDrawingConnection) {
+                    const inputDot = nodeElement.querySelector('.input-dot');
+                    const connectionEnd = { node: nodeData, element: inputDot };
+                    createConnection(connectionStart, connectionEnd);
+                    clearConnectionState();
+                }
+            };
+
+            nodeAndSvgContainer.appendChild(nodeElement);
+        }
+
+        window.loadFlowById = async function(flowId) {
+            try {
+                const response = await fetch(`/ai-flow/${flowId}`, { cache: 'no-store' });
+                if (!response.ok) throw new Error('Failed to load flow.');
+                const flowData = await response.json();
+
+                clearCanvas(false); 
+
+                const nameInput = document.querySelector('#save-flow-form input[name="name"]');
+                if(nameInput) nameInput.value = flowData.name;
+
+                if (flowData.nodes) {
+                    flowData.nodes.forEach(node => {
+                        createNode(node.moduleId, node.name, node.nodeTypeId, node.x, node.y, node.id);
+                    });
+                }
+
+                connections = flowData.connections || [];
+                drawConnections();
+
+                const llmNode = nodes.find(n => n.moduleId === 'llm_module');
+                if (llmNode) {
+                    // Center the view on the LLM Core node when a flow is loaded.
+                    const nodeWidth = 192; // w-48
+                    const nodeHeight = 100; // approx
+                    const nodeCenterX = llmNode.x + nodeWidth / 2;
+                    const nodeCenterY = llmNode.y + nodeHeight / 2;
+
+                    const canvasRect = canvas.getBoundingClientRect();
+                    const viewportCenterX = canvasRect.width / 2;
+                    const viewportCenterY = canvasRect.height / 2;
+
+                    zoom = 1; // Reset zoom to a default level
+                    panX = viewportCenterX - (nodeCenterX * zoom);
+                    panY = viewportCenterY - (nodeCenterY * zoom);
+                    updateCanvasTransform();
+                } else {
+                    centerCanvas(); // Fallback to centering all nodes if no LLM node is found
+                }
+            } catch (error) {
+                console.error(error);
+                alert(error.message);
+            }
+        }
+
+        window.clearCanvas = function(withConfirmation = true) {
+            if (withConfirmation && !confirm('Are you sure you want to clear the canvas? This cannot be undone.')) {
+                return;
+            }
+            nodes = [];
+            connections = [];
+            nodeAndSvgContainer.querySelectorAll('.absolute.bg-slate-950').forEach(el => el.remove());
+            drawConnections();
+            nextNodeId = 0;
+            document.querySelector('#save-flow-form input[name="name"]').value = '';
+        }
+
+        function deleteNode(nodeId) {
+            // Remove node from array
+            const nodeIndex = nodes.findIndex(n => n.id === nodeId);
+            if (nodeIndex > -1) {
+                nodes.splice(nodeIndex, 1);
+            }
+
+            const nodeEl = document.getElementById(nodeId);
+            if (nodeEl) {
+                nodeEl.remove();
+            }
+
+            connections = connections.filter(c => c.from !== nodeId && c.to !== nodeId);
+            drawConnections();
+        }
+
+        window.centerCanvas = function() {
+            if (nodes.length === 0) {
+                zoom = 1;
+                panX = 0;
+                panY = 0;
+                updateCanvasTransform();
+                return;
+            };
+
+            let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+            const nodeWidth = 192; // w-48
+            const nodeHeight = 100; // approx
+
+            nodes.forEach(node => {
+                minX = Math.min(minX, node.x);
+                minY = Math.min(minY, node.y);
+                maxX = Math.max(maxX, node.x + nodeWidth);
+                maxY = Math.max(maxY, node.y + nodeHeight);
+            });
+
+            const nodesWidth = maxX - minX;
+            const nodesHeight = maxY - minY;
+            const nodesCenterX = minX + nodesWidth / 2;
+            const nodesCenterY = minY + nodesHeight / 2;
+
+            const canvasRect = canvas.getBoundingClientRect();
+            const viewportCenterX = canvasRect.width / 2;
+            const viewportCenterY = canvasRect.height / 2;
+
+            const zoomX = canvasRect.width / (nodesWidth + 150);
+            const zoomY = canvasRect.height / (nodesHeight + 150);
+            zoom = Math.min(1, zoomX, zoomY);
+
+            panX = viewportCenterX - (nodesCenterX * zoom);
+            panY = viewportCenterY - (nodesCenterY * zoom);
+
+            updateCanvasTransform();
+        }
+
+        window.toggleConfirm = function(id, show) {
+            const confirmUi = document.querySelector(`.confirm-${id}`);
+            const actionBtns = document.querySelector(`.action-btns-${id}`);
+            if (confirmUi && actionBtns) {
+                if (show) {
+                    confirmUi.classList.remove('hidden');
+                    actionBtns.classList.add('hidden');
+                } else {
+                    confirmUi.classList.add('hidden');
+                    actionBtns.classList.remove('hidden');
+                }
+            }
+        }
+
+        function createConnection(start, end) {
+            if (start.node.id === end.node.id) return;
+            const newConnection = { from: start.node.id, to: end.node.id };
+            if (connections.some(c => c.from === newConnection.from && c.to === newConnection.to)) return;
+            connections.push(newConnection);
+            drawConnections();
+        }
+
+        window.toggleModuleFunctions = function(moduleId) {
+            const functionsDiv = document.getElementById(`functions-${moduleId}`);
+            const arrowIcon = document.getElementById(`arrow-${moduleId}`);
+            if (functionsDiv && arrowIcon) {
+                const isHidden = functionsDiv.classList.contains('hidden');
+                if (isHidden) {
+                    functionsDiv.classList.remove('hidden');
+                    arrowIcon.classList.add('rotate-180');
+                } else {
+                    functionsDiv.classList.add('hidden');
+                    arrowIcon.classList.remove('rotate-180');
+                }
+            }
+        }
+
+        function drawConnections() {
+            svg.innerHTML = '';
+            const canvasRect = canvas.getBoundingClientRect();
+            connections.forEach(conn => {
+                const fromNodeEl = document.getElementById(conn.from);
+                const toNodeEl = document.getElementById(conn.to);
+                if (!fromNodeEl || !toNodeEl) return;
+
+                const fromDot = fromNodeEl.querySelector('.output-dot').getBoundingClientRect();
+                const toDot = toNodeEl.querySelector('.input-dot').getBoundingClientRect();
+
+                const startX = (fromDot.left + fromDot.width / 2 - canvasRect.left - panX) / zoom;
+                const startY = (fromDot.top + fromDot.height / 2 - canvasRect.top - panY) / zoom;
+                const endX = (toDot.left + toDot.width / 2 - canvasRect.left - panX) / zoom;
+                const endY = (toDot.top + toDot.height / 2 - canvasRect.top - panY) / zoom;
+
+                const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+                const d = `M ${startX} ${startY} C ${startX + 50} ${startY}, ${endX - 50} ${endY}, ${endX} ${endY}`;
+                path.setAttribute('d', d);
+                path.setAttribute('stroke', '#475569');
+                path.setAttribute('stroke-width', '2');
+                path.setAttribute('fill', 'none');
+                path.style.pointerEvents = 'none';
+                svg.appendChild(path);
+            });
+        }
+
+    })();
+    </script>
+</body>
+</html>

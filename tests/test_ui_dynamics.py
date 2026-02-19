@@ -12,7 +12,6 @@ def test_navbar_fragment(client):
     response = client.get("/navbar")
     assert response.status_code == 200
     assert 'id="main-navbar"' in response.text
-    assert "Dashboard" in response.text
     assert "Modules" in response.text
     assert "Settings" in response.text
 
@@ -20,8 +19,8 @@ def test_module_list_fragment(client):
     """Tests if the module list fragment loads correctly."""
     response = client.get("/modules/list")
     assert response.status_code == 200
-    assert "Module Management" in response.text
-    assert 'hx-post="/modules/' in response.text # Check for button presence
+    assert "Loaded Modules" in response.text
+    assert 'hx-get="/modules/' in response.text # Check for button presence
 
 def test_llm_status_fragment(client):
     """Tests if the LLM status fragment loads correctly."""

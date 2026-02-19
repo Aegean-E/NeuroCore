@@ -7,7 +7,8 @@ DEFAULT_SETTINGS = {
     "llm_api_url": "http://localhost:1234/v1",
     "default_model": "local-model",
     "temperature": 0.7,
-    "max_tokens": 2048
+    "max_tokens": 2048,
+    "active_ai_flow": None
 }
 
 class SettingsManager:

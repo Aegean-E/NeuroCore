@@ -2,5 +2,21 @@
     "name": "Chat",
     "description": "An interactive AI assistant.",
     "enabled": true,
-    "id": "chat"
+    "id": "chat",
+    "is_flow_node": false,
+    "order": 2,
+    "provides_nodes": [
+        {
+            "id": "chat_input",
+            "name": "Chat Input",
+            "description": "Provides user input and chat history to the flow.",
+            "singleton": true
+        },
+        {
+            "id": "chat_output",
+            "name": "Chat Output",
+            "description": "Receives the final data and formats it for the chat response.",
+            "singleton": true
+        }
+    ]
 }

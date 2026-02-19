@@ -1,0 +1,23 @@
+<div class="p-8">
+    <div class="flex items-center justify-between mb-6">
+        <h2 class="text-2xl font-bold">{{ module.name }}</h2>
+        <span class="text-sm font-mono px-2 py-1 rounded {{ 'bg-emerald-500/20 text-emerald-400' if module.enabled else 'bg-slate-700 text-slate-400' }}">
+            {{ 'Enabled' if module.enabled else 'Disabled' }}
+        </span>
+    </div>
+    
+    <p class="text-slate-400 mb-8">{{ module.description }}</p>
+
+    <div class="bg-slate-900 rounded-xl border border-slate-800 p-6">
+        <h3 class="font-semibold text-lg mb-4">Module State</h3>
+        <p class="text-sm text-slate-500 mb-4">
+            {{ 'Disabling this module will remove it from the UI and prevent it from being used until it is re-enabled.' if module.enabled else 'Enabling this module will make it available for use throughout the application.' }}
+        </p>
+        <button hx-post="/modules/{{ module.id }}/{{ 'disable' if module.enabled else 'enable' }}" 
+                hx-target="#module-content"
+                hx-swap="innerHTML"
+                class="px-6 py-2 rounded-lg text-sm font-semibold transition-colors {{ 'bg-red-600/80 hover:bg-red-600' if module.enabled else 'bg-emerald-600/80 hover:bg-emerald-600' }}">
+            {{ 'Disable' if module.enabled else 'Enable' }}
+        </button>
+    </div>
+</div>
