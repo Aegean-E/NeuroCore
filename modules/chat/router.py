@@ -2,26 +2,15 @@ from fastapi import APIRouter, Request, Form, Depends, Query
 from fastapi.responses import HTMLResponse, Response
 from core.settings import settings
 from core.dependencies import get_llm_bridge
+from core.llm import LLMBridge
 from modules.chat.sessions import session_manager
 from fastapi.templating import Jinja2Templates
 from core.flow_runner import FlowRunner
 from core.flow_manager import flow_manager
+import json
 
 router = APIRouter()
 templates = Jinja2Templates(directory="web/templates")
-
-@router.get("", response_class=HTMLResponse)
-async def chat_page(request: Request):
-    # Access module manager from app state to render the sidebar correctly
-    module_manager = request.app.state.module_manager
-    enabled_modules = [m for m in module_manager.get_all_modules() if m.get("enabled")]
-    
-    return templates.TemplateResponse(request, "index.html", {
-        "modules": enabled_modules,
-        "active_module": "chat",
-        "sidebar_template": "chat_sidebar.html",
-        "sessions": session_manager.list_sessions()
-    })
 
 @router.get("", response_class=HTMLResponse)
 async def chat_page(request: Request):
@@ -58,7 +47,6 @@ async def get_chat_sessions(request: Request):
 @router.post("/sessions/new")
 async def create_new_session():
     new_session = session_manager.create_session()
-    import json
     trigger_data = {
         "sessionsChanged": None,
         "newSessionCreated": {"id": new_session['id']}
@@ -82,11 +70,26 @@ async def rename_session(session_id: str, name: str = Form(...)):
     session_manager.rename_session(session_id, name)
     return HTMLResponse(content="", headers={"HX-Trigger": "sessionsChanged"})
 
+@router.post("/settings/save")
+async def save_chat_settings(request: Request, auto_rename_turns: int = Form(...)):
+    module_manager = request.app.state.module_manager
+    chat_module = module_manager.modules.get("chat")
+    if not chat_module:
+        return Response(status_code=404)
+        
+    config = chat_module.get("config", {}).copy()
+    config["auto_rename_turns"] = auto_rename_turns
+    
+    module_manager.update_module_config("chat", config)
+    
+    return Response(status_code=200, headers={"HX-Trigger": json.dumps({"showMessage": {"level": "success", "message": "Chat settings saved"}})})
+
 @router.post("/send", response_class=HTMLResponse)
 async def send_message(
     request: Request,
     message: str = Form(...),
-    session_id: str = Query(None)
+    session_id: str = Query(None),
+    llm: LLMBridge = Depends(get_llm_bridge)
 ):
     if not session_id:
         return HTMLResponse("Error: No session selected", status_code=400)
@@ -127,11 +130,45 @@ async def send_message(
     # Add AI response to history
     session_manager.add_message(session_id, "assistant", ai_response)
 
+    # --- Auto-Renaming Logic ---
+    # Get config for auto-rename turns
+    module_manager = request.app.state.module_manager
+    chat_module = module_manager.modules.get("chat")
+    config = chat_module.get("config", {}) if chat_module else {}
+    auto_rename_turns = int(config.get("auto_rename_turns", 3))
+
+    if len(active_session["history"]) == auto_rename_turns * 2 and active_session["name"].startswith("Session "):
+        try:
+            # Construct a prompt to summarize the conversation
+            # We use the first user message and the AI response
+            user_text = active_session["history"][0]["content"]
+            ai_text = active_session["history"][1]["content"]
+            
+            # Truncate to avoid huge context if messages are long
+            summary_context = f"User: {user_text[:500]}\nAI: {ai_text[:500]}"
+            
+            prompt = f"Generate a short, concise title (3-5 words) for this conversation based on the start:\n\n{summary_context}\n\nTitle:"
+            
+            # Call LLM for title generation
+            title_response = await llm.chat_completion(
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.7,
+                max_tokens=15
+            )
+            
+            if "choices" in title_response:
+                new_title = title_response["choices"][0]["message"]["content"].strip().strip('"')
+                if new_title and len(new_title) < 50:
+                    session_manager.rename_session(session_id, new_title)
+        except Exception as e:
+            print(f"Auto-rename failed: {e}")
+
     return templates.TemplateResponse(
         request, 
         "chat_message_pair.html", 
         {
             "user_message": message,
             "ai_response": ai_response
-        }
+        },
+        headers={"HX-Trigger": "sessionsChanged"}
     )

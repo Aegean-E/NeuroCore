@@ -8,9 +8,11 @@
     "order": 3,
     "config": {
         "recall_limit": 3,
-        "recall_min_score": 0.0,
-        "save_confidence_threshold": 0.75,
-        "save_default_confidence": 1.0
+        "recall_min_score": 0.8,
+        "save_confidence_threshold": 0.85,
+        "save_default_confidence": 1.0,
+        "consolidation_threshold": 0.92,
+        "auto_consolidation_hours": 24
     },
     "provides_nodes": [
         {

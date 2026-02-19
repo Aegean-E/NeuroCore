@@ -1,21 +1,33 @@
 import asyncio
 import json
 import os
+import time
 from core.llm import LLMBridge
 from core.settings import settings
 from .backend import memory_store
 from .arbiter import MemoryArbiter
+from .consolidation import MemoryConsolidator
+
+class ConfigLoader:
+    _cache = {"mtime": 0, "data": {}}
+    _path = os.path.join(os.path.dirname(__file__), "module.json")
+
+    @classmethod
+    def get_config(cls):
+        try:
+            if os.path.exists(cls._path):
+                mtime = os.path.getmtime(cls._path)
+                if mtime > cls._cache["mtime"]:
+                    with open(cls._path, "r") as f:
+                        cls._cache["data"] = json.load(f).get("config", {})
+                    cls._cache["mtime"] = mtime
+        except Exception as e:
+            print(f"Error loading memory config: {e}")
+        return cls._cache["data"]
 
 class MemoryRecallExecutor:
     def __init__(self):
-        self.config = {}
-        try:
-            module_path = os.path.join(os.path.dirname(__file__), "module.json")
-            if os.path.exists(module_path):
-                with open(module_path, "r") as f:
-                    self.config = json.load(f).get("config", {})
-        except Exception as e:
-            print(f"Error loading memory config: {e}")
+        self.config = ConfigLoader.get_config()
 
     async def receive(self, input_data: dict, config: dict = None) -> dict:
         config = config or {}
@@ -43,13 +55,23 @@ class MemoryRecallExecutor:
             return input_data
 
         # Search memory
+        limit_val = config.get("limit")
+        if limit_val is None:
+            limit_val = self.config.get("recall_limit", 3)
         try:
-            limit = int(config.get("limit") or self.config.get("recall_limit", 3))
+            limit = int(limit_val)
+            if limit < 1:
+                limit = 1
         except (ValueError, TypeError):
             limit = 3
-            
+
+        min_score_val = config.get("min_score")
+        if min_score_val is None:
+            min_score_val = self.config.get("recall_min_score", 0.0)
         try:
-            min_score = float(config.get("min_score") or self.config.get("recall_min_score", 0.0))
+            min_score = float(min_score_val)
+            if min_score < 0.0: min_score = 0.0
+            if min_score > 1.0: min_score = 1.0
         except (ValueError, TypeError):
             min_score = 0.0
 
@@ -79,14 +101,7 @@ class MemoryRecallExecutor:
 class MemorySaveExecutor:
     def __init__(self):
         # Load config from module.json to ensure we have the latest settings
-        self.config = {}
-        try:
-            module_path = os.path.join(os.path.dirname(__file__), "module.json")
-            if os.path.exists(module_path):
-                with open(module_path, "r") as f:
-                    self.config = json.load(f).get("config", {})
-        except Exception as e:
-            print(f"Error loading memory config: {e}")
+        self.config = ConfigLoader.get_config()
         self.arbiter = MemoryArbiter(memory_store, config=self.config)
 
     async def _save_background(self, text: str, subject: str = "User", confidence: float = 1.0):
@@ -138,18 +153,35 @@ class MemorySaveExecutor:
                 text_to_save = last_user_msg["content"]
                 subject = "User"
 
-        try:
-            confidence = float(config.get("confidence") if config.get("confidence") is not None else self.config.get("save_default_confidence", 1.0))
-        except (ValueError, TypeError):
-            confidence = float(self.config.get("save_default_confidence", 1.0))
+        # Determine default confidence
+        # We default Assistant memories to 0.5 so they are filtered out by the default 0.85 threshold.
+        # User memories remain at 1.0 (or configured default).
+        base_default = float(self.config.get("save_default_confidence", 1.0))
+        default_conf = min(base_default, 0.5) if subject == "Assistant" else base_default
 
-        if text_to_save and len(text_to_save) > 1:
+        try:
+            confidence = float(config.get("confidence") if config.get("confidence") is not None else default_conf)
+        except (ValueError, TypeError):
+            confidence = default_conf
+
+        if text_to_save and len(text_to_save.strip()) > 10:
             # Fire and forget: Don't block the flow for embedding generation
             asyncio.create_task(self._save_background(
                 text_to_save, 
                 subject=subject, 
                 confidence=confidence
             ))
+            
+            # Auto-Consolidation Check
+            try:
+                auto_hours = float(self.config.get("auto_consolidation_hours", 24))
+                if auto_hours > 0:
+                    if time.time() - memory_store.last_consolidation_ts > (auto_hours * 3600):
+                        print("⏳ Triggering Auto-Consolidation...")
+                        memory_store.last_consolidation_ts = time.time()
+                        asyncio.create_task(MemoryConsolidator(config=self.config).run())
+            except Exception as e:
+                print(f"Auto-consolidation check failed: {e}")
 
         return input_data
 

@@ -25,11 +25,13 @@ class SessionManager:
 
     def create_session(self, name=None):
         session_id = str(uuid.uuid4())
+        now = datetime.now().isoformat()
         self.sessions[session_id] = {
             "id": session_id,
             "name": name or f"Session {datetime.now().strftime('%Y-%m-%d %H:%M')}",
             "history": [],
-            "created_at": datetime.now().isoformat()
+            "created_at": now,
+            "updated_at": now
         }
         self._save_sessions()
         return self.sessions[session_id]
@@ -52,12 +54,13 @@ class SessionManager:
         return False
 
     def list_sessions(self):
-        # Return sorted by creation date (newest first)
-        return sorted(self.sessions.values(), key=lambda x: x['created_at'], reverse=True)
+        # Return sorted by updated_at date (newest activity first)
+        return sorted(self.sessions.values(), key=lambda x: x.get('updated_at', x['created_at']), reverse=True)
 
     def add_message(self, session_id, role, content):
         if session_id in self.sessions:
             self.sessions[session_id]["history"].append({"role": role, "content": content})
+            self.sessions[session_id]["updated_at"] = datetime.now().isoformat()
             self._save_sessions()
             return True
         return False

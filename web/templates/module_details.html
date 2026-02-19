@@ -54,11 +54,13 @@
                     <label class="block text-sm font-medium text-slate-400 mb-2">Temperature</label>
                     <input type="number" step="0.1" name="temperature" value="{{ module.config.temperature }}" 
                            class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all">
+                    <p class="text-xs text-slate-500 mt-2">Controls randomness (0.0 to 2.0). Lower values (e.g., 0.2) are focused and deterministic; higher values (e.g., 0.8) are more creative and varied.</p>
                 </div>
                 <div>
                     <label class="block text-sm font-medium text-slate-400 mb-2">Max Tokens</label>
                     <input type="number" name="max_tokens" value="{{ module.config.max_tokens }}" 
                            class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all">
+                    <p class="text-xs text-slate-500 mt-2">The maximum number of tokens to generate. Limits the length of the AI's response (1000 tokens ≈ 750 words).</p>
                 </div>
             </div>
             <div class="mt-4 flex justify-end">
@@ -68,51 +70,78 @@
     </div>
     {% endif %}
 
-    {% if module.id == 'memory' and module.enabled %}
+    {% if module.id == 'chat' and module.enabled %}
     <div class="bg-slate-900 rounded-xl border border-slate-800 p-6 mt-6">
-        <h3 class="font-semibold text-lg mb-4">Persistence Settings</h3>
-        <form hx-post="/memory/settings/persistence" 
+        <h3 class="font-semibold text-lg mb-4">Chat Settings</h3>
+        <form hx-post="/chat/settings/save" 
               hx-swap="none"
               hx-on::after-request="const btn = this.querySelector('button[type=submit]'); const orig = btn.innerText; btn.innerText = 'Saved!'; btn.classList.remove('bg-blue-600', 'hover:bg-blue-500'); btn.classList.add('bg-emerald-600', 'hover:bg-emerald-500'); setTimeout(() => { btn.innerText = orig; btn.classList.add('bg-blue-600', 'hover:bg-blue-500'); btn.classList.remove('bg-emerald-600', 'hover:bg-emerald-500'); }, 2000);">
             
             <div>
-                <label class="block text-sm font-medium text-slate-400 mb-2">Save Confidence Threshold</label>
-                <input type="number" name="save_confidence_threshold" value="{{ module.config.save_confidence_threshold }}" step="0.05" min="0.0" max="1.0"
+                <label class="block text-sm font-medium text-slate-400 mb-2">Auto-Rename Turns</label>
+                <input type="number" name="auto_rename_turns" value="{{ module.config.auto_rename_turns }}" min="1" max="20"
                        class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all">
-                <p class="text-xs text-slate-500 mt-2">The minimum reliability score (0.0-1.0) required to store a memory. If an upstream node assigns a confidence lower than this, the memory is rejected.</p>
+                <p class="text-xs text-slate-500 mt-2">Number of conversation turns (User + AI) before automatically generating a session title.</p>
             </div>
-
             <div class="mt-4 flex justify-end">
-                <button type="submit" class="bg-blue-600 hover:bg-blue-500 text-white px-6 py-2 rounded-lg text-sm font-semibold transition-colors">Save Persistence Settings</button>
+                <button type="submit" class="bg-blue-600 hover:bg-blue-500 text-white px-6 py-2 rounded-lg text-sm font-semibold transition-colors">Save Chat Settings</button>
             </div>
         </form>
     </div>
+    {% endif %}
 
+    {% if module.id == 'memory' and module.enabled %}
     <div class="bg-slate-900 rounded-xl border border-slate-800 p-6 mt-6">
-        <h3 class="font-semibold text-lg mb-4">Recall Settings</h3>
-        <form hx-post="/memory/settings/recall" 
+        <h3 class="font-semibold text-lg mb-4">Long-Term Memory Settings</h3>
+        <form hx-post="/memory/settings/save" 
               hx-swap="none"
               hx-on::after-request="const btn = this.querySelector('button[type=submit]'); const orig = btn.innerText; btn.innerText = 'Saved!'; btn.classList.remove('bg-blue-600', 'hover:bg-blue-500'); btn.classList.add('bg-emerald-600', 'hover:bg-emerald-500'); setTimeout(() => { btn.innerText = orig; btn.classList.add('bg-blue-600', 'hover:bg-blue-500'); btn.classList.remove('bg-emerald-600', 'hover:bg-emerald-500'); }, 2000);">
             
-            <div class="grid grid-cols-2 gap-6">
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div>
+                    <label class="block text-sm font-medium text-slate-400 mb-2">Save Confidence Threshold</label>
+                    <input type="number" name="save_confidence_threshold" value="{{ module.config.save_confidence_threshold }}" step="0.05" min="0.0" max="1.0"
+                           class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all">
+                    <p class="text-xs text-slate-500 mt-2">Determines how certain the AI must be before saving a new memory (0.0 to 1.0). Higher values prevent saving uncertain information.</p>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-slate-400 mb-2">Consolidation Threshold</label>
+                    <input type="number" name="consolidation_threshold" value="{{ module.config.consolidation_threshold }}" step="0.01" min="0.5" max="1.0"
+                           class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all">
+                    <p class="text-xs text-slate-500 mt-2">Determines how similar two memories must be to be merged (0.5 to 1.0). Higher values require near-exact matches.</p>
+                </div>
                 <div>
                     <label class="block text-sm font-medium text-slate-400 mb-2">Recall Limit</label>
                     <input type="number" name="recall_limit" value="{{ module.config.recall_limit }}" min="1" max="20"
                            class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all">
-                    <p class="text-xs text-slate-500 mt-2">Maximum number of memories to retrieve per query.</p>
+                    <p class="text-xs text-slate-500 mt-2">The maximum number of past memories to bring into the current conversation context.</p>
                 </div>
                 <div>
                     <label class="block text-sm font-medium text-slate-400 mb-2">Minimum Score</label>
                     <input type="number" name="recall_min_score" value="{{ module.config.recall_min_score }}" step="0.05" min="0.0" max="1.0"
                            class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all">
-                    <p class="text-xs text-slate-500 mt-2">Similarity threshold (0.0 to 1.0). Higher is stricter.</p>
+                    <p class="text-xs text-slate-500 mt-2">Determines how relevant a memory must be to the current topic to be recalled (0.0 to 1.0). Higher values filter out loosely related memories.</p>
                 </div>
             </div>
 
             <div class="mt-4 flex justify-end">
-                <button type="submit" class="bg-blue-600 hover:bg-blue-500 text-white px-6 py-2 rounded-lg text-sm font-semibold transition-colors">Save Recall Settings</button>
+                <button type="submit" class="bg-blue-600 hover:bg-blue-500 text-white px-6 py-2 rounded-lg text-sm font-semibold transition-colors">Save Long-Term Memory Settings</button>
             </div>
         </form>
+    </div>
+
+    <div class="bg-slate-900 rounded-xl border border-slate-800 p-6 mt-6">
+        <h3 class="font-semibold text-lg mb-4">Maintenance</h3>
+        
+        <form hx-post="/memory/settings/save" hx-swap="none" class="mb-2">
+                <label class="block text-sm font-medium text-slate-400 mb-2">Auto-Consolidation (Hours)</label>
+                <div class="flex space-x-2">
+                    <input type="number" name="auto_consolidation_hours" value="{{ module.config.auto_consolidation_hours }}" step="0.5" min="0"
+                           class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all">
+                    <button type="submit" class="bg-slate-800 hover:bg-slate-700 text-slate-300 px-4 py-2 rounded-xl text-sm font-semibold transition-colors border border-slate-700">Save</button>
+                </div>
+        </form>
+        <p class="text-xs text-slate-500">Merges semantically identical memories to improve recall quality and performance. Set hours to 0 to disable auto-run.</p>
     </div>
 
     <div class="bg-slate-900 rounded-xl border border-slate-800 p-6 mt-6">

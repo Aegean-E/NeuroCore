@@ -31,8 +31,27 @@ class LLMExecutor:
 
         model = config.get("model") or input_data.get("model")
         
-        temperature = float(config.get("temperature") or input_data.get("temperature") or self.module_config.get("temperature", 0.7))
-        max_tokens = int(config.get("max_tokens") or input_data.get("max_tokens") or self.module_config.get("max_tokens", 2048))
+        # Helper to resolve priority: config > input_data > module_config > default
+        # Handles 0 values correctly (unlike 'or' operator)
+        def get_val(key, default, type_cast=None):
+            val = config.get(key)
+            if val is None:
+                val = input_data.get(key)
+            if val is None:
+                val = self.module_config.get(key)
+            
+            if val is None:
+                return default
+                
+            if type_cast:
+                try:
+                    return type_cast(val)
+                except (ValueError, TypeError):
+                    return default
+            return val
+
+        temperature = get_val("temperature", 0.7, float)
+        max_tokens = get_val("max_tokens", 2048, int)
         
         # Return the result of the core logic
         return await llm_bridge.chat_completion(

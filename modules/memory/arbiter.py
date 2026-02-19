@@ -30,7 +30,7 @@ class MemoryArbiter:
         Returns memory_id if stored, None otherwise.
         """
         # 1. Confidence Gate
-        min_conf = float(self.config.get("save_confidence_threshold", 0.75))
+        min_conf = float(self.config.get("save_confidence_threshold", 0.85))
         if confidence < min_conf:
             print(f"❌ [Arbiter] Confidence gate failed: {confidence} < {min_conf}")
             return None

@@ -29,6 +29,7 @@ class MemoryStore:
         self.faiss_lock = threading.Lock()
         self.unsaved_changes = 0
         self.save_threshold = 20  # Save index to disk after 20 changes
+        self.last_consolidation_ts = 0 # Track last consolidation time
         self._init_db()
         
         self.faiss_index = None
@@ -63,7 +64,8 @@ class MemoryStore:
                     confidence REAL NOT NULL,
                     created_at INTEGER NOT NULL,
                     embedding TEXT,
-                    deleted INTEGER DEFAULT 0
+                    deleted INTEGER DEFAULT 0,
+                    parent_id INTEGER DEFAULT NULL
                 )
             """)
             con.execute("CREATE INDEX IF NOT EXISTS idx_identity ON memories(identity);")
@@ -72,6 +74,10 @@ class MemoryStore:
             # Migration: Add subject column if it doesn't exist
             try:
                 con.execute("ALTER TABLE memories ADD COLUMN subject TEXT DEFAULT 'User'")
+            except sqlite3.OperationalError:
+                pass
+            try:
+                con.execute("ALTER TABLE memories ADD COLUMN parent_id INTEGER DEFAULT NULL")
             except sqlite3.OperationalError:
                 pass
 
@@ -113,7 +119,7 @@ class MemoryStore:
         """Ensures FAISS index count matches DB count on startup."""
         if not FAISS_AVAILABLE or not self.faiss_index: return
         with self._connect() as con:
-            db_count = con.execute("SELECT COUNT(*) FROM memories WHERE deleted = 0 AND embedding IS NOT NULL").fetchone()[0]
+            db_count = con.execute("SELECT COUNT(*) FROM memories WHERE deleted = 0 AND parent_id IS NULL AND embedding IS NOT NULL").fetchone()[0]
         
         if self.faiss_index.ntotal != db_count:
             print(f"Memory Index out of sync (Index: {self.faiss_index.ntotal}, DB: {db_count}). Rebuilding...")
@@ -124,7 +130,7 @@ class MemoryStore:
         with self.faiss_lock:
             try:
                 with self._connect() as con:
-                    rows = con.execute("SELECT id, embedding FROM memories WHERE deleted = 0 AND embedding IS NOT NULL").fetchall()
+                    rows = con.execute("SELECT id, embedding FROM memories WHERE deleted = 0 AND parent_id IS NULL AND embedding IS NOT NULL ORDER BY id ASC").fetchall()
                 
                 embeddings = []
                 ids = []
@@ -163,7 +169,7 @@ class MemoryStore:
         with self.write_lock:
             with self._connect() as con:
                 # Check for duplicates
-                exists = con.execute("SELECT 1 FROM memories WHERE identity = ? AND deleted = 0", (identity,)).fetchone()
+                exists = con.execute("SELECT 1 FROM memories WHERE identity = ? AND deleted = 0 AND parent_id IS NULL", (identity,)).fetchone()
                 if exists:
                     return -1
 
@@ -181,6 +187,20 @@ class MemoryStore:
                     self._save_faiss_index()
             
             return row_id
+
+    def set_parent(self, child_id: int, parent_id: int):
+        """Links a memory to a parent, effectively archiving the child as an older version."""
+        with self.write_lock:
+            with self._connect() as con:
+                con.execute("UPDATE memories SET parent_id = ? WHERE id = ?", (parent_id, child_id))
+                # We do NOT delete the child. It remains for audit trails.
+                # The search method filters out items with parent_id IS NOT NULL.
+            
+            # Remove from FAISS so it doesn't pollute search results
+            if FAISS_AVAILABLE and self.faiss_index:
+                with self.faiss_lock:
+                    self.faiss_index.remove_ids(np.array([child_id]).astype('int64'))
+                    self._save_faiss_index()
 
     def search(self, query_embedding: List[float], limit: int = 5) -> List[Dict]:
         if not query_embedding: return []
@@ -208,7 +228,7 @@ class MemoryStore:
         else:
             try:
                 with self._connect() as con:
-                    rows = con.execute("SELECT id, embedding FROM memories WHERE deleted = 0 AND embedding IS NOT NULL").fetchall()
+                    rows = con.execute("SELECT id, embedding FROM memories WHERE deleted = 0 AND parent_id IS NULL AND embedding IS NOT NULL").fetchall()
                 
                 # Normalize query
                 q_norm = np.linalg.norm(q_emb_np)
@@ -238,7 +258,7 @@ class MemoryStore:
             
             placeholders = ','.join(['?'] * len(top_ids))
             with self._connect() as con:
-                rows = con.execute(f"SELECT id, text, created_at FROM memories WHERE id IN ({placeholders}) AND deleted = 0", top_ids).fetchall()
+                rows = con.execute(f"SELECT id, text, created_at FROM memories WHERE id IN ({placeholders}) AND deleted = 0 AND parent_id IS NULL", top_ids).fetchall()
             
             for r in rows:
                 mid = r[0]
@@ -257,14 +277,14 @@ class MemoryStore:
 
     def get_recent(self, limit: int = 20) -> List[Dict]:
         with self._connect() as con:
-            rows = con.execute("SELECT id, text, created_at FROM memories WHERE deleted = 0 ORDER BY created_at DESC LIMIT ?", (limit,)).fetchall()
+            rows = con.execute("SELECT id, text, created_at FROM memories WHERE deleted = 0 AND parent_id IS NULL ORDER BY created_at DESC LIMIT ?", (limit,)).fetchall()
         return [{"id": r[0], "text": r[1], "created_at": r[2]} for r in rows]
 
     def browse(self, limit: int = 50, offset: int = 0, search_text: str = None, filter_date: str = "ALL") -> List[Dict]:
         """
         Retrieves memories with optional filtering for the Memory Browser UI.
         """
-        query = "SELECT id, subject, text, confidence, created_at FROM memories WHERE deleted = 0"
+        query = "SELECT id, subject, text, confidence, created_at, parent_id FROM memories WHERE deleted = 0 AND parent_id IS NULL"
         params = []
         
         if filter_date == "TODAY":
@@ -296,7 +316,8 @@ class MemoryStore:
                 "subject": r[1],
                 "text": r[2],
                 "confidence": r[3],
-                "created_at": r[4]
+                "created_at": r[4],
+                "is_consolidated": r[5] is not None
             }
             for r in rows
         ]
@@ -304,7 +325,7 @@ class MemoryStore:
     def delete_entry(self, memory_id: int):
         with self.write_lock:
             with self._connect() as con:
-                con.execute("UPDATE memories SET deleted = 1 WHERE id = ?", (memory_id,))
+                con.execute("DELETE FROM memories WHERE id = ?", (memory_id,))
             
             if FAISS_AVAILABLE and self.faiss_index:
                 with self.faiss_lock:
@@ -330,6 +351,14 @@ class MemoryStore:
             row = con.execute("SELECT COUNT(*) FROM memories WHERE deleted = 1").fetchone()
             stats['archived'] = row[0] if row else 0
             
+            # Deleted (Hard deleted items cannot be counted, returning 0 for UI consistency)
+            stats['deleted'] = 0
+            
+            # Consolidated (Hidden)
+            row = con.execute("SELECT COUNT(*) FROM memories WHERE deleted = 0 AND parent_id IS NOT NULL").fetchone()
+            stats['consolidated'] = row[0] if row else 0
+            
+        stats['grand_total'] = stats['total'] + stats['archived']
         return stats
 
 # Global Instance

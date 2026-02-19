@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Request, Query
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, Response
 from fastapi.templating import Jinja2Templates
+import json
 from modules.memory.backend import memory_store
 from datetime import datetime
 
@@ -30,7 +31,7 @@ async def list_memories(
     memories = memory_store.browse(search_text=q, filter_date=filter_date, limit=50)
     return templates.TemplateResponse(request, "memory_list.html", {"memories": memories})
 
-@router.delete("/delete/{memory_id}", response_class=HTMLResponse)
+@router.delete("/delete/{memory_id}")
 async def delete_memory(request: Request, memory_id: int):
     memory_store.delete_entry(memory_id)
-    return ""
+    return Response(status_code=200, headers={"HX-Trigger": json.dumps({"showMessage": {"level": "info", "message": "Memory deleted"}})})
