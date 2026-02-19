@@ -9,7 +9,7 @@ DEFAULT_SETTINGS = {
     "default_model": "local-model",
     "temperature": 0.7,
     "max_tokens": 2048,
-    "active_ai_flow": None
+    "active_ai_flow": "default-flow-001"
 }
 
 class SettingsManager:

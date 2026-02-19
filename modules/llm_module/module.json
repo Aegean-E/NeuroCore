@@ -6,5 +6,5 @@
     "is_flow_node": true,
     "order": 1,
     "singleton": true,
-    "configurable": true
+    "configurable": false
 }

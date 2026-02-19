@@ -80,6 +80,9 @@
                     <button onclick="centerCanvas()" class="w-full bg-slate-700 hover:bg-slate-600 text-white px-4 py-2 rounded-lg text-sm font-semibold transition-all">
                         Center
                     </button>
+                    <button onclick="deleteSelectedConnection()" id="btn-break-line" class="col-span-2 w-full bg-slate-700 hover:bg-red-600 text-white px-4 py-2 rounded-lg text-sm font-semibold transition-all opacity-50 cursor-not-allowed" disabled>
+                        Break Connection
+                    </button>
                 </div>
             </div>
             <div class="border-t border-slate-800 pt-4 mt-4">
@@ -235,6 +238,7 @@
         let connections = [];
         let nextNodeId = 0;
         let activeConfigNodeId = null;
+        let selectedConnection = null;
         
         let panX = 0, panY = 0, zoom = 1;
         let isPanning = false;
@@ -309,6 +313,13 @@
             if (event.button === 1 || (event.button === 0 && (event.target === canvas || event.target.id === 'node-container'))) {
                 isPanning = true;
                 canvas.style.cursor = 'grabbing';
+                
+                // Deselect connection if clicking on empty space
+                if (selectedConnection) {
+                    selectedConnection = null;
+                    drawConnections();
+                }
+                
                 event.preventDefault();
             }
             if (isDrawingConnection && event.target === canvas) {
@@ -328,6 +339,13 @@
             if (isPanning) {
                 isPanning = false;
                 canvas.style.cursor = 'default';
+            }
+        });
+
+        // Global Keydown for Deletion
+        window.addEventListener('keydown', (event) => {
+            if ((event.key === 'Delete' || event.key === 'Backspace') && selectedConnection) {
+                deleteSelectedConnection();
             }
         });
 
@@ -359,7 +377,7 @@
             // We check !existingId to ensure this rule only applies when a user drags a new node.
             if (!existingId && singletonNodeTypeIds.has(nodeTypeId)) {
                 if (nodes.some(n => n.nodeTypeId === nodeTypeId)) {
-                    alert(`Only one "${name}" node can be added to a flow.`);
+                    showToast(`Only one "${name}" node can be added to a flow.`, 'error');
                     return;
                 }
             }
@@ -548,7 +566,7 @@
                 centerCanvas();
             } catch (error) {
                 console.error(error);
-                alert(error.message);
+                showToast(error.message, 'error');
             }
         }
 
@@ -558,6 +576,7 @@
             }
             nodes = [];
             connections = [];
+            selectedConnection = null;
             nodeAndSvgContainer.querySelectorAll('.absolute.bg-slate-950').forEach(el => el.remove());
             drawConnections();
             nextNodeId = 0;
@@ -582,6 +601,7 @@
             }
 
             connections = connections.filter(c => c.from !== nodeId && c.to !== nodeId);
+            if (selectedConnection && (selectedConnection.from === nodeId || selectedConnection.to === nodeId)) selectedConnection = null;
             drawConnections();
         }
 
@@ -699,6 +719,15 @@
             closeClearModal();
         }
 
+        window.deleteSelectedConnection = function() {
+            if (selectedConnection) {
+                connections = connections.filter(c => c !== selectedConnection);
+                selectedConnection = null;
+                drawConnections();
+                showToast('Connection removed', 'info');
+            }
+        }
+
         // --- Config Modal Logic ---
         window.openConfigModal = function(nodeId) {
             activeConfigNodeId = nodeId;
@@ -742,7 +771,7 @@
                 if (node) node.config = config;
                 closeConfigModal();
             } catch (e) {
-                alert("Invalid JSON: " + e.message);
+                showToast("Invalid JSON: " + e.message, 'error');
             }
         }
 
@@ -828,12 +857,46 @@
                 const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
                 const d = `M ${startX} ${startY} C ${startX + 50} ${startY}, ${endX - 50} ${endY}, ${endX} ${endY}`;
                 path.setAttribute('d', d);
-                path.setAttribute('stroke', '#475569');
+                
+                // Styling based on selection
+                if (selectedConnection === conn) {
+                    path.setAttribute('stroke', '#ef4444'); // Red
+                    path.setAttribute('stroke-dasharray', '5,5');
+                } else {
+                    path.setAttribute('stroke', '#475569'); // Slate-600
+                }
+                
                 path.setAttribute('stroke-width', '2');
                 path.setAttribute('fill', 'none');
                 path.style.pointerEvents = 'none';
                 svg.appendChild(path);
+
+                // Invisible Hit Path for Selection
+                const hitPath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+                hitPath.setAttribute('d', d);
+                hitPath.setAttribute('stroke', 'transparent');
+                hitPath.setAttribute('stroke-width', '20');
+                hitPath.setAttribute('fill', 'none');
+                hitPath.style.cursor = 'pointer';
+                hitPath.style.pointerEvents = 'stroke';
+                hitPath.onclick = (e) => {
+                    e.stopPropagation();
+                    selectedConnection = conn;
+                    drawConnections();
+                };
+                svg.appendChild(hitPath);
             });
+            
+            const breakBtn = document.getElementById('btn-break-line');
+            if (breakBtn) {
+                if (selectedConnection) {
+                    breakBtn.disabled = false;
+                    breakBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+                } else {
+                    breakBtn.disabled = true;
+                    breakBtn.classList.add('opacity-50', 'cursor-not-allowed');
+                }
+            }
         }
 
     })();

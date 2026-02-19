@@ -1,6 +1,6 @@
 import json
-from fastapi import APIRouter, Request, Form, Depends, HTTPException
-from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
+from fastapi import APIRouter, Request, Form, Depends, HTTPException, Response
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 
 from core.settings import SettingsManager, settings
@@ -62,7 +62,7 @@ async def toggle_module(request: Request, module_id: str, action: str, module_ma
         raise HTTPException(status_code=404, detail="Module not found")
     
     return templates.TemplateResponse(
-        request, "module_details.html", {"module": module}, headers={"HX-Trigger": "modulesChanged"}
+        request, "module_details.html", {"module": module}, headers={"HX-Trigger": json.dumps({"modulesChanged": None, "showMessage": {"level": "success", "message": f"Module {action}d"}})}
     )
 
 # --- AI Flow ---
@@ -88,10 +88,11 @@ async def save_ai_flow(request: Request, name: str = Form(...), nodes: str = For
     if not flow_id:
         flow_id = None
     flow_manager.save_flow(name=name, nodes=json.loads(nodes), connections=json.loads(connections), flow_id=flow_id)
+    
     return templates.TemplateResponse(request, "ai_flow_list.html", {
         "flows": flow_manager.list_flows(),
         "active_flow_id": settings.get("active_ai_flow")
-    })
+    }, headers={"HX-Trigger": json.dumps({"showMessage": {"level": "success", "message": "Flow saved successfully"}})})
 
 @router.post("/ai-flow/{flow_id}/rename", response_class=HTMLResponse)
 async def rename_flow(request: Request, flow_id: str, name: str = Form(...), settings_man: SettingsManager = Depends(get_settings_manager)):
@@ -134,4 +135,4 @@ async def save_settings_route(llm_api_url: str = Form(...), llm_api_key: str = F
         "default_model": default_model,
         "temperature": temperature, "max_tokens": max_tokens
     })
-    return RedirectResponse(url="/settings", status_code=303)
+    return Response(status_code=200, headers={"HX-Trigger": json.dumps({"showMessage": {"level": "success", "message": "Settings saved successfully"}})})

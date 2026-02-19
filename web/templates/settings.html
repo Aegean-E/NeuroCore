@@ -15,7 +15,7 @@
         <div class="bg-slate-950/50 rounded-2xl border border-slate-800 shadow-2xl p-8">
             <h2 class="text-2xl font-bold mb-6">System Settings</h2>
             
-            <form action="/settings/save" method="POST" class="space-y-6">
+            <form hx-post="/settings/save" hx-swap="none" class="space-y-6">
                 <div>
                     <label class="block text-sm font-medium text-slate-400 mb-2">LLM API URL</label>
                     <input type="text" name="llm_api_url" value="{{ settings.llm_api_url }}" 

@@ -1,0 +1,10 @@
+{
+    "name": "System Prompt",
+    "description": "Injects a system instruction/persona into the conversation context.",
+    "enabled": true,
+    "id": "system_prompt",
+    "is_flow_node": true,
+    "order": 2,
+    "singleton": false,
+    "configurable": true
+}
