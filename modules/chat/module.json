@@ -10,13 +10,15 @@
             "id": "chat_input",
             "name": "Chat Input",
             "description": "Provides user input and chat history to the flow.",
-            "singleton": true
+            "singleton": true,
+            "configurable": false
         },
         {
             "id": "chat_output",
             "name": "Chat Output",
             "description": "Receives the final data and formats it for the chat response.",
-            "singleton": true
+            "singleton": true,
+            "configurable": false
         }
     ]
 }

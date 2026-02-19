@@ -5,6 +5,10 @@ from .flow_manager import flow_manager
 class FlowRunner:
     _executor_cache = {}
 
+    @classmethod
+    def clear_cache(cls):
+        cls._executor_cache.clear()
+
     def __init__(self, flow_id: str):
         self.flow = flow_manager.get_flow(flow_id)
         if not self.flow:
@@ -65,7 +69,8 @@ class FlowRunner:
                 
                 executor = executor_class()
 
-                processed_data = await executor.receive(current_data)
+                node_config = node_meta.get('config', {})
+                processed_data = await executor.receive(current_data, config=node_config)
                 current_data = await executor.send(processed_data)
 
             except (ImportError, AttributeError) as e:

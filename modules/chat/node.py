@@ -2,7 +2,7 @@ class ChatInputExecutor:
     """
     Node to start a flow with chat data.
     """
-    async def receive(self, input_data: dict) -> dict:
+    async def receive(self, input_data: dict, config: dict = None) -> dict:
         # This node's main job is to start the flow, so receive just accepts the data.
         return input_data
 
@@ -16,7 +16,7 @@ class ChatOutputExecutor:
     """
     Node to format the final AI response for the chat UI.
     """
-    async def receive(self, input_data: dict) -> dict:
+    async def receive(self, input_data: dict, config: dict = None) -> dict:
         if "error" in input_data:
             return input_data
         try:

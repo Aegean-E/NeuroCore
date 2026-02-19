@@ -4,6 +4,7 @@ import importlib
 from fastapi import FastAPI
 from starlette.routing import Mount
 
+from core.flow_runner import FlowRunner
 MODULES_DIR = "modules"
 
 class ModuleManager:
@@ -51,9 +52,11 @@ class ModuleManager:
             if hasattr(module, "router"):
                 self.app.include_router(module.router, prefix=f"/{module_id}", tags=[module_id])
                 print(f"Hot-loaded module router: {module_id}")
+                self.modules[module_id]['load_error'] = None
                 return True
         except Exception as e:
             print(f"Failed to load module router for {module_id}: {e}")
+            self.modules[module_id]['load_error'] = str(e)
         return False
 
     def _unload_module_router(self, module_id: str):
@@ -91,6 +94,9 @@ class ModuleManager:
         meta_path = os.path.join(self.modules_dir, module_id, "module.json")
         with open(meta_path, "w") as f:
             json.dump(self.modules[module_id], f, indent=4)
+            
+        # Clear the FlowRunner cache to ensure no stale executor classes are used
+        FlowRunner.clear_cache()
 
         return self.modules[module_id]
 

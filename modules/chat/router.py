@@ -4,6 +4,8 @@ from core.settings import settings
 from core.dependencies import get_llm_bridge
 from modules.chat.sessions import session_manager
 from fastapi.templating import Jinja2Templates
+from core.flow_runner import FlowRunner
+from core.flow_manager import flow_manager
 
 router = APIRouter()
 templates = Jinja2Templates(directory="web/templates")
@@ -17,6 +19,7 @@ async def chat_page(request: Request):
     return templates.TemplateResponse(request, "index.html", {
         "modules": enabled_modules,
         "active_module": "chat",
+        "sidebar_template": "chat_sidebar.html",
         "sessions": session_manager.list_sessions()
     })
 
@@ -29,6 +32,7 @@ async def chat_page(request: Request):
     return templates.TemplateResponse(request, "index.html", {
         "modules": enabled_modules,
         "active_module": "chat",
+        "sidebar_template": "chat_sidebar.html",
         "sessions": session_manager.list_sessions()
     })
 
@@ -97,10 +101,6 @@ async def send_message(
     active_session = session_manager.get_session(session_id)
     
     # --- New AI Flow Execution Logic ---
-    from core.flow_runner import FlowRunner
-    from core.flow_manager import flow_manager
-
-    # Use the globally active AI Flow
     active_flow_id = settings.get("active_ai_flow")
     active_flow = flow_manager.get_flow(active_flow_id) if active_flow_id else None
 

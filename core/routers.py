@@ -84,8 +84,10 @@ async def get_flow_data(flow_id: str):
     return flow
 
 @router.post("/ai-flow/save")
-async def save_ai_flow(request: Request, name: str = Form(...), nodes: str = Form(...), connections: str = Form(...)):
-    flow_manager.save_flow(name=name, nodes=json.loads(nodes), connections=json.loads(connections))
+async def save_ai_flow(request: Request, name: str = Form(...), nodes: str = Form(...), connections: str = Form(...), flow_id: str = Form(None)):
+    if not flow_id:
+        flow_id = None
+    flow_manager.save_flow(name=name, nodes=json.loads(nodes), connections=json.loads(connections), flow_id=flow_id)
     return templates.TemplateResponse(request, "ai_flow_list.html", {
         "flows": flow_manager.list_flows(),
         "active_flow_id": settings.get("active_ai_flow")

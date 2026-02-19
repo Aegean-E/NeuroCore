@@ -2,7 +2,8 @@ from core.llm import LLMBridge
 from core.settings import settings
 
 class LLMExecutor:
-    async def receive(self, input_data: dict) -> dict:
+    async def receive(self, input_data: dict, config: dict = None) -> dict:
+        config = config or {}
         """
         Receives data from an upstream node (like Chat Input),
         and executes the core logic of this node (calling the LLM).
@@ -16,8 +17,8 @@ class LLMExecutor:
         if not messages:
             return {"error": "No 'messages' field provided in input_data for llm_module."}
 
-        model = input_data.get("model")
-        temperature = input_data.get("temperature")
+        model = config.get("model") or input_data.get("model")
+        temperature = config.get("temperature") or input_data.get("temperature")
         
         # Return the result of the core logic
         return await llm_bridge.chat_completion(

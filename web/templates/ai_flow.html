@@ -28,13 +28,23 @@
         <!-- Sidebar -->
         <aside class="w-72 flex-shrink-0 bg-slate-950/80 backdrop-blur-md border-r border-slate-800 p-4 flex flex-col space-y-4 overflow-y-auto">
             <div>
-                <h2 class="text-sm font-bold mb-3 uppercase tracking-widest text-slate-500">Available Functions</h2>
+                <div class="flex justify-between items-center mb-3">
+                    <h2 class="text-sm font-bold uppercase tracking-widest text-slate-500">Available Functions</h2>
+                    <button onclick="toggleDisabledModules()" id="toggle-disabled-btn" class="text-slate-600 hover:text-blue-400 transition-colors" title="Show/Hide Disabled Modules">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path></svg>
+                    </button>
+                </div>
                 <div class="space-y-2">
                     {% for module in modules %}
                         {% if module.provides_nodes or module.get('is_flow_node') %}
-                            <div class="bg-slate-900/50 rounded-xl border border-slate-800">
+                            <div class="bg-slate-900/50 rounded-xl border border-slate-800 {{ 'opacity-50 disabled-module-item hidden' if not module.enabled else '' }}">
                                 <button onclick="toggleModuleFunctions('{{ module.id }}')" class="w-full text-left px-4 py-3 flex justify-between items-center hover:bg-slate-800/50 rounded-t-xl transition-colors">
-                                    <span class="font-semibold text-sm">{{ module.name }}</span>
+                                    <span class="font-semibold text-sm flex items-center">
+                                        {{ module.name }}
+                                        {% if not module.enabled %}
+                                        <span class="ml-2 text-[10px] uppercase bg-slate-700 text-slate-400 px-1.5 py-0.5 rounded">Disabled</span>
+                                        {% endif %}
+                                    </span>
                                     <svg id="arrow-{{ module.id }}" class="w-4 h-4 text-slate-500 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
                                 </button>
                                 <div id="functions-{{ module.id }}" class="p-2 space-y-2 hidden border-t border-slate-800">
@@ -77,14 +87,19 @@
                 <form id="save-flow-form" 
                       hx-post="/ai-flow/save"
                       hx-target="#saved-flows-list"
-                      hx-swap="innerHTML"
-                      hx-on::before-request="populateHiddenFields(event)">
+                      hx-swap="innerHTML">
                     <input type="text" name="name" placeholder="Enter flow name..." required class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm mb-2 focus:outline-none focus:ring-2 focus:ring-blue-500">
                     <input type="hidden" name="nodes">
                     <input type="hidden" name="connections">
-                    <button type="submit" class="w-full bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-lg text-sm font-semibold transition-all">
-                        Save Flow
-                    </button>
+                    <input type="hidden" name="flow_id" id="current-flow-id">
+                    <div class="flex space-x-2">
+                        <button type="submit" onclick="document.getElementById('current-flow-id').value = ''; populateHiddenFields()" class="flex-grow bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-lg text-sm font-semibold transition-all">
+                            Save New
+                        </button>
+                        <button type="submit" id="update-flow-btn" onclick="populateHiddenFields()" class="flex-grow bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 rounded-lg text-sm font-semibold transition-all hidden">
+                            Update
+                        </button>
+                    </div>
                 </form>
             </div>
             <div id="saved-flows-list" class="border-t border-slate-800 pt-4 mt-4 flex-grow">
@@ -125,6 +140,28 @@
             <div class="mt-6 flex justify-end space-x-3">
                 <button type="button" onclick="closeDeleteModal()" class="rounded-xl px-4 py-2 text-sm font-semibold text-slate-300 hover:bg-slate-800 transition-colors">Cancel</button>
                 <button type="button" id="confirm-delete-btn" class="rounded-xl bg-red-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-red-500 transition-colors">Delete</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Node Configuration Modal -->
+    <div id="config-modal" class="fixed inset-0 z-50 flex items-center justify-center hidden" aria-labelledby="modal-title" role="dialog" aria-modal="true">
+        <div class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm transition-opacity opacity-0" id="config-modal-backdrop"></div>
+        <div class="relative transform overflow-hidden rounded-2xl bg-slate-900 border border-slate-800 text-left shadow-2xl transition-all scale-95 opacity-0 sm:w-full sm:max-w-lg p-6" id="config-modal-panel">
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="text-lg font-semibold leading-6 text-white">Node Configuration</h3>
+                <button onclick="closeConfigModal()" class="text-slate-500 hover:text-slate-300">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                </button>
+            </div>
+            <div class="mb-4">
+                <label class="block text-sm font-medium text-slate-400 mb-2">Configuration (JSON)</label>
+                <textarea id="node-config-input" rows="10" class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all custom-scrollbar"></textarea>
+                <p class="text-xs text-slate-500 mt-2">Enter valid JSON. Example: {"model": "gpt-4", "temperature": 0.5}</p>
+            </div>
+            <div class="flex justify-end space-x-3">
+                <button type="button" onclick="closeConfigModal()" class="rounded-xl px-4 py-2 text-sm font-semibold text-slate-300 hover:bg-slate-800 transition-colors">Cancel</button>
+                <button type="button" onclick="saveNodeConfig()" class="rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-500 transition-colors">Save Configuration</button>
             </div>
         </div>
     </div>
@@ -180,10 +217,24 @@
             {% endif %}
         {% endfor %}
 
+        const configurableNodeTypeIds = new Set();
+        {% for module in modules %}
+            {% if module.provides_nodes %}
+                {% for node in module.provides_nodes %}
+                    {% if node.get('configurable') %}
+                        configurableNodeTypeIds.add('{{ node.id }}');
+                    {% endif %}
+                {% endfor %}
+            {% elif module.get('is_flow_node') and module.get('configurable') %}
+                configurableNodeTypeIds.add('{{ module.id }}');
+            {% endif %}
+        {% endfor %}
+
         // --- State Variables ---
         let nodes = [];
         let connections = [];
         let nextNodeId = 0;
+        let activeConfigNodeId = null;
         
         let panX = 0, panY = 0, zoom = 1;
         let isPanning = false;
@@ -303,7 +354,7 @@
             createNode(data.moduleId, data.nodeName, data.nodeTypeId, x, y);
         }
 
-        function createNode(moduleId, name, nodeTypeId, x, y, existingId = null) {
+        function createNode(moduleId, name, nodeTypeId, x, y, existingId = null, existingConfig = {}) {
             // Rule: If a node is marked as a singleton, only one can exist in the flow.
             // We check !existingId to ensure this rule only applies when a user drags a new node.
             if (!existingId && singletonNodeTypeIds.has(nodeTypeId)) {
@@ -324,13 +375,21 @@
                 nodeId = `node-${nextNodeId++}`;
             }
 
+            const isConfigurable = configurableNodeTypeIds.has(nodeTypeId);
+
             const nodeElement = document.createElement('div');
             nodeElement.id = nodeId;
             nodeElement.className = 'absolute bg-slate-950 border border-slate-800 p-4 rounded-xl shadow-2xl cursor-move w-48';
             nodeElement.style.left = `${x}px`;
             nodeElement.style.top = `${y}px`;
             nodeElement.innerHTML = `
-                <div class="font-bold text-xs uppercase text-slate-500 mb-3 pointer-events-none">${name}</div>
+                <div class="flex justify-between items-start mb-3">
+                    <div class="font-bold text-xs uppercase text-slate-500 pointer-events-none">${name}</div>
+                    ${isConfigurable ? `
+                    <button class="text-slate-600 hover:text-blue-400 transition-colors config-btn" title="Configure Node">
+                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
+                    </button>` : ''}
+                </div>
                 <div class="flex justify-between items-center text-xs text-slate-400">
                     <div class="input-area flex items-center space-x-2 p-1 -m-1 rounded-md hover:bg-slate-800 transition-colors cursor-pointer">
                         <div class="w-2.5 h-2.5 bg-blue-500 rounded-full input-dot" title="Input"></div>
@@ -343,13 +402,23 @@
                 </div>
             `;
             
-            const nodeData = { id: nodeId, moduleId: moduleId, nodeTypeId: nodeTypeId, name: name, x: x, y: y };
+            const nodeData = { id: nodeId, moduleId: moduleId, nodeTypeId: nodeTypeId, name: name, x: x, y: y, config: existingConfig };
             nodes.push(nodeData);
 
             let isDragging = false;
             const bin = document.getElementById('canvas-bin');
+            
+            // Config Button Logic
+            const configBtn = nodeElement.querySelector('.config-btn');
+            if (configBtn) {
+                configBtn.onclick = (e) => {
+                    e.stopPropagation();
+                    openConfigModal(nodeId);
+                };
+            }
+
             nodeElement.onmousedown = (e) => {
-                if (e.target.closest('.input-area') || e.target.closest('.output-area')) return;
+                if (e.target.closest('.input-area') || e.target.closest('.output-area') || e.target.closest('.config-btn')) return;
                 isDragging = true;
 
                 document.onmousemove = (e) => {
@@ -462,34 +531,21 @@
                 const nameInput = document.querySelector('#save-flow-form input[name="name"]');
                 if(nameInput) nameInput.value = flowData.name;
 
+                const flowIdInput = document.getElementById('current-flow-id');
+                const updateBtn = document.getElementById('update-flow-btn');
+                if (flowIdInput) flowIdInput.value = flowData.id;
+                if (updateBtn) updateBtn.classList.remove('hidden');
+
                 if (flowData.nodes) {
                     flowData.nodes.forEach(node => {
-                        createNode(node.moduleId, node.name, node.nodeTypeId, node.x, node.y, node.id);
+                        createNode(node.moduleId, node.name, node.nodeTypeId, node.x, node.y, node.id, node.config || {});
                     });
                 }
 
                 connections = flowData.connections || [];
                 drawConnections();
 
-                const llmNode = nodes.find(n => n.moduleId === 'llm_module');
-                if (llmNode) {
-                    // Center the view on the LLM Core node when a flow is loaded.
-                    const nodeWidth = 192; // w-48
-                    const nodeHeight = 100; // approx
-                    const nodeCenterX = llmNode.x + nodeWidth / 2;
-                    const nodeCenterY = llmNode.y + nodeHeight / 2;
-
-                    const canvasRect = canvas.getBoundingClientRect();
-                    const viewportCenterX = canvasRect.width / 2;
-                    const viewportCenterY = canvasRect.height / 2;
-
-                    zoom = 1; // Reset zoom to a default level
-                    panX = viewportCenterX - (nodeCenterX * zoom);
-                    panY = viewportCenterY - (nodeCenterY * zoom);
-                    updateCanvasTransform();
-                } else {
-                    centerCanvas(); // Fallback to centering all nodes if no LLM node is found
-                }
+                centerCanvas();
             } catch (error) {
                 console.error(error);
                 alert(error.message);
@@ -506,6 +562,11 @@
             drawConnections();
             nextNodeId = 0;
             document.querySelector('#save-flow-form input[name="name"]').value = '';
+            
+            const flowIdInput = document.getElementById('current-flow-id');
+            const updateBtn = document.getElementById('update-flow-btn');
+            if (flowIdInput) flowIdInput.value = '';
+            if (updateBtn) updateBtn.classList.add('hidden');
         }
 
         function deleteNode(nodeId) {
@@ -638,6 +699,53 @@
             closeClearModal();
         }
 
+        // --- Config Modal Logic ---
+        window.openConfigModal = function(nodeId) {
+            activeConfigNodeId = nodeId;
+            const node = nodes.find(n => n.id === nodeId);
+            if (!node) return;
+
+            const textarea = document.getElementById('node-config-input');
+            textarea.value = JSON.stringify(node.config || {}, null, 4);
+
+            const modal = document.getElementById('config-modal');
+            const backdrop = document.getElementById('config-modal-backdrop');
+            const panel = document.getElementById('config-modal-panel');
+
+            modal.classList.remove('hidden');
+            requestAnimationFrame(() => {
+                backdrop.classList.remove('opacity-0');
+                panel.classList.remove('opacity-0', 'scale-95');
+                panel.classList.add('opacity-100', 'scale-100');
+            });
+        }
+
+        window.closeConfigModal = function() {
+            const modal = document.getElementById('config-modal');
+            const backdrop = document.getElementById('config-modal-backdrop');
+            const panel = document.getElementById('config-modal-panel');
+
+            backdrop.classList.add('opacity-0');
+            panel.classList.remove('opacity-100', 'scale-100');
+            panel.classList.add('opacity-0', 'scale-95');
+
+            setTimeout(() => {
+                modal.classList.add('hidden');
+                activeConfigNodeId = null;
+            }, 200);
+        }
+
+        window.saveNodeConfig = function() {
+            try {
+                const config = JSON.parse(document.getElementById('node-config-input').value);
+                const node = nodes.find(n => n.id === activeConfigNodeId);
+                if (node) node.config = config;
+                closeConfigModal();
+            } catch (e) {
+                alert("Invalid JSON: " + e.message);
+            }
+        }
+
         window.toggleFlowRename = function(id, show) {
             const nameBtn = document.querySelector(`.flow-name-${id}`);
             const renameForm = document.querySelector(`.rename-form-${id}`);
@@ -684,6 +792,20 @@
                     functionsDiv.classList.add('hidden');
                     arrowIcon.classList.remove('rotate-180');
                 }
+            }
+        }
+
+        window.toggleDisabledModules = function() {
+            const disabledItems = document.querySelectorAll('.disabled-module-item');
+            const btn = document.getElementById('toggle-disabled-btn');
+            
+            disabledItems.forEach(item => {
+                item.classList.toggle('hidden');
+            });
+            
+            if (btn) {
+                btn.classList.toggle('text-blue-400');
+                btn.classList.toggle('text-slate-600');
             }
         }
 

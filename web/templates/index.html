@@ -23,21 +23,18 @@
         
         <!-- Sidebar -->
         <aside class="w-64 flex flex-col space-y-4 border-r border-slate-800 pr-4">
-            {% if active_module == 'chat' %}
-            <div id="session-list-container" hx-get="/chat/sessions" hx-trigger="load, sessionsChanged from:body" hx-swap="innerHTML" class="flex flex-col h-full relative">
-                <div class="htmx-indicator absolute inset-0 bg-slate-900/50 flex items-center justify-center z-10">
-                    <div class="w-5 h-5 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+            <div class="flex-grow bg-slate-900/50 rounded-xl border border-slate-800 overflow-hidden flex flex-col relative">
+                {% if sidebar_template %}
+                    {% include sidebar_template %}
+                {% else %}
+                <div id="module-list-container"
+                     hx-get="/modules/list"
+                     hx-trigger="load, modulesChanged from:body"
+                     class="flex flex-col flex-grow py-3">
+                    <!-- This will be filled by HTMX -->
                 </div>
-                {% include 'chat_session_list.html' %}
+                {% endif %}
             </div>
-            {% else %}
-            <div id="module-list-container"
-                 hx-get="/modules/list"
-                 hx-trigger="load, modulesChanged from:body"
-                 class="flex flex-col flex-grow">
-                <!-- This will be filled by HTMX -->
-            </div>
-            {% endif %}
             
             <!-- Connection Status -->
             <div class="mt-auto p-4 bg-slate-800/50 rounded-xl border border-slate-700/50 space-y-2">
