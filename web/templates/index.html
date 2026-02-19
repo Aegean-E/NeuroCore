@@ -16,18 +16,7 @@
 <body class="bg-slate-900 text-slate-100 min-h-screen flex flex-col font-sans">
     
     <!-- Navbar -->
-    <header class="border-b border-slate-800 bg-slate-950 p-4 shadow-xl">
-        <div class="container mx-auto flex justify-between items-center">
-            <h1 class="text-2xl font-bold bg-gradient-to-r from-blue-400 to-emerald-400 bg-clip-text text-transparent">NeuroCore</h1>
-            <nav>
-                <ul class="flex space-x-6 text-sm font-medium text-slate-400">
-                    <li><a href="/" class="hover:text-blue-400 transition-colors">Dashboard</a></li>
-                    <li><a href="/modules" class="hover:text-blue-400 transition-colors">Modules</a></li>
-                    <li><a href="/settings" class="hover:text-blue-400 transition-colors">Settings</a></li>
-                </ul>
-            </nav>
-        </div>
-    </header>
+    {% include 'navbar.html' %}
 
     <!-- Main Layout -->
     <main class="flex-grow container mx-auto flex p-6 space-x-6 h-[calc(100vh-80px)] overflow-hidden">
@@ -36,10 +25,17 @@
         <aside class="w-64 flex flex-col space-y-4 border-r border-slate-800 pr-4">
             <h2 class="text-xs font-semibold text-slate-500 uppercase tracking-wider px-2">Loaded Modules</h2>
             <div class="flex-grow overflow-y-auto custom-scrollbar space-y-1">
-                {% if not modules %}
-                <p class="text-slate-600 text-sm italic px-2">No modules loaded</p>
-                {% else %}
+                {% set other_modules = [] %}
                 {% for module in modules %}
+                    {% if module.id != 'chat' %}
+                        {% set _ = other_modules.append(module) %}
+                    {% endif %}
+                {% endfor %}
+
+                {% if not other_modules %}
+                <p class="text-slate-600 text-sm italic px-2">No other modules loaded</p>
+                {% else %}
+                {% for module in other_modules %}
                 <button hx-get="/{{ module.id }}/gui" 
                         hx-target="#module-content" 
                         class="w-full text-left px-3 py-2 rounded-lg hover:bg-slate-800 text-slate-300 hover:text-white transition-all text-sm flex items-center group">
@@ -51,21 +47,30 @@
             </div>
             
             <!-- Connection Status -->
-            <div class="mt-auto p-4 bg-slate-800/50 rounded-xl border border-slate-700/50">
+            <div class="mt-auto p-4 bg-slate-800/50 rounded-xl border border-slate-700/50 space-y-2">
                 <div class="flex items-center space-x-2">
                     <div class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></div>
                     <span class="text-xs text-slate-400">Core Status: Online</span>
+                </div>
+                <div id="llm-status-container" hx-get="/llm-status" hx-trigger="load">
+                    <div class="flex items-center space-x-2 opacity-50">
+                        <div class="w-2 h-2 rounded-full bg-slate-500"></div>
+                        <span class="text-xs text-slate-500">LLM Status: Checking...</span>
+                    </div>
                 </div>
             </div>
         </aside>
 
         <!-- Dynamic Content Area -->
         <section class="flex-grow flex flex-col bg-slate-950/50 rounded-2xl border border-slate-800 shadow-2xl relative">
-            <div id="module-content" class="absolute inset-0 p-6 overflow-y-auto custom-scrollbar">
+            <div id="module-content" class="absolute inset-0 p-6 overflow-y-auto custom-scrollbar"
+                 {% if active_module %} hx-get="/{{ active_module }}/gui" hx-trigger="load" {% endif %}>
+                {% if not active_module %}
                 <div class="flex flex-col items-center justify-center h-full text-center space-y-4 opacity-50">
                     <svg class="w-16 h-16 text-slate-700" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"></path></svg>
                     <p class="text-slate-500">Select a module from the sidebar to begin</p>
                 </div>
+                {% endif %}
             </div>
         </section>
     </main>

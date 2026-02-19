@@ -41,8 +41,10 @@ def test_get_modules_page(client):
 
 def test_enable_module_route(client, temp_modules_dir):
     """Tests the API endpoint for enabling a module."""
-    response = client.post("/modules/toggle_test/enable", follow_redirects=False)
-    assert response.status_code == 303  # Redirect
+    response = client.post("/modules/toggle_test/enable")
+    assert response.status_code == 200
+    assert "HX-Trigger" in response.headers
+    assert response.headers["HX-Trigger"] == "modulesChanged"
 
     with open(os.path.join(temp_modules_dir, "toggle_test", "module.json"), "r") as f:
         data = json.load(f)
@@ -55,9 +57,16 @@ def test_disable_module_route(client, temp_modules_dir):
     client.post("/modules/toggle_test/enable")
 
     # Now, disable it
-    response = client.post("/modules/toggle_test/disable", follow_redirects=False)
-    assert response.status_code == 303  # Redirect
+    response = client.post("/modules/toggle_test/disable")
+    assert response.status_code == 200
+    assert "HX-Trigger" in response.headers
+    assert response.headers["HX-Trigger"] == "modulesChanged"
 
     with open(os.path.join(temp_modules_dir, "toggle_test", "module.json"), "r") as f:
         data = json.load(f)
     assert data['enabled'] is False
+
+def test_toggle_nonexistent_module_route(client):
+    """Tests that toggling a non-existent module returns a 404."""
+    response = client.post("/modules/non_existent_module/enable")
+    assert response.status_code == 404

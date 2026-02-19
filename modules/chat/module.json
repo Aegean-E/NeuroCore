@@ -1,5 +1,6 @@
 {
     "name": "Chat",
     "description": "An interactive AI assistant.",
-    "enabled": true
+    "enabled": true,
+    "id": "chat"
 }

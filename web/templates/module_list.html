@@ -1,0 +1,21 @@
+<h2 class="text-2xl font-bold mb-6">Module Management</h2>
+<div class="space-y-4">
+    {% for module in modules %}
+    <div class="flex items-center justify-between p-4 bg-slate-900 rounded-xl border border-slate-800">
+        <div>
+            <h3 class="font-semibold text-lg">{{ module.name }}</h3>
+            <p class="text-sm text-slate-400">{{ module.description }}</p>
+        </div>
+        <div class="flex items-center space-x-4">
+            <span class="text-xs font-mono px-2 py-1 rounded {{ 'bg-emerald-500/20 text-emerald-400' if module.enabled else 'bg-slate-700 text-slate-400' }}">
+                {{ 'Enabled' if module.enabled else 'Disabled' }}
+            </span>
+            <button hx-post="/modules/{{ module.id }}/{{ 'disable' if module.enabled else 'enable' }}" 
+                    hx-target="#module-management-card"
+                    class="px-4 py-2 rounded-lg text-sm font-semibold transition-colors {{ 'bg-red-600/80 hover:bg-red-600' if module.enabled else 'bg-emerald-600/80 hover:bg-emerald-600' }}">
+                {{ 'Disable' if module.enabled else 'Enable' }}
+            </button>
+        </div>
+    </div>
+    {% endfor %}
+</div>
