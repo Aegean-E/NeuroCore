@@ -40,6 +40,13 @@ class FlowManager:
         self._save_flows()
         return self.flows[flow_id]
 
+    def rename_flow(self, flow_id, new_name):
+        if flow_id in self.flows:
+            self.flows[flow_id]["name"] = new_name
+            self._save_flows()
+            return True
+        return False
+
     def get_flow(self, flow_id):
         return self.flows.get(flow_id)
 
