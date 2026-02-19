@@ -1,5 +1,6 @@
 import os
 import json
+import time
 import pytest
 from modules.chat.sessions import SessionManager
 
@@ -55,7 +56,7 @@ def test_delete_session(session_manager):
 def test_list_sessions_sorted(session_manager):
     """Tests that sessions are listed with the newest first."""
     session1 = session_manager.create_session("Session 1")
-    import time; time.sleep(0.01)
+    time.sleep(0.1)
     session2 = session_manager.create_session("Session 2")
     
     session_list = session_manager.list_sessions()

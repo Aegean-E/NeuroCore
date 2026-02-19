@@ -6,6 +6,7 @@ import threading
 import hashlib
 import logging
 from typing import List, Dict, Optional, Tuple, Any
+from contextlib import contextmanager
 import numpy as np
 
 try:
@@ -36,10 +37,18 @@ class MemoryStore:
             else:
                 self._sync_faiss_index()
 
-    def _connect(self) -> sqlite3.Connection:
+    @contextmanager
+    def _connect(self):
         con = sqlite3.connect(self.db_path, check_same_thread=False)
         con.execute("PRAGMA journal_mode=WAL;")
-        return con
+        try:
+            yield con
+            con.commit()
+        except Exception:
+            con.rollback()
+            raise
+        finally:
+            con.close()
 
     def _init_db(self) -> None:
         with self._connect() as con:
@@ -143,9 +152,9 @@ class MemoryStore:
         text_lower = " ".join(text.lower().strip().split())
         return hashlib.sha256(text_lower.encode("utf-8")).hexdigest()
 
-    def add_entry(self, text: str, embedding: Optional[List[float]] = None, confidence: float = 1.0, subject: str = "User", mem_type: str = "FACT") -> int:
+    def add_entry(self, text: str, embedding: Optional[List[float]] = None, confidence: float = 1.0, subject: str = "User", mem_type: str = "FACT", created_at: int = None) -> int:
         identity = self.compute_identity(text)
-        timestamp = int(time.time())
+        timestamp = created_at if created_at is not None else int(time.time())
         
         emb_np = np.array(embedding, dtype='float32') if embedding else None
         embedding_blob = emb_np.tobytes() if emb_np is not None else None

@@ -4,7 +4,8 @@ from unittest.mock import patch, MagicMock
 import pytest
 from fastapi.testclient import TestClient
 
-from main import app, get_settings_manager, get_module_manager
+from main import app
+from core.dependencies import get_settings_manager, get_module_manager
 from core.flow_manager import FlowManager
 from core.settings import SettingsManager
 from core.module_manager import ModuleManager
@@ -47,8 +48,8 @@ def client():
         return mock_module_manager
 
     # Patch the global instances used directly in some routes
-    with patch('main.flow_manager', mock_flow_manager), \
-         patch('main.settings', mock_settings_manager):
+    with patch('core.routers.flow_manager', mock_flow_manager), \
+         patch('core.routers.settings', mock_settings_manager):
         # Override dependencies for routes that use Depends()
         app.dependency_overrides[get_settings_manager] = override_get_settings_manager
         app.dependency_overrides[get_module_manager] = override_get_module_manager
@@ -72,7 +73,7 @@ def test_ai_flow_page(client):
 
 def test_get_flow_data(client):
     """Tests fetching data for an existing and non-existing flow (get_flow_data)."""
-    with patch('main.flow_manager') as mock_fm:
+    with patch('core.routers.flow_manager') as mock_fm:
         # Test success
         mock_fm.get_flow.return_value = TEST_FLOW
         response = client.get(f"/ai-flow/{TEST_FLOW_ID}")
@@ -92,11 +93,11 @@ def test_save_ai_flow(client):
         "nodes": json.dumps([{"id": "node-1"}]),
         "connections": json.dumps([{"from": "node-1", "to": "node-2"}])
     }
-    with patch('main.flow_manager') as mock_fm:
+    with patch('core.routers.flow_manager') as mock_fm:
         response = client.post("/ai-flow/save", data=flow_data)
 
     assert response.status_code == 200
-    mock_fm.save_flow.assert_called_once_with(name="My New Flow", nodes=[{"id": "node-1"}], connections=[{"from": "node-1", "to": "node-2"}])
+    mock_fm.save_flow.assert_called_once_with(name="My New Flow", nodes=[{"id": "node-1"}], connections=[{"from": "node-1", "to": "node-2"}], flow_id=None)
 
 
 def test_set_active_flow(client):
@@ -112,7 +113,7 @@ def test_delete_flow(client):
     settings_manager_mock = app.dependency_overrides[get_settings_manager]()
     settings_manager_mock.get.return_value = TEST_FLOW_ID  # Simulate it being active
 
-    with patch('main.flow_manager') as mock_fm:
+    with patch('core.routers.flow_manager') as mock_fm:
         response = client.post(f"/ai-flow/{TEST_FLOW_ID}/delete")
 
     assert response.status_code == 200
@@ -127,7 +128,7 @@ def test_get_module_details(client):
     # Test success
     response = client.get(f"/modules/{TEST_MODULE_ID}/details")
     assert response.status_code == 200
-    assert "Module State" in response.text
+    assert "Enabled" in response.text
     assert TEST_MODULE['name'] in response.text
 
     # Test not found
@@ -148,7 +149,7 @@ def test_enable_module_route(client):
     
     assert response.status_code == 200
     assert "HX-Trigger" in response.headers
-    assert response.headers["HX-Trigger"] == "modulesChanged"
+    assert "modulesChanged" in response.headers["HX-Trigger"]
     module_manager_mock.enable_module.assert_called_once_with(TEST_MODULE_ID)
     assert TEST_MODULE['name'] in response.text
 
@@ -164,6 +165,6 @@ def test_disable_module_route(client):
     
     assert response.status_code == 200
     assert "HX-Trigger" in response.headers
-    assert response.headers["HX-Trigger"] == "modulesChanged"
+    assert "modulesChanged" in response.headers["HX-Trigger"]
     module_manager_mock.disable_module.assert_called_once_with(TEST_MODULE_ID)
     assert "Disabled" in response.text

@@ -57,3 +57,34 @@ async def test_get_models_error(httpx_mock):
     bridge = LLMBridge(base_url="http://localhost:1234/v1")
     result = await bridge.get_models()
     assert "error" in result
+
+@pytest.mark.asyncio
+async def test_get_embedding_success(httpx_mock):
+    mock_response = {
+        "data": [
+            {"embedding": [0.1, 0.2, 0.3]}
+        ]
+    }
+    httpx_mock.add_response(
+        url="http://localhost:1234/v1/embeddings",
+        json=mock_response,
+        method="POST"
+    )
+    
+    bridge = LLMBridge(base_url="http://localhost:1234/v1")
+    embedding = await bridge.get_embedding("test text")
+    
+    assert embedding == [0.1, 0.2, 0.3]
+
+@pytest.mark.asyncio
+async def test_get_embedding_error(httpx_mock):
+    httpx_mock.add_response(
+        url="http://localhost:1234/v1/embeddings",
+        status_code=500,
+        method="POST"
+    )
+    
+    bridge = LLMBridge(base_url="http://localhost:1234/v1")
+    embedding = await bridge.get_embedding("test text")
+    
+    assert embedding is None

@@ -74,6 +74,13 @@ def test_chat_send_route(client, httpx_mock, mock_chat_sessions, monkeypatch):
         json=mock_response,
         method="POST"
     )
+    
+    # Mock the embedding call that MemorySaveExecutor might trigger
+    httpx_mock.add_response(
+        url=f"{test_api_url}/embeddings",
+        json={"data": [{"embedding": [0.1] * 1536}]},
+        method="POST"
+    )
 
     # Create a session to send a message to
     session = mock_chat_sessions.create_session("Send Test")
@@ -119,3 +126,10 @@ def test_rename_session_route(client, mock_chat_sessions):
     
     renamed_session = mock_chat_sessions.get_session(session_id)
     assert renamed_session['name'] == "New Name"
+
+def test_chat_page_route(client):
+    """Tests if the main chat page loads correctly."""
+    response = client.get("/chat")
+    assert response.status_code == 200
+    assert "NeuroCore" in response.text
+    assert "Chat Sessions" in response.text

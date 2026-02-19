@@ -94,3 +94,18 @@ def test_hot_disable_module(temp_modules_dir, mock_app):
     # Now it should be gone
     assert not any(isinstance(r, APIRoute) and "enabled_module" in r.tags for r in mock_app.router.routes)
     assert manager.modules["enabled_module"]["enabled"] is False
+
+def test_update_module_config(temp_modules_dir, mock_app):
+    """Tests that updating module configuration writes to the file."""
+    manager = ModuleManager(app=mock_app, modules_dir=temp_modules_dir)
+    
+    new_config = {"key": "value"}
+    manager.update_module_config("enabled_module", new_config)
+    
+    assert manager.modules["enabled_module"]["config"] == new_config
+    
+    # Verify file write
+    config_path = os.path.join(temp_modules_dir, "enabled_module", "module.json")
+    with open(config_path, "r") as f:
+        data = json.load(f)
+        assert data["config"] == new_config

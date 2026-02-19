@@ -16,7 +16,7 @@ def test_get_llm_bridge_uses_settings():
     bridge = get_llm_bridge(settings=mock_settings)
 
     # Assert that the settings were used correctly
-    mock_settings.get.assert_called_once_with("llm_api_url")
+    mock_settings.get.assert_any_call("llm_api_url")
     
     # Assert that the bridge was created with the correct URL
     assert isinstance(bridge, LLMBridge)

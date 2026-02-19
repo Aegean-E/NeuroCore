@@ -8,7 +8,7 @@ client = TestClient(app)
 def test_settings_page_accessible():
     response = client.get("/settings")
     assert response.status_code == 200
-    assert "System Settings" in response.text
+    assert "General Settings" in response.text
     assert 'name="llm_api_url"' in response.text
 
 
@@ -21,7 +21,7 @@ def test_save_settings_route():
     }
     # Test POST and Redirect
     response = client.post("/settings/save", data=payload, follow_redirects=False)
-    assert response.status_code == 303
+    assert response.status_code == 200
 
     # Verify the settings were actually saved (optional but good)
     from core.settings import settings

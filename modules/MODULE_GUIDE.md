@@ -27,7 +27,10 @@ Create a `module.json` file. This defines how NeuroCore loads and displays your 
     "id": "my_new_module",
     "is_flow_node": false,  // Set to true if the module itself acts as a single node
     "order": 10,            // Sort order in the UI
-    "provides_nodes": [     // List of nodes this module adds to the AI Flow editor
+    "config": {             // Optional: Default configuration values exposed in Module Details
+        "my_setting": "default_value"
+    },
+    "provides_nodes": [     // List of nodes this module adds to the AI Flow editor (Optional)
         {
             "id": "my_custom_node",
             "name": "Custom Processor",

@@ -19,8 +19,15 @@ NeuroCore is built on the principles of **Speed**, **Simplicity**, and **Modular
     *   **Drag-and-Drop Interface**: Build flows by dragging functions onto the canvas.
     *   **Pan & Zoom**: Effortlessly navigate large and complex flows.
     *   **Singleton Nodes**: Enforce architectural patterns by restricting certain nodes (like Chat Input/Output) to a single instance per flow.
+    *   **Flow Management**: Create, save, rename, and switch between multiple AI flows to handle different tasks.
 *   **💬 Built-in Chat UI**: A clean, modern chat interface for direct interaction with your configured AI flow.
-*   **⚙️ Dynamic Configuration**: Manage LLM API endpoints, models, and other parameters through a simple settings UI.
+    *   **Session Management**: Create, rename, and delete chat sessions to organize your conversations.
+*   **📚 Long-Term Memory**: Integrated vector database (FAISS + SQLite) for persistent AI memory.
+    *   **Automatic Storage**: Background processing saves user and assistant interactions.
+    *   **Memory Arbiter**: Intelligent filtering based on confidence scores and memory types (Facts, Rules, Beliefs) to ensure high-quality retention.
+    *   **Memory Browser**: A dedicated UI to search, filter, and delete stored memories.
+    *   **Context Injection**: Automatically retrieves relevant memories during conversations.
+*   **⚙️ Dynamic Configuration**: Manage LLM API endpoints, models, and other parameters through a simple, tabbed settings UI.
 *   **✅ Robust Testing**: A comprehensive test suite using `pytest` to ensure code quality and stability.
 
 ## 🛠️ Tech Stack
@@ -105,6 +112,9 @@ NeuroCore/
 ├── modules/              # Self-contained, plug-and-play feature modules
 │   ├── chat/             # The chat UI and flow nodes
 │   └── llm_module/       # The core LLM flow node
+│   ├── memory/           # Long-term memory backend and nodes
+│   ├── memory_browser/   # UI for managing memories
+│   └── system_prompt/    # System prompt injection node
 ├── tests/                # The pytest test suite
 ├── web/                  # Frontend files
 │   ├── static/           # Static assets (future CSS/JS)
