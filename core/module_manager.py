@@ -105,3 +105,14 @@ class ModuleManager:
 
     def disable_module(self, module_id: str):
         return self._toggle_module(module_id, False)
+
+    def update_module_config(self, module_id: str, new_config: dict):
+        """Updates the configuration for a specific module."""
+        if module_id not in self.modules:
+            return None
+        
+        self.modules[module_id]['config'] = new_config
+        meta_path = os.path.join(self.modules_dir, module_id, "module.json")
+        with open(meta_path, "w") as f:
+            json.dump(self.modules[module_id], f, indent=4)
+        return self.modules[module_id]

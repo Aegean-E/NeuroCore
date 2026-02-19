@@ -1,9 +1,20 @@
 <div class="p-8">
     <div class="flex items-center justify-between mb-6">
-        <h2 class="text-2xl font-bold">{{ module.name }}</h2>
-        <span class="text-sm font-mono px-2 py-1 rounded {{ 'bg-red-500/20 text-red-400' if module.load_error and module.enabled else ('bg-emerald-500/20 text-emerald-400' if module.enabled else 'bg-slate-700 text-slate-400') }}">
-            {{ 'Error' if module.load_error and module.enabled else ('Enabled' if module.enabled else 'Disabled') }}
-        </span>
+        <div class="flex items-center space-x-3">
+            <h2 class="text-2xl font-bold">{{ module.name }}</h2>
+            {% if module.load_error and module.enabled %}
+            <span class="text-xs font-mono px-2 py-1 rounded bg-red-500/20 text-red-400 border border-red-500/50">Load Error</span>
+            {% endif %}
+        </div>
+        <div class="flex items-center space-x-3">
+            <span class="text-sm text-slate-500 font-medium">{{ 'Enabled' if module.enabled else 'Disabled' }}</span>
+            <button hx-post="/modules/{{ module.id }}/{{ 'disable' if module.enabled else 'enable' }}" 
+                    hx-target="#module-content"
+                    hx-swap="innerHTML"
+                    class="relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:ring-offset-slate-900 {{ 'bg-emerald-500' if module.enabled else 'bg-slate-700' }}">
+                <span class="inline-block h-4 w-4 transform rounded-full bg-white transition-transform {{ 'translate-x-6' if module.enabled else 'translate-x-1' }}"></span>
+            </button>
+        </div>
     </div>
 
     {% if module.load_error and module.enabled %}
@@ -18,16 +29,40 @@
     
     <p class="text-slate-400 mb-8">{{ module.description }}</p>
 
-    <div class="bg-slate-900 rounded-xl border border-slate-800 p-6">
-        <h3 class="font-semibold text-lg mb-4">Module State</h3>
-        <p class="text-sm text-slate-500 mb-4">
-            {{ 'Disabling this module will remove it from the UI and prevent it from being used until it is re-enabled.' if module.enabled else 'Enabling this module will make it available for use throughout the application.' }}
-        </p>
-        <button hx-post="/modules/{{ module.id }}/{{ 'disable' if module.enabled else 'enable' }}" 
-                hx-target="#module-content"
-                hx-swap="innerHTML"
-                class="px-6 py-2 rounded-lg text-sm font-semibold transition-colors {{ 'bg-red-600/80 hover:bg-red-600' if module.enabled else 'bg-emerald-600/80 hover:bg-emerald-600' }}">
-            {{ 'Disable' if module.enabled else 'Enable' }}
-        </button>
+    {% if module.config %}
+    <div class="bg-slate-900 rounded-xl border border-slate-800 p-6 mt-6">
+        <h3 class="font-semibold text-lg mb-4">Configuration</h3>
+        <form hx-post="/modules/{{ module.id }}/config" hx-swap="none"
+              hx-on::after-request="const btn = this.querySelector('button[type=submit]'); const orig = btn.innerText; btn.innerText = 'Saved!'; btn.classList.remove('bg-blue-600', 'hover:bg-blue-500'); btn.classList.add('bg-emerald-600', 'hover:bg-emerald-500'); setTimeout(() => { btn.innerText = orig; btn.classList.add('bg-blue-600', 'hover:bg-blue-500'); btn.classList.remove('bg-emerald-600', 'hover:bg-emerald-500'); }, 2000);">
+            <textarea name="config_json" class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all custom-scrollbar h-64">{{ formatted_config }}</textarea>
+            <div class="mt-4 flex justify-end">
+                <button type="submit" class="bg-blue-600 hover:bg-blue-500 text-white px-6 py-2 rounded-lg text-sm font-semibold transition-colors">Save Configuration</button>
+            </div>
+        </form>
     </div>
+    {% endif %}
+
+    {% if module.id == 'memory' and module.enabled %}
+    <div class="bg-slate-900 rounded-xl border border-slate-800 p-6 mt-6">
+        <h3 class="font-semibold text-lg mb-4">Memory Statistics</h3>
+        <div hx-get="/memory/stats" hx-trigger="load" class="min-h-[100px] flex items-center justify-center">
+            <div class="w-6 h-6 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+        </div>
+    </div>
+    {% endif %}
+
+    {% if module.id == 'memory_browser' and module.enabled %}
+    <div class="mt-8">
+        <div class="bg-slate-900 rounded-xl border border-slate-800 overflow-hidden h-[700px] shadow-inner" 
+             hx-get="/memory_browser/gui" 
+             hx-trigger="load">
+            <div class="flex items-center justify-center h-full text-slate-500">
+                <div class="flex flex-col items-center space-y-3">
+                    <div class="w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+                    <span class="text-sm">Loading Memory Browser...</span>
+                </div>
+            </div>
+        </div>
+    </div>
+    {% endif %}
 </div>

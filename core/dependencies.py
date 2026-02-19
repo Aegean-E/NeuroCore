@@ -15,6 +15,8 @@ def get_llm_bridge(settings: SettingsManager = Depends(get_settings_manager)) ->
     return LLMBridge(
         base_url=settings.get("llm_api_url"),
         api_key=settings.get("llm_api_key"),
+        embedding_base_url=settings.get("embedding_api_url"),
+        embedding_model=settings.get("embedding_model"),
     )
 
 def get_module_manager(request: Request) -> ModuleManager:

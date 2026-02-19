@@ -68,7 +68,7 @@ Follow these steps to get NeuroCore up and running on your local machine.
 3.  **Install the required dependencies:**
     *(You may need to create a `requirements.txt` file based on the libraries used, such as `fastapi`, `uvicorn`, `httpx`, `jinja2`, `pytest`, etc.)*
     ```bash
-    pip install fastapi uvicorn httpx jinja2 "pytest<9" "pytest-cov" "pytest-httpx" "pytest-asyncio"
+    pip install fastapi uvicorn httpx jinja2 numpy faiss-cpu "pytest<9" "pytest-cov" "pytest-httpx" "pytest-asyncio"
     ```
 
 ### 3. Configuration

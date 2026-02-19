@@ -6,56 +6,134 @@
     <title>Settings - NeuroCore</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/htmx.org@2.0.2"></script>
+    <style>
+        .custom-scrollbar::-webkit-scrollbar { width: 4px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #4a5568; border-radius: 2px; }
+    </style>
 </head>
 <body class="bg-slate-900 text-slate-100 min-h-screen flex flex-col font-sans">
     
     {% include 'navbar.html' %}
 
-    <main class="flex-grow container mx-auto p-6 max-w-2xl">
-        <div class="bg-slate-950/50 rounded-2xl border border-slate-800 shadow-2xl p-8">
-            <h2 class="text-2xl font-bold mb-6">System Settings</h2>
-            
-            <form hx-post="/settings/save" hx-swap="none" class="space-y-6">
-                <div>
-                    <label class="block text-sm font-medium text-slate-400 mb-2">LLM API URL</label>
-                    <input type="text" name="llm_api_url" value="{{ settings.llm_api_url }}" 
-                           class="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all">
-                </div>
+    <main class="flex-grow container mx-auto p-6 flex gap-6 h-[calc(100vh-80px)] overflow-hidden">
+        
+        <!-- Settings Sidebar -->
+        <aside class="w-64 flex-shrink-0 bg-slate-950/50 rounded-xl border border-slate-800 p-4 flex flex-col gap-2">
+            <h3 class="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2 px-2">Configuration</h3>
+            <a href="#" onclick="switchTab(event, 'general')" class="settings-nav-link block px-3 py-2 rounded-lg bg-slate-800 text-white text-sm font-medium transition-all">General</a>
+            <a href="#" onclick="switchTab(event, 'embeddings')" class="settings-nav-link block px-3 py-2 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-white text-sm transition-all">Embeddings</a>
+            <a href="#" onclick="switchTab(event, 'generation')" class="settings-nav-link block px-3 py-2 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-white text-sm transition-all">Generation</a>
+        </aside>
 
-                <div>
-                    <label class="block text-sm font-medium text-slate-400 mb-2">LLM API Key</label>
-                    <input type="password" name="llm_api_key" value="{{ settings.llm_api_key }}" placeholder="sk-..."
-                           class="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all">
-                </div>
+        <!-- Settings Content -->
+        <div class="flex-grow bg-slate-950/50 rounded-xl border border-slate-800 shadow-2xl relative overflow-hidden flex flex-col">
+            <div class="overflow-y-auto custom-scrollbar flex-grow p-8 scroll-smooth relative" id="settings-scroll-container">
+                <form hx-post="/settings/save" hx-swap="none" class="max-w-3xl">
+                    
+                    <!-- General Section -->
+                    <section id="general" class="settings-tab">
+                        <div class="mb-6">
+                            <h2 class="text-xl font-bold text-white">General Settings</h2>
+                            <p class="text-sm text-slate-500">Configure the connection to your LLM provider.</p>
+                        </div>
+                        
+                        <div class="space-y-6">
+                            <div>
+                                <label class="block text-sm font-medium text-slate-400 mb-2">LLM API URL</label>
+                                <input type="text" name="llm_api_url" value="{{ settings.llm_api_url }}" 
+                                       class="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all">
+                            </div>
 
-                <div>
-                    <label class="block text-sm font-medium text-slate-400 mb-2">Default Model</label>
-                    <input type="text" name="default_model" value="{{ settings.default_model }}" 
-                           class="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all">
-                </div>
+                            <div>
+                                <label class="block text-sm font-medium text-slate-400 mb-2">LLM API Key</label>
+                                <input type="password" name="llm_api_key" value="{{ settings.llm_api_key }}" placeholder="sk-..."
+                                       class="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all">
+                            </div>
 
-                <div class="grid grid-cols-2 gap-4">
-                    <div>
-                        <label class="block text-sm font-medium text-slate-400 mb-2">Temperature</label>
-                        <input type="number" step="0.1" name="temperature" value="{{ settings.temperature }}" 
-                               class="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all">
-                    </div>
-                    <div>
-                        <label class="block text-sm font-medium text-slate-400 mb-2">Max Tokens</label>
-                        <input type="number" name="max_tokens" value="{{ settings.max_tokens }}" 
-                               class="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all">
-                    </div>
-                </div>
+                            <div>
+                                <label class="block text-sm font-medium text-slate-400 mb-2">Default Chat Model</label>
+                                <input type="text" name="default_model" value="{{ settings.default_model }}" 
+                                       class="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all">
+                            </div>
+                        </div>
+                    </section>
 
-                <div class="pt-4">
-                    <button type="submit" class="w-full bg-blue-600 hover:bg-blue-500 text-white px-6 py-3 rounded-xl text-sm font-semibold transition-all">
-                        Save Settings
-                    </button>
-                </div>
-            </form>
+                    <!-- Embedding Section -->
+                    <section id="embeddings" class="settings-tab hidden">
+                        <div class="mb-6">
+                            <h2 class="text-xl font-bold text-white">Embeddings</h2>
+                            <p class="text-sm text-slate-500">Configure vector embedding settings for memory and RAG.</p>
+                        </div>
 
+                        <div class="space-y-6">
+                            <div>
+                                <label class="block text-sm font-medium text-slate-400 mb-2">Embedding API URL</label>
+                                <input type="text" name="embedding_api_url" value="{{ settings.embedding_api_url }}" placeholder="Leave empty to use LLM API URL"
+                                       class="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all">
+                                <p class="text-xs text-slate-600 mt-2">If your embedding model is hosted on a different server (e.g., Ollama vs LM Studio), specify it here.</p>
+                            </div>
+
+                            <div>
+                                <label class="block text-sm font-medium text-slate-400 mb-2">Embedding Model</label>
+                                <input type="text" name="embedding_model" value="{{ settings.embedding_model }}" placeholder="e.g. text-embedding-nomic-embed-text-v1.5"
+                                       class="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all">
+                            </div>
+                        </div>
+                    </section>
+
+                    <!-- Generation Section -->
+                    <section id="generation" class="settings-tab hidden">
+                        <div class="mb-6">
+                            <h2 class="text-xl font-bold text-white">Generation Parameters</h2>
+                            <p class="text-sm text-slate-500">Fine-tune how the model generates responses.</p>
+                        </div>
+
+                        <div class="grid grid-cols-2 gap-6">
+                            <div>
+                                <label class="block text-sm font-medium text-slate-400 mb-2">Temperature</label>
+                                <input type="number" step="0.1" name="temperature" value="{{ settings.temperature }}" 
+                                       class="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all">
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-slate-400 mb-2">Max Tokens</label>
+                                <input type="number" name="max_tokens" value="{{ settings.max_tokens }}" 
+                                       class="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all">
+                            </div>
+                        </div>
+                    </section>
+                    
+                    <!-- Spacer for bottom scrolling -->
+                    <div class="h-20"></div>
+                </form>
+            </div>
+
+            <!-- Sticky Footer -->
+            <div class="p-6 border-t border-slate-800 bg-slate-950/80 backdrop-blur absolute bottom-0 left-0 right-0 flex justify-end">
+                <button onclick="document.querySelector('form').requestSubmit()" class="bg-blue-600 hover:bg-blue-500 text-white px-8 py-3 rounded-xl text-sm font-semibold transition-all shadow-lg shadow-blue-500/20">
+                    Save Settings
+                </button>
+            </div>
         </div>
     </main>
+
+    <script>
+        function switchTab(event, tabId) {
+            event.preventDefault();
+            const element = event.currentTarget;
+            
+            document.querySelectorAll('.settings-nav-link').forEach(el => {
+                el.classList.remove('bg-slate-800', 'text-white');
+                el.classList.add('text-slate-400', 'hover:bg-slate-800', 'hover:text-white');
+            });
+            element.classList.remove('text-slate-400', 'hover:bg-slate-800', 'hover:text-white');
+            element.classList.add('bg-slate-800', 'text-white');
+            
+            document.querySelectorAll('.settings-tab').forEach(el => {
+                el.classList.add('hidden');
+            });
+            document.getElementById(tabId).classList.remove('hidden');
+        }
+    </script>
 
     <footer class="p-2 text-center text-[10px] text-slate-700 font-mono tracking-tighter uppercase">
         NeuroCore // Core V1.0.0-MODULAR // LLM Ready

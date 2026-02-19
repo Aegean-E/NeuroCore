@@ -1,0 +1,37 @@
+from fastapi import APIRouter, Request, Query
+from fastapi.responses import HTMLResponse
+from fastapi.templating import Jinja2Templates
+from modules.memory.backend import memory_store
+from datetime import datetime
+
+router = APIRouter()
+templates = Jinja2Templates(directory="web/templates")
+
+# Helper filter for templates
+def format_timestamp(ts):
+    return datetime.fromtimestamp(ts).strftime('%Y-%m-%d %H:%M')
+
+templates.env.filters["datetime"] = format_timestamp
+
+@router.get("/gui", response_class=HTMLResponse)
+async def browser_gui(request: Request):
+    # Initial load with default browse parameters
+    memories = memory_store.browse(limit=50)
+    return templates.TemplateResponse(request, "memory_browser.html", {
+        "memories": memories,
+        "types": sorted(["FACT", "RULE", "IDENTITY", "PREFERENCE", "BELIEF", "PERMISSION"])
+    })
+
+@router.get("/list", response_class=HTMLResponse)
+async def list_memories(
+    request: Request, 
+    q: str = Query(None), 
+    type: str = Query("ALL")
+):
+    memories = memory_store.browse(search_text=q, mem_type=type, limit=50)
+    return templates.TemplateResponse(request, "memory_list.html", {"memories": memories})
+
+@router.delete("/delete/{memory_id}", response_class=HTMLResponse)
+async def delete_memory(request: Request, memory_id: int):
+    memory_store.delete_entry(memory_id)
+    return ""

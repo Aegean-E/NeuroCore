@@ -1,0 +1,48 @@
+{
+    "name": "Long-Term Memory",
+    "description": "Vector-based memory storage and retrieval using SQLite and FAISS.",
+    "enabled": true,
+    "id": "memory",
+    "icon": "M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4",
+    "is_flow_node": false,
+    "order": 3,
+    "config": {
+        "recall_limit": 3,
+        "recall_min_score": 0.0,
+        "save_default_type": "FACT",
+        "save_default_confidence": 1.0,
+        "arbiter_confidence_thresholds": {
+            "PERMISSION": 0.85,
+            "RULE": 0.9,
+            "IDENTITY": 0.8,
+            "PREFERENCE": 0.6,
+            "FACT": 0.7,
+            "BELIEF": 0.5
+        },
+        "arbiter_precedence": {
+            "PERMISSION": 0,
+            "RULE": 1,
+            "IDENTITY": 2,
+            "FACT": 3,
+            "PREFERENCE": 4,
+            "BELIEF": 5
+        }
+    },
+    "provides_nodes": [
+        {
+            "id": "memory_recall",
+            "name": "Memory Recall",
+            "description": "Searches memory for relevant context and adds it to the conversation.",
+            "singleton": false,
+            "configurable": false
+        },
+        {
+            "id": "memory_save",
+            "name": "Memory Save",
+            "description": "Stores the current interaction into long-term memory.",
+            "singleton": false,
+            "configurable": false
+        }
+    ],
+    "load_error": null
+}

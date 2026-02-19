@@ -61,8 +61,11 @@
         }
 
         // Listen for HTMX events from the backend
-        document.body.addEventListener("showMessage", function(evt){
-            window.showToast(evt.detail.message, evt.detail.level);
-        });
+        if (!window.htmxMessageListenerAttached) {
+            document.body.addEventListener("showMessage", function(evt){
+                window.showToast(evt.detail.message, evt.detail.level);
+            });
+            window.htmxMessageListenerAttached = true;
+        }
     </script>
 </header>

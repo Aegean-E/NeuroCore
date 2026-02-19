@@ -47,7 +47,8 @@ async def get_module_details(request: Request, module_id: str, module_manager: M
     module = module_manager.modules.get(module_id)
     if not module:
         raise HTTPException(status_code=404, detail="Module not found")
-    return templates.TemplateResponse(request, "module_details.html", {"module": module})
+    formatted_config = json.dumps(module.get('config', {}), indent=4)
+    return templates.TemplateResponse(request, "module_details.html", {"module": module, "formatted_config": formatted_config})
 
 @router.post("/modules/{module_id}/{action}")
 async def toggle_module(request: Request, module_id: str, action: str, module_manager: ModuleManager = Depends(get_module_manager)):
@@ -61,9 +62,22 @@ async def toggle_module(request: Request, module_id: str, action: str, module_ma
     if not module:
         raise HTTPException(status_code=404, detail="Module not found")
     
+    formatted_config = json.dumps(module.get('config', {}), indent=4)
     return templates.TemplateResponse(
-        request, "module_details.html", {"module": module}, headers={"HX-Trigger": json.dumps({"modulesChanged": None, "showMessage": {"level": "success", "message": f"Module {action}d"}})}
+        request, "module_details.html", {"module": module, "formatted_config": formatted_config}, headers={"HX-Trigger": json.dumps({"modulesChanged": None, "showMessage": {"level": "success", "message": f"Module {action}d"}})}
     )
+
+@router.post("/modules/{module_id}/config")
+async def save_module_config(request: Request, module_id: str, config_json: str = Form(...), module_manager: ModuleManager = Depends(get_module_manager)):
+    try:
+        new_config = json.loads(config_json)
+        module_manager.update_module_config(module_id, new_config)
+        return Response(status_code=200, headers={"HX-Trigger": json.dumps({"showMessage": {"level": "success", "message": "Configuration saved"}})})
+    except json.JSONDecodeError:
+        return Response(status_code=400, headers={"HX-Trigger": json.dumps({"showMessage": {"level": "error", "message": "Invalid JSON format"}})})
+    except Exception as e:
+        return Response(status_code=500, headers={"HX-Trigger": json.dumps({"showMessage": {"level": "error", "message": str(e)}})})
+
 
 # --- AI Flow ---
 
@@ -129,10 +143,10 @@ async def get_settings(request: Request, settings_man: SettingsManager = Depends
     })
 
 @router.post("/settings/save")
-async def save_settings_route(llm_api_url: str = Form(...), llm_api_key: str = Form(""), default_model: str = Form(...), temperature: float = Form(...), max_tokens: int = Form(...), settings_man: SettingsManager = Depends(get_settings_manager)):
+async def save_settings_route(llm_api_url: str = Form(...), llm_api_key: str = Form(""), embedding_api_url: str = Form(""), default_model: str = Form(...), embedding_model: str = Form(""), temperature: float = Form(...), max_tokens: int = Form(...), settings_man: SettingsManager = Depends(get_settings_manager)):
     settings_man.save_settings({
-        "llm_api_url": llm_api_url, "llm_api_key": llm_api_key,
-        "default_model": default_model,
+        "llm_api_url": llm_api_url, "llm_api_key": llm_api_key, "embedding_api_url": embedding_api_url,
+        "default_model": default_model, "embedding_model": embedding_model,
         "temperature": temperature, "max_tokens": max_tokens
     })
     return Response(status_code=200, headers={"HX-Trigger": json.dumps({"showMessage": {"level": "success", "message": "Settings saved successfully"}})})

@@ -3,6 +3,7 @@
     "description": "Direct interface to the Large Language Model for completions.",
     "enabled": true,
     "id": "llm_module",
+    "icon": "M13 10V3L4 14h7v7l9-11h-7z",
     "is_flow_node": true,
     "order": 1,
     "singleton": true,

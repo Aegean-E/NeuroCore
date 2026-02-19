@@ -6,7 +6,9 @@ SETTINGS_FILE = "settings.json"
 DEFAULT_SETTINGS = {
     "llm_api_url": "http://localhost:1234/v1",
     "llm_api_key": "",
+    "embedding_api_url": "",
     "default_model": "local-model",
+    "embedding_model": "",
     "temperature": 0.7,
     "max_tokens": 2048,
     "active_ai_flow": "default-flow-001"
