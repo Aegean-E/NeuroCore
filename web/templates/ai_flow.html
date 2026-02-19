@@ -64,7 +64,7 @@
             <div class="border-t border-slate-800 pt-4 mt-4">
                 <h2 class="text-sm font-bold mb-3 uppercase tracking-widest text-slate-500">Canvas Controls</h2>
                 <div class="grid grid-cols-2 gap-2">
-                    <button onclick="clearCanvas()" class="w-full bg-slate-700 hover:bg-slate-600 text-white px-4 py-2 rounded-lg text-sm font-semibold transition-all">
+                    <button onclick="openClearModal()" class="w-full bg-slate-700 hover:bg-slate-600 text-white px-4 py-2 rounded-lg text-sm font-semibold transition-all">
                         Clear
                     </button>
                     <button onclick="centerCanvas()" class="w-full bg-slate-700 hover:bg-slate-600 text-white px-4 py-2 rounded-lg text-sm font-semibold transition-all">
@@ -101,6 +101,60 @@
             </div>
         </div>
     </main>
+
+    <!-- Delete Confirmation Modal -->
+    <div id="delete-modal" class="fixed inset-0 z-50 flex items-center justify-center hidden" aria-labelledby="modal-title" role="dialog" aria-modal="true">
+        <!-- Backdrop -->
+        <div class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm transition-opacity opacity-0" id="delete-modal-backdrop"></div>
+
+        <!-- Modal Panel -->
+        <div class="relative transform overflow-hidden rounded-2xl bg-slate-900 border border-slate-800 text-left shadow-2xl transition-all scale-95 opacity-0 sm:w-full sm:max-w-md p-6" id="delete-modal-panel">
+            <div class="flex items-start space-x-4">
+                <div class="flex-shrink-0 flex items-center justify-center h-12 w-12 rounded-full bg-red-900/30 text-red-500">
+                    <svg class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
+                    </svg>
+                </div>
+                <div class="flex-grow">
+                    <h3 class="text-lg font-semibold leading-6 text-white" id="modal-title">Delete Flow</h3>
+                    <div class="mt-2">
+                        <p class="text-sm text-slate-400">Are you sure you want to delete the flow "<span id="delete-flow-name" class="font-bold text-slate-200"></span>"? This action cannot be undone.</p>
+                    </div>
+                </div>
+            </div>
+            <div class="mt-6 flex justify-end space-x-3">
+                <button type="button" onclick="closeDeleteModal()" class="rounded-xl px-4 py-2 text-sm font-semibold text-slate-300 hover:bg-slate-800 transition-colors">Cancel</button>
+                <button type="button" id="confirm-delete-btn" class="rounded-xl bg-red-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-red-500 transition-colors">Delete</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Clear Canvas Confirmation Modal -->
+    <div id="clear-modal" class="fixed inset-0 z-50 flex items-center justify-center hidden" aria-labelledby="modal-title" role="dialog" aria-modal="true">
+        <!-- Backdrop -->
+        <div class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm transition-opacity opacity-0" id="clear-modal-backdrop"></div>
+
+        <!-- Modal Panel -->
+        <div class="relative transform overflow-hidden rounded-2xl bg-slate-900 border border-slate-800 text-left shadow-2xl transition-all scale-95 opacity-0 sm:w-full sm:max-w-md p-6" id="clear-modal-panel">
+            <div class="flex items-start space-x-4">
+                <div class="flex-shrink-0 flex items-center justify-center h-12 w-12 rounded-full bg-yellow-900/30 text-yellow-500">
+                    <svg class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
+                    </svg>
+                </div>
+                <div class="flex-grow">
+                    <h3 class="text-lg font-semibold leading-6 text-white" id="modal-title">Clear Canvas</h3>
+                    <div class="mt-2">
+                        <p class="text-sm text-slate-400">Are you sure you want to clear the canvas? Any unsaved changes will be lost.</p>
+                    </div>
+                </div>
+            </div>
+            <div class="mt-6 flex justify-end space-x-3">
+                <button type="button" onclick="closeClearModal()" class="rounded-xl px-4 py-2 text-sm font-semibold text-slate-300 hover:bg-slate-800 transition-colors">Cancel</button>
+                <button type="button" onclick="confirmClearCanvas()" class="rounded-xl bg-yellow-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-yellow-500 transition-colors">Clear Canvas</button>
+            </div>
+        </div>
+    </div>
 
     <script>
     (function() {
@@ -200,7 +254,8 @@
         });
 
         canvas.addEventListener('mousedown', (event) => {
-            if (event.button === 1) { // Middle mouse button for panning
+            // Allow panning with Middle mouse (1) OR Left mouse (0) on empty space
+            if (event.button === 1 || (event.button === 0 && (event.target === canvas || event.target.id === 'node-container'))) {
                 isPanning = true;
                 canvas.style.cursor = 'grabbing';
                 event.preventDefault();
@@ -508,18 +563,105 @@
             updateCanvasTransform();
         }
 
-        window.toggleConfirm = function(id, show) {
-            const confirmUi = document.querySelector(`.confirm-${id}`);
+        window.openDeleteModal = function(flowId, flowName) {
+            const modal = document.getElementById('delete-modal');
+            const backdrop = document.getElementById('delete-modal-backdrop');
+            const panel = document.getElementById('delete-modal-panel');
+            const nameSpan = document.getElementById('delete-flow-name');
+            const confirmBtn = document.getElementById('confirm-delete-btn');
+
+            nameSpan.textContent = flowName;
+            
+            // Setup HTMX on the confirm button
+            confirmBtn.setAttribute('hx-post', `/ai-flow/${flowId}/delete`);
+            confirmBtn.setAttribute('hx-target', '#saved-flows-list');
+            confirmBtn.setAttribute('hx-swap', 'innerHTML');
+            htmx.process(confirmBtn);
+
+            // Close modal on click (HTMX will handle the request)
+            confirmBtn.onclick = function() {
+                closeDeleteModal();
+            };
+
+            modal.classList.remove('hidden');
+            // Trigger transitions
+            requestAnimationFrame(() => {
+                backdrop.classList.remove('opacity-0');
+                panel.classList.remove('opacity-0', 'scale-95');
+                panel.classList.add('opacity-100', 'scale-100');
+            });
+        }
+
+        window.closeDeleteModal = function() {
+            const modal = document.getElementById('delete-modal');
+            const backdrop = document.getElementById('delete-modal-backdrop');
+            const panel = document.getElementById('delete-modal-panel');
+
+            backdrop.classList.add('opacity-0');
+            panel.classList.remove('opacity-100', 'scale-100');
+            panel.classList.add('opacity-0', 'scale-95');
+
+            setTimeout(() => {
+                modal.classList.add('hidden');
+            }, 200); // Match transition duration
+        }
+
+        window.openClearModal = function() {
+            const modal = document.getElementById('clear-modal');
+            const backdrop = document.getElementById('clear-modal-backdrop');
+            const panel = document.getElementById('clear-modal-panel');
+
+            modal.classList.remove('hidden');
+            requestAnimationFrame(() => {
+                backdrop.classList.remove('opacity-0');
+                panel.classList.remove('opacity-0', 'scale-95');
+                panel.classList.add('opacity-100', 'scale-100');
+            });
+        }
+
+        window.closeClearModal = function() {
+            const modal = document.getElementById('clear-modal');
+            const backdrop = document.getElementById('clear-modal-backdrop');
+            const panel = document.getElementById('clear-modal-panel');
+
+            backdrop.classList.add('opacity-0');
+            panel.classList.remove('opacity-100', 'scale-100');
+            panel.classList.add('opacity-0', 'scale-95');
+
+            setTimeout(() => {
+                modal.classList.add('hidden');
+            }, 200);
+        }
+
+        window.confirmClearCanvas = function() {
+            clearCanvas(false);
+            closeClearModal();
+        }
+
+        window.toggleFlowRename = function(id, show) {
+            const nameBtn = document.querySelector(`.flow-name-${id}`);
+            const renameForm = document.querySelector(`.rename-form-${id}`);
             const actionBtns = document.querySelector(`.action-btns-${id}`);
-            if (confirmUi && actionBtns) {
+            const renameConfirm = document.querySelector(`.rename-confirm-${id}`);
+
+            if (nameBtn && renameForm && actionBtns && renameConfirm) {
                 if (show) {
-                    confirmUi.classList.remove('hidden');
+                    nameBtn.classList.add('hidden');
+                    renameForm.classList.remove('hidden');
                     actionBtns.classList.add('hidden');
+                    renameConfirm.classList.remove('hidden');
+                    renameForm.querySelector('input').focus();
                 } else {
-                    confirmUi.classList.add('hidden');
+                    nameBtn.classList.remove('hidden');
+                    renameForm.classList.add('hidden');
                     actionBtns.classList.remove('hidden');
+                    renameConfirm.classList.add('hidden');
                 }
             }
+        }
+
+        window.submitFlowRename = function(id) {
+            htmx.trigger(`.rename-form-${id}`, 'submit');
         }
 
         function createConnection(start, end) {

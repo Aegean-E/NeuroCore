@@ -4,9 +4,10 @@ from core.settings import settings
 
 
 class LLMBridge:
-    def __init__(self, base_url: str):
+    def __init__(self, base_url: str, api_key: str = None):
         # Normalize base_url: strip trailing slashes
         self.base_url = base_url.rstrip("/")
+        self.api_key = api_key
 
     def _get_url(self, path: str):
         """Constructs a full URL for the given path."""
@@ -23,6 +24,10 @@ class LLMBridge:
         final_temperature = temperature if temperature is not None else settings.get("temperature")
         max_tokens = settings.get("max_tokens")
 
+        headers = {}
+        if self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
+
         payload = {
             "model": final_model,
             "messages": messages,
@@ -33,7 +38,7 @@ class LLMBridge:
         
         async with httpx.AsyncClient(timeout=60.0) as client:
             try:
-                response = await client.post(url, json=payload)
+                response = await client.post(url, json=payload, headers=headers)
                 response.raise_for_status()
                 return response.json()
             except Exception as e:
@@ -42,9 +47,13 @@ class LLMBridge:
     async def get_models(self):
         """Fetches available models from the LLM API."""
         url = self._get_url("/models")
+        headers = {}
+        if self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
+
         async with httpx.AsyncClient() as client:
             try:
-                response = await client.get(url)
+                response = await client.get(url, headers=headers)
                 response.raise_for_status()
                 return response.json()
             except Exception as e:

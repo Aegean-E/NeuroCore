@@ -7,7 +7,10 @@ class LLMExecutor:
         Receives data from an upstream node (like Chat Input),
         and executes the core logic of this node (calling the LLM).
         """
-        llm_bridge = LLMBridge(base_url=settings.get("llm_api_url"))
+        llm_bridge = LLMBridge(
+            base_url=settings.get("llm_api_url"),
+            api_key=settings.get("llm_api_key")
+        )
         
         messages = input_data.get("messages")
         if not messages:

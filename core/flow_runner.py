@@ -3,6 +3,8 @@ from collections import deque
 from .flow_manager import flow_manager
 
 class FlowRunner:
+    _executor_cache = {}
+
     def __init__(self, flow_id: str):
         self.flow = flow_manager.get_flow(flow_id)
         if not self.flow:
@@ -48,11 +50,16 @@ class FlowRunner:
             node_type_id = node_meta['nodeTypeId']
             
             try:
-                # Dynamically import the module's node logic dispatcher
-                node_dispatcher = importlib.import_module(f"modules.{module_id}.node")
+                cache_key = f"{module_id}.{node_type_id}"
+                
+                if cache_key not in self._executor_cache:
+                    # Dynamically import the module's node logic dispatcher
+                    node_dispatcher = importlib.import_module(f"modules.{module_id}.node")
+                    # Get the specific executor class for this node type
+                    executor_class = await node_dispatcher.get_executor_class(node_type_id)
+                    self._executor_cache[cache_key] = executor_class
 
-                # Get the specific executor class for this node type
-                executor_class = await node_dispatcher.get_executor_class(node_type_id)
+                executor_class = self._executor_cache[cache_key]
                 if not executor_class:
                     raise ImportError(f"Executor class for '{node_type_id}' not found in '{module_id}'.")
                 

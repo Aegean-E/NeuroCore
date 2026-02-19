@@ -23,6 +23,12 @@
                 </div>
 
                 <div>
+                    <label class="block text-sm font-medium text-slate-400 mb-2">LLM API Key</label>
+                    <input type="password" name="llm_api_key" value="{{ settings.llm_api_key }}" placeholder="sk-..."
+                           class="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all">
+                </div>
+
+                <div>
                     <label class="block text-sm font-medium text-slate-400 mb-2">Default Model</label>
                     <input type="text" name="default_model" value="{{ settings.default_model }}" 
                            class="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all">

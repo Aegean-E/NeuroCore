@@ -8,6 +8,30 @@ from fastapi.templating import Jinja2Templates
 router = APIRouter()
 templates = Jinja2Templates(directory="web/templates")
 
+@router.get("", response_class=HTMLResponse)
+async def chat_page(request: Request):
+    # Access module manager from app state to render the sidebar correctly
+    module_manager = request.app.state.module_manager
+    enabled_modules = [m for m in module_manager.get_all_modules() if m.get("enabled")]
+    
+    return templates.TemplateResponse(request, "index.html", {
+        "modules": enabled_modules,
+        "active_module": "chat",
+        "sessions": session_manager.list_sessions()
+    })
+
+@router.get("", response_class=HTMLResponse)
+async def chat_page(request: Request):
+    # Access module manager from app state to render the sidebar correctly
+    module_manager = request.app.state.module_manager
+    enabled_modules = [m for m in module_manager.get_all_modules() if m.get("enabled")]
+    
+    return templates.TemplateResponse(request, "index.html", {
+        "modules": enabled_modules,
+        "active_module": "chat",
+        "sessions": session_manager.list_sessions()
+    })
+
 @router.get("/gui", response_class=HTMLResponse)
 async def chat_gui(request: Request, session_id: str = Query(None)):
     active_session = None
