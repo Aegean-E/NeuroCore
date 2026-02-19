@@ -1,5 +1,10 @@
 # NeuroCore
 
+<p align="center">
+  <img src="https://github.com/Aegean-E/NeuroCore/blob/main/banner.jpg?raw=true" alt="NeuroCore Banner" width="1200">
+</p>
+
+
 **A modular, extensible, and high-performance web UI for interacting with and orchestrating local or remote Language Models.**
 
 NeuroCore is built on the principles of **Speed**, **Simplicity**, and **Modularity**. It provides a solid foundation for building custom AI-powered applications with a fast, modern web stack and a powerful visual workflow editor.
