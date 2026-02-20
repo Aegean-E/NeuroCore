@@ -98,3 +98,12 @@ async def consolidate_memories(request: Request):
     memory_store.last_consolidation_ts = time.time()
     
     return Response(status_code=200, headers={"HX-Trigger": json.dumps({"showMessage": {"level": "success", "message": f"Consolidated {count} redundant memories"}})})
+
+@router.post("/wipe")
+async def wipe_memories(request: Request):
+    try:
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(memory_store.executor, memory_store.wipe_all)
+        return Response(status_code=200, headers={"HX-Trigger": json.dumps({"memoryWiped": None, "showMessage": {"level": "success", "message": "All memories wiped successfully"}})})
+    except Exception as e:
+        return Response(status_code=500, headers={"HX-Trigger": json.dumps({"showMessage": {"level": "error", "message": f"Failed to wipe memories: {str(e)}"}})})

@@ -42,50 +42,6 @@
     </div>
     {% endif %}
 
-    {% if module.id == 'system_prompt' and module.enabled %}
-    <div class="bg-slate-900 rounded-xl border border-slate-800 p-6 mt-6">
-        <h3 class="font-semibold text-lg mb-4">System Prompt Settings</h3>
-        <form hx-post="/modules/{{ module.id }}/config" hx-swap="none"
-              hx-on::after-request="
-                if(this.parentElement.querySelector('button[type=submit]')) {
-                  const btn = this.querySelector('button[type=submit]');
-                  const orig = btn.innerText;
-                  btn.innerText = 'Saved!';
-                  btn.classList.remove('bg-blue-600', 'hover:bg-blue-500');
-                  btn.classList.add('bg-emerald-600', 'hover:bg-emerald-500');
-                  setTimeout(() => {
-                    btn.innerText = orig;
-                    btn.classList.add('bg-blue-600', 'hover:bg-blue-500');
-                    btn.classList.remove('bg-emerald-600', 'hover:bg-emerald-500');
-                  }, 2000);
-                }
-                htmx.ajax('GET', '/system_prompt/available-tools', {target:'#tools-list', swap:'innerHTML'});
-              ">
-            
-            <div class="mb-6">
-                <label class="block text-sm font-medium text-slate-400 mb-2">System Prompt</label>
-                <textarea name="system_prompt" rows="6" class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all custom-scrollbar">{{ module.config.system_prompt }}</textarea>
-                <p class="text-xs text-slate-500 mt-2">The main system instruction that will be prepended to every conversation.</p>
-            </div>
-
-            <div class="mb-6">
-                <h4 class="text-sm font-medium text-slate-400 mb-3">Available Tools</h4>
-                <p class="text-xs text-slate-500 mb-4">Check the tools you want to include in the system prompt:</p>
-                <div class="bg-slate-950/50 rounded-lg border border-slate-700/50 p-4">
-                    <div id="tools-list" hx-get="/system_prompt/available-tools" hx-trigger="load" class="min-h-[100px] flex items-center justify-center">
-                        <div class="w-6 h-6 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
-                    </div>
-                </div>
-                <input type="hidden" name="enabled_tools" id="enabled_tools" value="{{ module.config.enabled_tools | tojson }}">
-            </div>
-
-            <div class="mt-6 flex justify-end">
-                <button type="submit" class="bg-blue-600 hover:bg-blue-500 text-white px-6 py-2 rounded-lg text-sm font-semibold transition-colors">Save System Prompt Settings</button>
-            </div>
-        </form>
-    </div>
-    {% endif %}
-
     {% if module.id == 'llm_module' and module.enabled %}
     <div class="bg-slate-900 rounded-xl border border-slate-800 p-6 mt-6">
         <h3 class="font-semibold text-lg mb-4">Connection Settings</h3>
@@ -114,6 +70,32 @@
             </div>
             <div class="mt-4 flex justify-end">
                 <button type="submit" class="bg-blue-600 hover:bg-blue-500 text-white px-6 py-2 rounded-lg text-sm font-semibold transition-colors">Save Connection</button>
+            </div>
+        </form>
+    </div>
+
+    <div class="bg-slate-900 rounded-xl border border-slate-800 p-6 mt-6">
+        <h3 class="font-semibold text-lg mb-4">Embeddings Settings</h3>
+        <form hx-post="/settings/save" 
+              hx-swap="none"
+              hx-on::after-request="const btn = this.querySelector('button[type=submit]'); const orig = btn.innerText; btn.innerText = 'Saved!'; btn.classList.remove('bg-blue-600', 'hover:bg-blue-500'); btn.classList.add('bg-emerald-600', 'hover:bg-emerald-500'); setTimeout(() => { btn.innerText = orig; btn.classList.add('bg-blue-600', 'hover:bg-blue-500'); btn.classList.remove('bg-emerald-600', 'hover:bg-emerald-500'); }, 2000);">
+            
+            <div class="space-y-6">
+                <div>
+                    <label class="block text-sm font-medium text-slate-400 mb-2">Embedding API URL</label>
+                    <input type="text" name="embedding_api_url" value="{{ settings.embedding_api_url }}" placeholder="Leave empty to use LLM API URL"
+                           class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all">
+                    <p class="text-xs text-slate-500 mt-2">If your embedding model is hosted on a different server (e.g., Ollama vs LM Studio), specify it here.</p>
+                </div>
+
+                <div>
+                    <label class="block text-sm font-medium text-slate-400 mb-2">Embedding Model</label>
+                    <input type="text" name="embedding_model" value="{{ settings.embedding_model }}" placeholder="e.g. text-embedding-nomic-embed-text-v1.5"
+                           class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all">
+                </div>
+            </div>
+            <div class="mt-4 flex justify-end">
+                <button type="submit" class="bg-blue-600 hover:bg-blue-500 text-white px-6 py-2 rounded-lg text-sm font-semibold transition-colors">Save Embeddings</button>
             </div>
         </form>
     </div>
@@ -232,10 +214,28 @@
 
     <div class="bg-slate-900 rounded-xl border border-slate-800 p-6 mt-6">
         <h3 class="font-semibold text-lg mb-4">Memory Statistics</h3>
-        <div hx-get="/memory/stats" hx-trigger="load" class="min-h-[100px] flex items-center justify-center">
+        <div id="memory-stats-container" hx-get="/memory/stats" hx-trigger="load, memoryWiped from:body" class="min-h-[100px] flex items-center justify-center">
             <div class="w-6 h-6 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
         </div>
     </div>
+
+    <div class="mt-6">
+        <button type="button" onclick="confirmWipe()" class="w-full bg-red-950/30 hover:bg-red-900/50 border-2 border-red-800/50 hover:border-red-500 text-red-500 hover:text-red-100 font-bold py-4 rounded-xl shadow-lg transition-all uppercase tracking-widest text-lg flex items-center justify-center space-x-3 group">
+            <svg class="w-6 h-6 group-hover:animate-pulse" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+            <span>Wipe All Memories</span>
+        </button>
+    </div>
+
+    <script>
+        function confirmWipe() {
+            const input = prompt("⚠️ DANGER ZONE ⚠️\n\nThis will permanently delete ALL stored memories. This action cannot be undone.\n\nTo confirm, type 'DELETE' in the box below:");
+            if (input === 'DELETE') {
+                htmx.ajax('POST', '/memory/wipe', {swap: 'none'});
+            } else if (input !== null) {
+                alert("Incorrect confirmation code. Action cancelled.");
+            }
+        }
+    </script>
     {% endif %}
 
     {% if module.id == 'telegram' and module.enabled %}

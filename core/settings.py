@@ -13,7 +13,7 @@ DEFAULT_SETTINGS = {
     "active_ai_flow": "default-flow-001",
     "temperature": 0.7,
     "max_tokens": 2048,
-    "debug_mode": False
+    "debug_mode": True
 }
 
 class SettingsManager:

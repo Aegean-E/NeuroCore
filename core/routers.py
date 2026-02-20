@@ -226,7 +226,7 @@ async def save_settings_route(request: Request, settings_man: SettingsManager = 
         updates["debug_mode"] = form_data.get("debug_mode") == "on"
 
     settings_man.save_settings(updates)
-    return Response(status_code=200, headers={"HX-Trigger": json.dumps({"showMessage": {"level": "success", "message": "Settings saved successfully"}})})
+    return Response(status_code=200, headers={"HX-Trigger": json.dumps({"settingsChanged": None, "showMessage": {"level": "success", "message": "Settings saved successfully"}})})
 
 # --- Debug ---
 

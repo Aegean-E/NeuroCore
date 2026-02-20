@@ -345,6 +345,18 @@ class MemoryStore:
                     self.faiss_index.remove_ids(np.array([memory_id]).astype('int64'))
                     self._save_faiss_index()
 
+    def wipe_all(self):
+        with self.write_lock:
+            with self._connect() as con:
+                con.execute("DELETE FROM memories")
+                try: con.execute("DELETE FROM sqlite_sequence WHERE name='memories'")
+                except Exception: pass
+            
+            if FAISS_AVAILABLE and self.faiss_index:
+                with self.faiss_lock:
+                    self.faiss_index.reset()
+                    self._save_faiss_index(force=True)
+
     def get_memory_stats(self) -> Dict[str, Any]:
         """Returns statistics about the stored memories."""
         stats = {}
