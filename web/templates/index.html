@@ -8,6 +8,8 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- HTMX (Fast and less memory than React/Vue/Svelte) -->
     <script src="https://unpkg.com/htmx.org@2.0.2"></script>
+    <!-- Sortable.js for drag-and-drop -->
+    <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.2/Sortable.min.js"></script>
     <style>
         .custom-scrollbar::-webkit-scrollbar { width: 4px; }
         .custom-scrollbar::-webkit-scrollbar-thumb { background: #4a5568; border-radius: 2px; }
@@ -19,14 +21,15 @@
     {% include 'navbar.html' %}
 
     <!-- Main Layout -->
-    <main class="flex-grow container mx-auto flex p-6 space-x-6 h-[calc(100vh-80px)] overflow-hidden">
+    <main class="flex-grow container mx-auto flex p-6 {{ 'space-x-6' if not full_width_content else '' }} h-[calc(100vh-80px)] overflow-hidden">
         
         <!-- Sidebar -->
+        {% if not full_width_content %}
         <aside class="w-64 flex flex-col space-y-4 border-r border-slate-800 pr-4">
             <div class="flex-grow bg-slate-900/50 rounded-xl border border-slate-800 overflow-hidden flex flex-col relative">
                 {% if sidebar_template %}
                     {% include sidebar_template %}
-                {% else %}
+            {% elif not hide_module_list %}
                 <div id="module-list-container"
                      hx-get="/modules/list"
                      hx-trigger="load, modulesChanged from:body"
@@ -50,6 +53,7 @@
                 </div>
             </div>
         </aside>
+        {% endif %}
 
         <!-- Dynamic Content Area -->
         <section class="flex-grow flex flex-col bg-slate-950/50 rounded-2xl border border-slate-800 shadow-2xl relative overflow-hidden">

@@ -10,15 +10,27 @@
         <a href="{{ '/chat' if ns.chat_enabled else '/' }}" class="text-2xl font-bold bg-gradient-to-r from-blue-400 to-emerald-400 bg-clip-text text-transparent hover:opacity-80 transition-opacity">NeuroCore</a>
         <nav>
             <ul class="flex space-x-6 text-sm font-medium text-slate-400">
+                <!-- Chat -->
                 {% for module in modules %}
                     {% if module.id == 'chat' and module.enabled %}
-                    <li>
-                        <a href="/chat" class="hover:text-blue-400 transition-colors">Chat</a>
-                    </li>
+                    <li><a href="/chat" class="hover:text-blue-400 transition-colors">Chat</a></li>
                     {% endif %}
                 {% endfor %}
+
+                <!-- Modules -->
                 <li><a href="/" class="hover:text-blue-400 transition-colors">Modules</a></li>
+
+                <!-- Tools -->
+                {% for module in modules %}
+                    {% if module.id == 'tools' and module.enabled %}
+                    <li><a href="/tools" class="hover:text-blue-400 transition-colors">Tools</a></li>
+                    {% endif %}
+                {% endfor %}
+
+                <!-- AI Flow -->
                 <li><a href="/ai-flow" class="hover:text-blue-400 transition-colors">AI Flow</a></li>
+
+                <!-- Settings -->
                 <li><a href="/settings" class="hover:text-blue-400 transition-colors">Settings</a></li>
             </ul>
         </nav>

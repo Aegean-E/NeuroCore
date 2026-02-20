@@ -1,0 +1,105 @@
+<div class="p-8">
+    <div class="flex items-center justify-between mb-8">
+        <div>
+            <h2 class="text-2xl font-bold">Tool Library</h2>
+            <p class="text-slate-400 text-sm">Define functions that the AI can execute.</p>
+        </div>
+        <div class="flex items-center space-x-2">
+            <button hx-get="/tools/list" hx-target="#tools-list" hx-indicator="#tools-list" class="bg-slate-800 hover:bg-slate-700 text-white px-4 py-2 rounded-lg text-sm font-bold transition-all">
+                Load Tools
+            </button>
+            <button onclick="resetToolForm()" class="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-lg text-sm font-bold transition-all">
+                + New Tool
+            </button>
+        </div>
+    </div>
+
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+        <!-- Tool Form -->
+        <div id="tool-form-wrapper" class="lg:col-span-1 bg-slate-900 rounded-xl border border-slate-800 p-6 h-fit hidden">
+            <h3 id="form-title" class="font-semibold mb-4">Add New Tool</h3>
+            <form id="tool-form" hx-post="/tools/save" hx-target="#tools-list" hx-on::after-request="if(event.detail.successful) toggleToolForm(false)" class="space-y-4">
+                <div>
+                    <label class="block text-xs font-bold text-slate-500 uppercase mb-1">Function Name</label>
+                    <input type="text" id="tool-name" name="name" placeholder="get_weather" required class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none">
+                </div>
+                <div>
+                    <label class="block text-xs font-bold text-slate-500 uppercase mb-1">Description</label>
+                    <input type="text" id="tool-desc" name="description" placeholder="Get current weather for a location" required class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none">
+                </div>
+                <div>
+                    <label class="block text-xs font-bold text-slate-500 uppercase mb-1">Parameters (JSON Schema)</label>
+                    <textarea id="tool-params" name="parameters" rows="5" class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-xs font-mono focus:ring-2 focus:ring-blue-500 outline-none">
+{
+  "type": "object",
+  "properties": {
+    "location": { "type": "string" }
+  },
+  "required": ["location"]
+}</textarea>
+                </div>
+                <div>
+                    <label class="block text-xs font-bold text-slate-500 uppercase mb-1">Python Logic</label>
+                    <textarea id="tool-code" name="code" rows="8" class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-xs font-mono focus:ring-2 focus:ring-blue-500 outline-none" placeholder="# Use 'args' dict, set 'result'&#10;loc = args.get('location')&#10;result = f'Weather in {loc} is 72F'"></textarea>
+                </div>
+                <div class="flex space-x-2 pt-2">
+                    <button type="button" onclick="toggleToolForm(false)" class="w-full bg-slate-700 hover:bg-slate-600 text-white py-2 rounded-lg text-sm font-bold transition-colors">Cancel</button>
+                    <button type="submit" id="submit-btn" class="w-full bg-blue-600 hover:bg-blue-500 text-white py-2 rounded-lg text-sm font-bold transition-colors">Save Tool</button>
+                </div>
+            </form>
+        </div>
+
+        <!-- Tools List -->
+        <div id="tools-list-wrapper" class="lg:col-span-3">
+            <div id="tools-list" hx-get="/tools/list" hx-trigger="load">
+                <div class="flex items-center justify-center py-20">
+                    <div class="w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    function toggleToolForm(show) {
+        const formWrapper = document.getElementById('tool-form-wrapper');
+        const listWrapper = document.getElementById('tools-list-wrapper');
+        if (show) {
+            formWrapper.classList.remove('hidden');
+            listWrapper.classList.remove('lg:col-span-3');
+            listWrapper.classList.add('lg:col-span-2');
+        } else {
+            formWrapper.classList.add('hidden');
+            listWrapper.classList.remove('lg:col-span-2');
+            listWrapper.classList.add('lg:col-span-3');
+        }
+    }
+
+    async function loadToolForEdit(name) {
+        const response = await fetch(`/tools/edit/${name}`);
+        if (response.ok) {
+            const data = await response.json();
+            document.getElementById('form-title').innerText = 'Edit Tool: ' + name;
+            document.getElementById('tool-name').value = data.name;
+            document.getElementById('tool-name').readOnly = true;
+            document.getElementById('tool-desc').value = data.description;
+            document.getElementById('tool-params').value = data.parameters;
+            document.getElementById('tool-code').value = data.code;
+            document.getElementById('submit-btn').innerText = 'Update Tool';
+            toggleToolForm(true);
+            document.getElementById('tool-form-wrapper').scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+    }
+
+    function resetToolForm() {
+        document.getElementById('form-title').innerText = 'Add New Tool';
+        document.getElementById('tool-name').value = '';
+        document.getElementById('tool-name').readOnly = false;
+        document.getElementById('tool-desc').value = '';
+        document.getElementById('tool-params').value = '{\n  "type": "object",\n  "properties": {\n    "location": { "type": "string" }\n  },\n  "required": ["location"]\n}';
+        document.getElementById('tool-code').value = '';
+        document.getElementById('submit-btn').innerText = 'Save Tool';
+        toggleToolForm(true);
+        document.getElementById('tool-form-wrapper').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+</script>

@@ -105,6 +105,23 @@ class ModuleManager:
 
         return self.modules[module_id]
 
+    def reorder_modules(self, module_ids: list):
+        """Updates the 'order' of all modules based on a provided list of IDs."""
+        with self.lock:
+            # Create a map for quick lookups
+            id_to_meta = {m['id']: m for m in self.modules.values()}
+
+            for index, module_id in enumerate(module_ids):
+                if module_id in id_to_meta:
+                    # Update the order in the in-memory representation
+                    id_to_meta[module_id]['order'] = index
+                    
+                    # Write the change to the module.json file
+                    meta_path = os.path.join(self.modules_dir, module_id, "module.json")
+                    if os.path.exists(meta_path):
+                        with open(meta_path, "w") as f:
+                            json.dump(id_to_meta[module_id], f, indent=4)
+
     def enable_module(self, module_id: str):
         return self._toggle_module(module_id, True)
 

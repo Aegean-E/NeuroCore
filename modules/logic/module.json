@@ -5,7 +5,7 @@
     "id": "logic",
     "icon": "M4 6h16M4 12h16m-7 6h7",
     "is_flow_node": false,
-    "order": 0,
+    "order": 3,
     "provides_nodes": [
         {
             "id": "delay_node",

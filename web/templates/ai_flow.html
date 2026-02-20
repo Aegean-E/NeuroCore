@@ -213,6 +213,12 @@
                     </div>
                     <p class="text-xs text-slate-500 mt-2">The flow will be re-triggered after the delay. Set Max Repeats to 0 to loop indefinitely.</p>
                 </div>
+        <!-- Tool Dispatcher Editor -->
+        <div id="config-tools" class="hidden">
+            <label class="block text-sm font-medium text-slate-400 mb-2">Enabled Tools</label>
+            <div id="tools-checklist" class="space-y-2 max-h-60 overflow-y-auto custom-scrollbar bg-slate-950 border border-slate-700 rounded-xl p-4"></div>
+            <p class="text-xs text-slate-500 mt-2">Select which tools this dispatcher is allowed to execute. Leave all unchecked to allow all.</p>
+        </div>
             </div>
             <div class="flex justify-end space-x-3">
                 <button type="button" onclick="closeConfigModal()" class="rounded-xl px-4 py-2 text-sm font-semibold text-slate-300 hover:bg-slate-800 transition-colors">Cancel</button>
@@ -872,6 +878,7 @@
             document.getElementById('config-system-prompt').classList.add('hidden');
             document.getElementById('config-script').classList.add('hidden');
             document.getElementById('config-repeater').classList.add('hidden');
+            document.getElementById('config-tools').classList.add('hidden');
 
             if (node.nodeTypeId === 'delay_node') {
                 document.getElementById('config-delay').classList.remove('hidden');
@@ -886,6 +893,23 @@
                 document.getElementById('config-repeater').classList.remove('hidden');
                 document.getElementById('repeater-delay-input').value = node.config.delay || 5.0;
                 document.getElementById('repeater-count-input').value = node.config.max_repeats || 1;
+            } else if (node.nodeTypeId === 'tool_dispatcher') {
+                document.getElementById('config-tools').classList.remove('hidden');
+                const checklist = document.getElementById('tools-checklist');
+                checklist.innerHTML = '<div class="animate-pulse text-slate-600 text-xs">Loading tools...</div>';
+                
+                fetch('/tools/names').then(r => r.json()).then(names => {
+                    checklist.innerHTML = '';
+                    const allowed = node.config.allowed_tools || [];
+                    names.forEach(name => {
+                        const checked = allowed.includes(name) ? 'checked' : '';
+                        checklist.innerHTML += `
+                            <label class="flex items-center space-x-3 cursor-pointer hover:bg-slate-900 p-1 rounded transition-colors">
+                                <input type="checkbox" value="${name}" ${checked} class="form-checkbox h-4 w-4 text-blue-600 bg-slate-900 border-slate-700 rounded focus:ring-blue-500">
+                                <span class="text-sm text-slate-300">${name}</span>
+                            </label>`;
+                    });
+                });
             } else {
                 document.getElementById('config-default').classList.remove('hidden');
                 document.getElementById('node-config-input').value = JSON.stringify(node.config || {}, null, 4);
@@ -935,6 +959,10 @@
                     const d = parseFloat(document.getElementById('repeater-delay-input').value);
                     const c = parseInt(document.getElementById('repeater-count-input').value);
                     newConfig = { delay: isNaN(d) ? 5.0 : d, max_repeats: isNaN(c) ? 1 : c };
+                } else if (node.nodeTypeId === 'tool_dispatcher') {
+                    const checkboxes = document.querySelectorAll('#tools-checklist input:checked');
+                    const allowed = Array.from(checkboxes).map(cb => cb.value);
+                    newConfig = { allowed_tools: allowed };
                 } else {
                     newConfig = JSON.parse(document.getElementById('node-config-input').value);
                 }

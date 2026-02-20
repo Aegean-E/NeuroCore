@@ -94,6 +94,16 @@ async def save_module_config(request: Request, module_id: str, config_json: str 
     except Exception as e:
         return Response(status_code=500, headers={"HX-Trigger": json.dumps({"showMessage": {"level": "error", "message": str(e)}})})
 
+@router.post("/modules/reorder")
+async def reorder_modules(request: Request, order: str = Form(...), module_manager: ModuleManager = Depends(get_module_manager)):
+    module_ids = order.split(',')
+    try:
+        module_manager.reorder_modules(module_ids)
+        # Trigger a refresh of the navbar to reflect the new order
+        return Response(status_code=200, headers={"HX-Trigger": "modulesChanged"})
+    except Exception as e:
+        return Response(status_code=500, headers={"HX-Trigger": json.dumps({"showMessage": {"level": "error", "message": f"Failed to reorder: {e}"}})})
+
 @router.post("/modules/{module_id}/{action}")
 async def toggle_module(request: Request, module_id: str, action: str, module_manager: ModuleManager = Depends(get_module_manager)):
     if action == "enable":

@@ -62,13 +62,17 @@ class LLMExecutor:
 
         temperature = get_val("temperature", 0.7, float)
         max_tokens = get_val("max_tokens", 2048, int)
+        tools = config.get("tools") # Expects OpenAI tool format
+        tool_choice = config.get("tool_choice")
         
         # Return the result of the core logic
         return await llm_bridge.chat_completion(
             messages=messages,
             model=model,
             temperature=temperature,
-            max_tokens=max_tokens
+            max_tokens=max_tokens,
+            tools=tools,
+            tool_choice=tool_choice
         )
 
     async def send(self, processed_data: dict) -> dict:
