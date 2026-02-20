@@ -1,19 +1,18 @@
 {
     "name": "Calendar",
-    "description": "Manage schedules and events.",
+    "description": "Event scheduling and reminders.",
     "enabled": true,
     "id": "calendar",
     "icon": "M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z",
     "is_flow_node": false,
     "order": 8,
-    "config": {},
     "provides_nodes": [
         {
-            "id": "send_reminder",
-            "name": "Send Reminder",
-            "description": "Sends a formatted reminder notification to the chat output.",
+            "id": "calendar_watcher",
+            "name": "Calendar Watcher",
+            "description": "Checks for events due at the current time. Returns event details if due, or stops flow if not.",
             "singleton": false,
-            "configurable": true
+            "configurable": false
         }
     ],
     "load_error": null

@@ -1,5 +1,6 @@
 import os
 import json
+from datetime import datetime
 from fastapi import APIRouter, Request, Form, UploadFile, File, Query
 from fastapi.responses import HTMLResponse, Response, JSONResponse
 from fastapi.templating import Jinja2Templates
@@ -165,7 +166,17 @@ async def get_tools_with_descriptions():
 async def get_definitions():
     """Returns the JSON definitions for all tools to be used in LLM config."""
     tools = load_tools()
-    return [t["definition"] for t in tools.values() if t.get("enabled", True)]
+    definitions = []
+    for name, tool in tools.items():
+        if tool.get("enabled", True):
+            definition = tool["definition"]
+            # Inject current time into SaveReminder description to help LLM with relative dates
+            if name == "SaveReminder":
+                now = datetime.now().strftime("%Y-%m-%d %H:%M %A")
+                desc = definition["function"].get("description", "")
+                definition["function"]["description"] = f"{desc} Current date/time: {now}."
+            definitions.append(definition)
+    return definitions
 
 @router.get("/export")
 async def export_tools(name: str = Query(None)):
