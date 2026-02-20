@@ -27,8 +27,9 @@ class LLMExecutor:
     async def receive(self, input_data: dict, config: dict = None) -> dict:
         config = config or {}
         """
-        Receives data from an upstream node (like Chat Input),
+        Receives data from an upstream node (like System Prompt or Chat Input),
         and executes the core logic of this node (calling the LLM).
+        Gets available tools from system prompt and knows how to call tool dispatcher.
         """
         llm_bridge = LLMBridge(
             base_url=settings.get("llm_api_url"),
@@ -62,8 +63,11 @@ class LLMExecutor:
 
         temperature = get_val("temperature", 0.7, float)
         max_tokens = get_val("max_tokens", 2048, int)
-        tools = config.get("tools") # Expects OpenAI tool format
-        tool_choice = config.get("tool_choice")
+        
+        # Priority: config > input_data (from system prompt) > module_config
+        # Tools come from system prompt via input_data, or can be overridden in config
+        tools = config.get("tools") or input_data.get("tools")
+        tool_choice = config.get("tool_choice") or input_data.get("tool_choice", "auto" if tools else None)
         
         # Return the result of the core logic
         return await llm_bridge.chat_completion(

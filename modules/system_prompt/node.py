@@ -31,10 +31,22 @@ class SystemPromptExecutor:
                     tools_text += f"- **{tool_name}**: {desc}\n"
         
         return tools_text
+    
+    def _get_tools_in_openai_format(self, enabled_tool_names: list) -> list:
+        """Convert enabled tools to OpenAI tool format."""
+        all_tools = self._load_available_tools()
+        tools_list = []
+        
+        for tool_name in enabled_tool_names:
+            if tool_name in all_tools and "definition" in all_tools[tool_name]:
+                tools_list.append(all_tools[tool_name]["definition"])
+        
+        return tools_list
 
     async def receive(self, input_data: dict, config: dict = None) -> dict:
         """
         Receives the current conversation state and prepends a system message with available tools.
+        Also passes tools in OpenAI format for the LLM to use.
         """
         if input_data is None:
             input_data = {}
@@ -61,9 +73,17 @@ class SystemPromptExecutor:
         # Prepend the system message to the history
         new_messages = [system_message] + messages
         
-        # Return the updated data structure
+        # Get tools in OpenAI format for the LLM to use
+        tools = self._get_tools_in_openai_format(enabled_tools)
+        
+        # Return the updated data structure with tools
         # We use **input_data to preserve any other keys flowing through the system
-        return {**input_data, "messages": new_messages}
+        result = {**input_data, "messages": new_messages}
+        if tools:
+            result["tools"] = tools
+            result["available_tools"] = enabled_tools
+        
+        return result
 
     async def send(self, processed_data: dict) -> dict:
         return processed_data

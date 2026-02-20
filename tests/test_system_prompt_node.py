@@ -104,3 +104,53 @@ async def test_system_prompt_with_empty_tools():
     # Should just contain the system prompt without tools section
     assert messages[0]["content"] == "You are a helpful assistant."
     assert "Available Tools" not in messages[0]["content"]
+
+@pytest.mark.asyncio
+async def test_system_prompt_passes_tools_in_openai_format():
+    """Test that enabled tools are passed in OpenAI format via result data."""
+    executor = SystemPromptExecutor()
+    
+    input_data = {
+        "messages": [
+            {"role": "user", "content": "What's the weather?"}
+        ]
+    }
+    
+    config = {
+        "system_prompt": "You are a helpful assistant.",
+        "enabled_tools": ["Weather"]
+    }
+    
+    result = await executor.receive(input_data, config)
+    
+    # Check that tools are passed in the result
+    assert "tools" in result
+    assert "available_tools" in result
+    assert result["available_tools"] == ["Weather"]
+    
+    # Check that tools contain the OpenAI format
+    assert len(result["tools"]) > 0
+    tool = result["tools"][0]
+    assert tool["type"] == "function"
+    assert "function" in tool
+    assert tool["function"]["name"] == "Weather"
+
+@pytest.mark.asyncio
+async def test_system_prompt_no_tools_in_result_when_empty():
+    """Test that tools are not added to result when no tools are enabled."""
+    executor = SystemPromptExecutor()
+    
+    input_data = {
+        "messages": []
+    }
+    
+    config = {
+        "system_prompt": "You are a helpful assistant.",
+        "enabled_tools": []
+    }
+    
+    result = await executor.receive(input_data, config)
+    
+    # Should not have tools in result when none are enabled
+    assert "tools" not in result
+    assert "available_tools" not in result
