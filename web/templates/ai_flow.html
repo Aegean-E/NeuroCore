@@ -18,6 +18,11 @@
             0%, 100% { box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.4); }
             50% { box-shadow: 0 0 0 8px rgba(59, 130, 246, 0); }
         }
+        .selected-node {
+            border-color: #3b82f6 !important; /* blue-500 */
+            box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.4);
+            z-index: 20 !important;
+        }
     </style>
 </head>
 <body class="bg-slate-900 text-slate-100 min-h-screen flex flex-col font-sans">
@@ -93,8 +98,11 @@
                     <button onclick="centerCanvas()" class="w-full bg-slate-700 hover:bg-slate-600 text-white px-4 py-2 rounded-lg text-sm font-semibold transition-all">
                         Center
                     </button>
-                    <button onclick="deleteSelectedConnection()" id="btn-break-line" class="col-span-2 w-full bg-slate-700 hover:bg-red-600 text-white px-4 py-2 rounded-lg text-sm font-semibold transition-all opacity-50 cursor-not-allowed" disabled>
-                        Break Connection
+                    <button onclick="revertSelectedConnection()" id="btn-revert-line" class="w-full bg-slate-700 hover:bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-semibold transition-all opacity-50 cursor-not-allowed" disabled>
+                        Revert
+                    </button>
+                    <button onclick="deleteSelectedConnection()" id="btn-break-line" class="w-full bg-slate-700 hover:bg-red-600 text-white px-4 py-2 rounded-lg text-sm font-semibold transition-all opacity-50 cursor-not-allowed" disabled>
+                        Break
                     </button>
                 </div>
             </div>
@@ -304,6 +312,7 @@
         let nextNodeId = 0;
         let activeConfigNodeId = null;
         let selectedConnection = null;
+        let selectedNodeId = null;
         
         let panX = 0, panY = 0, zoom = 1;
         let isPanning = false;
@@ -385,6 +394,15 @@
                     selectedConnection = null;
                     drawConnections();
                 }
+
+                // Deselect node if clicking on empty space
+                if (selectedNodeId) {
+                    const prevNode = document.getElementById(selectedNodeId);
+                    if (prevNode) {
+                        prevNode.classList.remove('selected-node');
+                    }
+                    selectedNodeId = null;
+                }
                 
                 event.preventDefault();
             }
@@ -410,8 +428,17 @@
 
         // Global Keydown for Deletion
         window.addEventListener('keydown', (event) => {
-            if ((event.key === 'Delete' || event.key === 'Backspace') && selectedConnection) {
-                deleteSelectedConnection();
+            const activeEl = document.activeElement;
+            const isInputFocused = activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA');
+
+            if ((event.key === 'Delete' || event.key === 'Backspace') && !isInputFocused) {
+                if (selectedConnection) {
+                    deleteSelectedConnection();
+                }
+                if (selectedNodeId) {
+                    deleteNode(selectedNodeId);
+                    selectedNodeId = null;
+                }
             }
         });
 
@@ -564,11 +591,41 @@
             }
 
             nodeElement.onmousedown = (e) => {
+                // Only allow dragging/selection with the left mouse button
+                 if (e.button !== 0) return;
+
+                 // Stop this event from bubbling up to the canvas, which would trigger
+                 // the pan/deselect logic and interfere with selection.
+                 e.stopPropagation();
+
                 // Check for specific interactive elements before starting drag
                 if (e.target.closest('.input-area') || e.target.closest('.output-area') || e.target.closest('.config-btn') || e.target.tagName.toLowerCase() === 'textarea' || e.target.classList.contains('comment-resize-handle')) {
                     return;
                 }
                 isDragging = true;
+
+                // Handle node selection
+                if (selectedNodeId !== nodeId) {
+                    // Deselect previous node
+                    if (selectedNodeId) {
+                        const prevNode = document.getElementById(selectedNodeId);
+                        if (prevNode) {
+                            prevNode.classList.remove('selected-node');
+                        }
+                    }
+                    
+                    // Select current node
+                    nodeElement.classList.add('selected-node');
+                    selectedNodeId = nodeId;
+                    
+                    // Also deselect any selected connection
+                    if (selectedConnection) {
+                        selectedConnection = null;
+                        drawConnections();
+                    } else {
+                        updateButtonStates();
+                    }
+                }
 
                 document.onmousemove = (e) => {
                     bin.style.opacity = '1';
@@ -625,8 +682,9 @@
             // Only add connection logic for non-comment nodes
             if (inputArea && outputArea) {
                 const outputDot = nodeElement.querySelector('.output-dot');
-
-                outputArea.onclick = (e) => {
+                const inputDot = nodeElement.querySelector('.input-dot');
+                
+                const createStartHandler = (dot) => (e) => {
                     e.stopPropagation();
                     if (isDrawingConnection) {
                         clearConnectionState();
@@ -634,11 +692,11 @@
                     }
                     isDrawingConnection = true;
                     connectionStart.node = nodeData;
-                    connectionStart.element = outputDot;
-                    outputDot.classList.add('connecting');
+                    connectionStart.element = dot;
+                    dot.classList.add('connecting');
 
                     const canvasRect = canvas.getBoundingClientRect();
-                    const fromDotRect = connectionStart.element.getBoundingClientRect();
+                    const fromDotRect = dot.getBoundingClientRect();
                     const startX = (fromDotRect.left + fromDotRect.width / 2 - canvasRect.left - panX) / zoom;
                     const startY = (fromDotRect.top + fromDotRect.height / 2 - canvasRect.top - panY) / zoom;
 
@@ -658,16 +716,21 @@
                         activeDrawingLine.setAttribute('d', d);
                     };
                 };
-
-                inputArea.onclick = (e) => {
+                
+                const createEndHandler = (dot) => (e) => {
                     e.stopPropagation();
                     if (isDrawingConnection) {
-                        const inputDot = nodeElement.querySelector('.input-dot');
-                        const connectionEnd = { node: nodeData, element: inputDot };
+                        const connectionEnd = { node: nodeData, element: dot };
                         createConnection(connectionStart, connectionEnd);
                         clearConnectionState();
                     }
-                }
+                };
+                
+                nodeData.startConnectionHandler = createStartHandler(outputDot);
+                nodeData.endConnectionHandler = createEndHandler(inputDot);
+                
+                outputArea.onclick = nodeData.startConnectionHandler;
+                inputArea.onclick = nodeData.endConnectionHandler;
             }
 
             nodeAndSvgContainer.appendChild(nodeElement);
@@ -855,12 +918,83 @@
             closeClearModal();
         }
 
+        window.revertSelectedConnection = function() {
+            if (selectedNodeId) {
+                const nodeData = nodes.find(n => n.id === selectedNodeId);
+                if (nodeData) {
+                    nodeData.isReverted = !nodeData.isReverted;
+                }
+                
+                const nodeElement = document.getElementById(selectedNodeId);
+                if (nodeElement) {
+                    // Toggle the flex-row-reverse to visually flip the layout
+                    const areasContainer = nodeElement.querySelector('.flex.justify-between');
+                    if (areasContainer) {
+                        areasContainer.classList.toggle('flex-row-reverse');
+                    }
+                    
+                    const inputArea = nodeElement.querySelector('.input-area');
+                    const outputArea = nodeElement.querySelector('.output-area');
+                    const inputDot = nodeElement.querySelector('.input-dot');
+                    const outputDot = nodeElement.querySelector('.output-dot');
+                    
+                    if (inputDot && outputDot && nodeData && nodeData.startConnectionHandler && nodeData.endConnectionHandler) {
+                        // Swap colors
+                        inputDot.classList.toggle('bg-blue-500');
+                        inputDot.classList.toggle('bg-emerald-500');
+                        
+                        outputDot.classList.toggle('bg-emerald-500');
+                        outputDot.classList.toggle('bg-blue-500');
+                        
+                        // Swap text labels
+                        const inputText = inputArea?.querySelector('span');
+                        const outputText = outputArea?.querySelector('span');
+                        if (inputText && outputText) {
+                            const temp = inputText.textContent;
+                            inputText.textContent = outputText.textContent;
+                            outputText.textContent = temp;
+                        }
+                        
+                        // Swap the click handlers
+                        if (inputArea && outputArea) {
+                            const temp = inputArea.onclick;
+                            inputArea.onclick = outputArea.onclick;
+                            outputArea.onclick = temp;
+                        }
+                    }
+                    
+                    drawConnections();
+                    showToast('Input/Output positions swapped.', 'success');
+                }
+            }
+        }
+
         window.deleteSelectedConnection = function() {
             if (selectedConnection) {
                 connections = connections.filter(c => c !== selectedConnection);
                 selectedConnection = null;
                 drawConnections();
                 showToast('Connection removed', 'info');
+            }
+        }
+
+        function updateButtonStates() {
+            const breakBtn = document.getElementById('btn-break-line');
+            const revertBtn = document.getElementById('btn-revert-line');
+            
+            const isNodeSelected = !!selectedNodeId;
+            const isConnectionSelected = !!selectedConnection;
+            
+            if (revertBtn) {
+                revertBtn.disabled = !isNodeSelected;
+                revertBtn.classList.toggle('opacity-50', !isNodeSelected);
+                revertBtn.classList.toggle('cursor-not-allowed', !isNodeSelected);
+            }
+            
+            if (breakBtn) {
+                breakBtn.disabled = !isConnectionSelected;
+                breakBtn.classList.toggle('opacity-50', !isConnectionSelected);
+                breakBtn.classList.toggle('cursor-not-allowed', !isConnectionSelected);
             }
         }
 
@@ -1054,8 +1188,12 @@
                 const toNodeEl = document.getElementById(conn.to);
                 if (!fromNodeEl || !toNodeEl) return;
 
-                const fromDot = fromNodeEl.querySelector('.output-dot').getBoundingClientRect();
-                const toDot = toNodeEl.querySelector('.input-dot').getBoundingClientRect();
+                const fromNodeData = nodes.find(n => n.id === conn.from);
+                const toNodeData = nodes.find(n => n.id === conn.to);
+                
+                // If node is reverted, visual output is on the left (input-dot), visual input is on the right (output-dot)
+                const fromDot = fromNodeEl.querySelector(fromNodeData?.isReverted ? '.input-dot' : '.output-dot').getBoundingClientRect();
+                const toDot = toNodeEl.querySelector(toNodeData?.isReverted ? '.output-dot' : '.input-dot').getBoundingClientRect();
 
                 const startX = (fromDot.left + fromDot.width / 2 - canvasRect.left - panX) / zoom;
                 const startY = (fromDot.top + fromDot.height / 2 - canvasRect.top - panY) / zoom;
@@ -1063,7 +1201,32 @@
                 const endY = (toDot.top + toDot.height / 2 - canvasRect.top - panY) / zoom;
 
                 const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-                const d = `M ${startX} ${startY} C ${startX + 50} ${startY}, ${endX - 50} ${endY}, ${endX} ${endY}`;
+                
+                // Get node centers to determine which side the dots are on
+                const fromNodeRect = fromNodeEl.getBoundingClientRect();
+                const toNodeRect = toNodeEl.getBoundingClientRect();
+                const fromNodeCenterX = fromNodeRect.left + fromNodeRect.width / 2;
+                const toNodeCenterX = toNodeRect.left + toNodeRect.width / 2;
+                
+                // Check if dots are on the same side relative to their node centers
+                const fromDotOnRight = fromDot.left + fromDot.width / 2 > fromNodeCenterX;
+                const toDotOnRight = toDot.left + toDot.width / 2 > toNodeCenterX;
+                const sameSide = fromDotOnRight === toDotOnRight;
+                
+                let cp1x, cp2x;
+                const distance = Math.abs(endX - startX);
+                
+                if (sameSide) {
+                    // Dots on same side, curve outward
+                    cp1x = startX + (fromDotOnRight ? 80 : -80);
+                    cp2x = endX + (toDotOnRight ? 80 : -80);
+                } else {
+                    // Dots on opposite sides, curve inward normally
+                    cp1x = startX + 50;
+                    cp2x = endX - 50;
+                }
+                
+                const d = `M ${startX} ${startY} C ${cp1x} ${startY}, ${cp2x} ${endY}, ${endX} ${endY}`;
                 path.setAttribute('d', d);
                 
                 // Styling based on selection
@@ -1087,24 +1250,28 @@
                 hitPath.setAttribute('fill', 'none');
                 hitPath.style.cursor = 'pointer';
                 hitPath.style.pointerEvents = 'stroke';
-                hitPath.onclick = (e) => {
+                // Use onmousedown for consistency with node selection and to stop event propagation early.
+                 hitPath.onmousedown = (e) => {
+                     // Only handle left-clicks
+                     if (e.button !== 0) return;
+
                     e.stopPropagation();
                     selectedConnection = conn;
+
+                    // Deselect any selected node
+                    if (selectedNodeId) {
+                        const prevNode = document.getElementById(selectedNodeId);
+                        if (prevNode) {
+                            prevNode.classList.remove('selected-node');
+                        }
+                        selectedNodeId = null;
+                    }
                     drawConnections();
                 };
                 svg.appendChild(hitPath);
             });
             
-            const breakBtn = document.getElementById('btn-break-line');
-            if (breakBtn) {
-                if (selectedConnection) {
-                    breakBtn.disabled = false;
-                    breakBtn.classList.remove('opacity-50', 'cursor-not-allowed');
-                } else {
-                    breakBtn.disabled = true;
-                    breakBtn.classList.add('opacity-50', 'cursor-not-allowed');
-                }
-            }
+            updateButtonStates();
         }
 
     })();
