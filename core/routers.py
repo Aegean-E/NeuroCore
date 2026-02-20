@@ -53,7 +53,7 @@ async def list_modules(request: Request, module_manager: ModuleManager = Depends
     return templates.TemplateResponse(request, "module_list.html", {"modules": module_manager.get_all_modules()})
 
 @router.get("/modules/{module_id}/details", response_class=HTMLResponse)
-async def get_module_details(request: Request, module_id: str, module_manager: ModuleManager = Depends(get_module_manager)):
+async def get_module_details(request: Request, module_id: str, module_manager: ModuleManager = Depends(get_module_manager), settings_man: SettingsManager = Depends(get_settings_manager)):
     module = module_manager.modules.get(module_id)
     if not module:
         raise HTTPException(status_code=404, detail="Module not found")
@@ -71,7 +71,8 @@ async def get_module_details(request: Request, module_id: str, module_manager: M
     return templates.TemplateResponse(request, "module_details.html", {
         "module": module, 
         "formatted_config": formatted_config,
-        "has_visible_config": has_visible_config
+        "has_visible_config": has_visible_config,
+        "settings": settings_man.settings
     })
 
 @router.post("/modules/{module_id}/config")
@@ -210,11 +211,21 @@ async def get_settings(request: Request, settings_man: SettingsManager = Depends
     })
 
 @router.post("/settings/save")
-async def save_settings_route(llm_api_url: str = Form(...), llm_api_key: str = Form(""), embedding_api_url: str = Form(""), default_model: str = Form(...), embedding_model: str = Form(""), debug_mode: bool = Form(False), settings_man: SettingsManager = Depends(get_settings_manager)):
-    settings_man.save_settings({
-        "llm_api_url": llm_api_url, "llm_api_key": llm_api_key, "embedding_api_url": embedding_api_url,
-        "default_model": default_model, "embedding_model": embedding_model, "debug_mode": debug_mode
-    })
+async def save_settings_route(request: Request, settings_man: SettingsManager = Depends(get_settings_manager)):
+    form_data = await request.form()
+    updates = {}
+    
+    # Handle text fields (update only if present)
+    text_fields = ["llm_api_url", "llm_api_key", "embedding_api_url", "default_model", "embedding_model"]
+    for field in text_fields:
+        if field in form_data:
+            updates[field] = form_data[field]
+            
+    # Handle debug_mode checkbox (only if the form intended to submit it)
+    if "save_debug_mode" in form_data:
+        updates["debug_mode"] = form_data.get("debug_mode") == "on"
+
+    settings_man.save_settings(updates)
     return Response(status_code=200, headers={"HX-Trigger": json.dumps({"showMessage": {"level": "success", "message": "Settings saved successfully"}})})
 
 # --- Debug ---

@@ -33,28 +33,10 @@
                     <section id="general" class="settings-tab">
                         <div class="mb-6">
                             <h2 class="text-xl font-bold text-white">General Settings</h2>
-                            <p class="text-sm text-slate-500">Configure the connection to your LLM provider.</p>
+                            <p class="text-sm text-slate-500">System-wide configurations.</p>
                         </div>
                         
                         <div class="space-y-6">
-                            <div>
-                                <label class="block text-sm font-medium text-slate-400 mb-2">LLM API URL</label>
-                                <input type="text" name="llm_api_url" value="{{ settings.llm_api_url }}" 
-                                       class="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all">
-                            </div>
-
-                            <div>
-                                <label class="block text-sm font-medium text-slate-400 mb-2">LLM API Key</label>
-                                <input type="password" name="llm_api_key" value="{{ settings.llm_api_key }}" placeholder="sk-..."
-                                       class="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all">
-                            </div>
-
-                            <div>
-                                <label class="block text-sm font-medium text-slate-400 mb-2">Default Chat Model</label>
-                                <input type="text" name="default_model" value="{{ settings.default_model }}" 
-                                       class="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all">
-                            </div>
-
                             <div>
                                 <label class="flex items-center space-x-3 cursor-pointer">
                                     <div class="relative inline-flex items-center cursor-pointer">
@@ -63,6 +45,7 @@
                                     </div>
                                     <span class="text-sm font-medium text-slate-400">Enable Debug Mode</span>
                                 </label>
+                                <input type="hidden" name="save_debug_mode" value="1">
                                 <p class="text-xs text-slate-600 mt-2 pl-14">Enables detailed logging of AI Flow execution and shows the Debug tab.</p>
                             </div>
                         </div>

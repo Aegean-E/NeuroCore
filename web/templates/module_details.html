@@ -88,6 +88,37 @@
 
     {% if module.id == 'llm_module' and module.enabled %}
     <div class="bg-slate-900 rounded-xl border border-slate-800 p-6 mt-6">
+        <h3 class="font-semibold text-lg mb-4">Connection Settings</h3>
+        <form hx-post="/settings/save" 
+              hx-swap="none"
+              hx-on::after-request="const btn = this.querySelector('button[type=submit]'); const orig = btn.innerText; btn.innerText = 'Saved!'; btn.classList.remove('bg-blue-600', 'hover:bg-blue-500'); btn.classList.add('bg-emerald-600', 'hover:bg-emerald-500'); setTimeout(() => { btn.innerText = orig; btn.classList.add('bg-blue-600', 'hover:bg-blue-500'); btn.classList.remove('bg-emerald-600', 'hover:bg-emerald-500'); }, 2000);">
+            
+            <div class="space-y-6">
+                <div>
+                    <label class="block text-sm font-medium text-slate-400 mb-2">LLM API URL</label>
+                    <input type="text" name="llm_api_url" value="{{ settings.llm_api_url }}" 
+                           class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all">
+                </div>
+
+                <div>
+                    <label class="block text-sm font-medium text-slate-400 mb-2">LLM API Key</label>
+                    <input type="password" name="llm_api_key" value="{{ settings.llm_api_key }}" placeholder="sk-..."
+                           class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all">
+                </div>
+
+                <div>
+                    <label class="block text-sm font-medium text-slate-400 mb-2">Default Chat Model</label>
+                    <input type="text" name="default_model" value="{{ settings.default_model }}" 
+                           class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all">
+                </div>
+            </div>
+            <div class="mt-4 flex justify-end">
+                <button type="submit" class="bg-blue-600 hover:bg-blue-500 text-white px-6 py-2 rounded-lg text-sm font-semibold transition-colors">Save Connection</button>
+            </div>
+        </form>
+    </div>
+
+    <div class="bg-slate-900 rounded-xl border border-slate-800 p-6 mt-6">
         <h3 class="font-semibold text-lg mb-4">Generation Settings</h3>
         <form hx-post="/llm_module/settings/generation" 
               hx-swap="none"

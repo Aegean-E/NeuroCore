@@ -1,0 +1,24 @@
+{
+    "Weather": {
+        "definition": {
+            "type": "function",
+            "function": {
+                "name": "Weather",
+                "description": "Get the current weather for a given location.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "location": {
+                            "type": "string",
+                            "description": "The city and state, e.g. San Francisco, CA"
+                        }
+                    },
+                    "required": [
+                        "location"
+                    ]
+                }
+            }
+        },
+        "enabled": true
+    }
+}
