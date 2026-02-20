@@ -1,4 +1,5 @@
 import json
+from datetime import datetime
 from fastapi import APIRouter, Request, Form, Depends, HTTPException, Response
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
@@ -207,7 +208,8 @@ async def delete_flow(request: Request, flow_id: str, settings_man: SettingsMana
 @router.get("/settings", response_class=HTMLResponse)
 async def get_settings(request: Request, settings_man: SettingsManager = Depends(get_settings_manager), module_manager: ModuleManager = Depends(get_module_manager)):
     return templates.TemplateResponse(request, "settings.html", {
-        "settings": settings_man.settings, "modules": module_manager.get_all_modules()
+        "settings": settings_man.settings, "modules": module_manager.get_all_modules(),
+        "system_time": datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S %Z")
     })
 
 @router.post("/settings/save")

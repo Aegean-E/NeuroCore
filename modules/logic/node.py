@@ -40,7 +40,7 @@ class ScriptExecutor:
         local_scope = {"data": data_val, "result": result_val, "json": json, "re": re}
         
         try:
-            exec(code, {}, local_scope)
+            exec(code, local_scope)
             return local_scope.get("result")
         except Exception as e:
             print(f"Script Node Error: {e}")

@@ -20,5 +20,106 @@
             }
         },
         "enabled": true
+    },
+    "Calculator": {
+        "definition": {
+            "type": "function",
+            "function": {
+                "name": "Calculator",
+                "description": "Evaluates mathematical expressions.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "expression": {
+                            "type": "string",
+                            "description": "The mathematical expression to evaluate (e.g., '2 + 2', 'sqrt(16)', 'sin(pi/2)')."
+                        }
+                    },
+                    "required": [
+                        "expression"
+                    ]
+                }
+            }
+        },
+        "enabled": true
+    },
+    "TimeZoneConverter": {
+        "definition": {
+            "type": "function",
+            "function": {
+                "name": "TimeZoneConverter",
+                "description": "Converts a specific date and time from one time zone to another.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "time_string": {
+                            "type": "string",
+                            "description": "The date and time to convert (ISO 8601 format, e.g., '2023-10-27 15:30:00')."
+                        },
+                        "source_tz": {
+                            "type": "string",
+                            "description": "The source time zone (IANA format, e.g., 'America/New_York', 'UTC')."
+                        },
+                        "target_tz": {
+                            "type": "string",
+                            "description": "The target time zone (IANA format, e.g., 'Europe/London', 'Asia/Tokyo')."
+                        }
+                    },
+                    "required": [
+                        "time_string",
+                        "source_tz",
+                        "target_tz"
+                    ]
+                }
+            }
+        },
+        "enabled": true
+    },
+    "ConversionCalculator": {
+        "definition": {
+            "type": "function",
+            "function": {
+                "name": "ConversionCalculator",
+                "description": "Converts values between different units of measurement (temperature, length, weight, volume).",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "value": {
+                            "type": "number",
+                            "description": "The numerical value to convert."
+                        },
+                        "from_unit": {
+                            "type": "string",
+                            "description": "The unit to convert from (e.g., 'meters', 'celsius', 'lbs')."
+                        },
+                        "to_unit": {
+                            "type": "string",
+                            "description": "The unit to convert to (e.g., 'feet', 'fahrenheit', 'kg')."
+                        }
+                    },
+                    "required": [
+                        "value",
+                        "from_unit",
+                        "to_unit"
+                    ]
+                }
+            }
+        },
+        "enabled": true
+    },
+    "SystemTime": {
+        "definition": {
+            "type": "function",
+            "function": {
+                "name": "SystemTime",
+                "description": "Get the current system date and time.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {},
+                    "required": []
+                }
+            }
+        },
+        "enabled": true
     }
 }

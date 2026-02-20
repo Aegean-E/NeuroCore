@@ -6,7 +6,7 @@
         </div>
         <div class="flex items-center space-x-2">
             <form id="import-form" hx-post="/tools/import" hx-encoding="multipart/form-data" hx-target="#tools-list" class="hidden">
-                <input type="file" name="file" accept=".json" onchange="this.form.requestSubmit(); this.value=''">
+                <input type="file" name="file" accept=".json,.py" onchange="this.form.requestSubmit(); this.value=''">
             </form>
             <button onclick="document.querySelector('#import-form input').click()" class="bg-slate-800 hover:bg-slate-700 text-white px-4 py-2 rounded-lg text-sm font-bold transition-all">
                 Import Tool
@@ -25,6 +25,7 @@
         <div id="tool-form-wrapper" class="lg:col-span-1 bg-slate-900 rounded-xl border border-slate-800 p-6 h-fit hidden">
             <h3 id="form-title" class="font-semibold mb-4">Add New Tool</h3>
             <form id="tool-form" hx-post="/tools/save" hx-target="#tools-list" hx-on::after-request="if(event.detail.successful) toggleToolForm(false)" class="space-y-4">
+                <input type="hidden" id="original-tool-name" name="original_name">
                 <div>
                     <label class="block text-xs font-bold text-slate-500 uppercase mb-1">Function Name</label>
                     <input type="text" id="tool-name" name="name" placeholder="get_weather" required class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none">
@@ -110,12 +111,13 @@
     }
 
     async function loadToolForEdit(name) {
-        const response = await fetch(`/tools/edit/${name}`);
+        const response = await fetch(`/tools/edit/${encodeURIComponent(name)}`);
         if (response.ok) {
             const data = await response.json();
             document.getElementById('form-title').innerText = 'Edit Tool: ' + name;
             document.getElementById('tool-name').value = data.name;
-            document.getElementById('tool-name').readOnly = true;
+            document.getElementById('tool-name').readOnly = false;
+            document.getElementById('original-tool-name').value = data.name;
             document.getElementById('tool-desc').value = data.description;
             document.getElementById('tool-params').value = data.parameters;
             document.getElementById('tool-code').value = data.code;
@@ -129,6 +131,7 @@
         document.getElementById('form-title').innerText = 'Add New Tool';
         document.getElementById('tool-name').value = '';
         document.getElementById('tool-name').readOnly = false;
+        document.getElementById('original-tool-name').value = '';
         document.getElementById('tool-desc').value = '';
         document.getElementById('tool-params').value = '{\n  "type": "object",\n  "properties": {\n    "location": { "type": "string" }\n  },\n  "required": ["location"]\n}';
         document.getElementById('tool-code').value = '';

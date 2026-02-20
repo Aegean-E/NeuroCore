@@ -52,16 +52,29 @@ async def save_tool(
     name: str = Form(...),
     description: str = Form(...),
     parameters: str = Form(...),
-    code: str = Form(...)
+    code: str = Form(...),
+    original_name: str = Form("")
 ):
     try:
         # Validate JSON parameters
         params_json = json.loads(parameters)
         tools = load_tools()
         
-        # Preserve enabled state
+        # Determine enabled state and handle renaming
+        name = name.strip()
+        if original_name:
+            original_name = original_name.strip()
+            
         is_enabled = True
-        if name in tools:
+        
+        if original_name and original_name != name:
+            if original_name in tools:
+                is_enabled = tools[original_name].get("enabled", True)
+                del tools[original_name]
+                old_code_path = os.path.join(LIBRARY_DIR, f"{original_name}.py")
+                if os.path.exists(old_code_path):
+                    os.remove(old_code_path)
+        elif name in tools:
             is_enabled = tools[name].get("enabled", True)
         
         # OpenAI Function Calling Format
@@ -195,34 +208,58 @@ async def export_tools(name: str = Query(None)):
 async def import_tools(request: Request, file: UploadFile = File(...)):
     try:
         content = await file.read()
-        import_data = json.loads(content)
-        
-        if isinstance(import_data, dict):
-            import_data = [import_data]
-            
+        filename = file.filename
         tools = load_tools()
         
-        for tool_data in import_data:
-            name = tool_data.get("name")
-            if not name: continue
+        if filename.endswith(".json"):
+            import_data = json.loads(content)
             
-            # Update tools.json structure
-            tools[name] = {
-                "definition": {
-                    "type": "function",
-                    "function": {
-                        "name": name,
-                        "description": tool_data.get("description", ""),
-                        "parameters": tool_data.get("parameters", {"type": "object", "properties": {}})
-                    }
-                },
-                "enabled": tool_data.get("enabled", True)
-            }
+            if isinstance(import_data, dict):
+                import_data = [import_data]
             
-            # Save code
-            code = tool_data.get("code", "")
+            for tool_data in import_data:
+                name = tool_data.get("name")
+                if not name: continue
+                
+                # Update tools.json structure
+                tools[name] = {
+                    "definition": {
+                        "type": "function",
+                        "function": {
+                            "name": name,
+                            "description": tool_data.get("description", ""),
+                            "parameters": tool_data.get("parameters", {"type": "object", "properties": {}})
+                        }
+                    },
+                    "enabled": tool_data.get("enabled", True)
+                }
+                
+                # Save code
+                code = tool_data.get("code", "")
+                with open(os.path.join(LIBRARY_DIR, f"{name}.py"), "w") as f:
+                    f.write(code)
+
+        elif filename.endswith(".py"):
+            name = os.path.splitext(os.path.basename(filename))[0]
+            code = content.decode("utf-8")
+            
+            if name not in tools:
+                tools[name] = {
+                    "definition": {
+                        "type": "function",
+                        "function": {
+                            "name": name,
+                            "description": "Imported Python Tool",
+                            "parameters": {"type": "object", "properties": {}}
+                        }
+                    },
+                    "enabled": True
+                }
+            
             with open(os.path.join(LIBRARY_DIR, f"{name}.py"), "w") as f:
                 f.write(code)
+        else:
+            return Response(status_code=400, headers={"HX-Trigger": json.dumps({"showMessage": {"level": "error", "message": "Unsupported file type. Please upload .json or .py"}})})
                 
         save_tools(tools)
         

@@ -44,7 +44,7 @@ class ToolDispatcherExecutor:
                 local_scope = {"args": args, "result": None, "json": json, "httpx": httpx}
                 try:
                     # We run this in a thread if it's heavy, but for now simple exec
-                    exec(code, {}, local_scope)
+                    exec(code, local_scope)
                     output = local_scope.get("result", "Success (no result returned)")
                 except Exception as e:
                     output = f"Error executing tool {func_name}: {str(e)}"
