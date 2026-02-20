@@ -54,7 +54,7 @@
                     "properties": {
                         "time_string": {
                             "type": "string",
-                            "description": "The date and time to convert (ISO 8601 format, e.g., '2023-10-27 15:30:00')."
+                            "description": "The date and time to convert (ISO 8601 format). If omitted, uses current system time."
                         },
                         "source_tz": {
                             "type": "string",
@@ -66,7 +66,6 @@
                         }
                     },
                     "required": [
-                        "time_string",
                         "source_tz",
                         "target_tz"
                     ]
@@ -117,6 +116,28 @@
                     "type": "object",
                     "properties": {},
                     "required": []
+                }
+            }
+        },
+        "enabled": true
+    },
+    "FetchURL": {
+        "definition": {
+            "type": "function",
+            "function": {
+                "name": "FetchURL",
+                "description": "Fetches the raw text content from a specific URL.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "url": {
+                            "type": "string",
+                            "description": "The URL to fetch content from."
+                        }
+                    },
+                    "required": [
+                        "url"
+                    ]
                 }
             }
         },
