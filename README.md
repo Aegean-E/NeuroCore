@@ -26,9 +26,13 @@ NeuroCore is built on the principles of **Speed**, **Simplicity**, and **Modular
       <img src="screenshots/flow_editor.png" alt="AI Flow Editor Canvas" width="100%" style="border-radius: 8px; border: 1px solid #334155;">
     </p>
     *   **Drag-and-Drop Interface**: Build flows by dragging functions onto the canvas.
+
     *   **Pan & Zoom**: Effortlessly navigate large and complex flows.
+
     *   **Singleton Nodes**: Enforce architectural patterns by restricting certain nodes (like Chat Input/Output) to a single instance per flow.
+
     *   **Flow Management**: Create, save, rename, and switch between multiple AI flows to handle different tasks.
+
     *   **Canvas Controls**: Center the view, clear the canvas, or manage connections (Revert direction, Break link) with dedicated controls.
 
 *   **⚡ Logic & Control Flow**: Advanced nodes for complex orchestration.
@@ -42,7 +46,9 @@ NeuroCore is built on the principles of **Speed**, **Simplicity**, and **Modular
       <img src="screenshots/chat_ui.png" alt="Chat Interface" width="100%" style="border-radius: 8px; border: 1px solid #334155;">
     </p>
     *   **Multimodal Support**: Upload images to interact with vision-capable models.
+
     *   **Session Management**: Create, rename, and delete chat sessions to organize your conversations.
+
     *   **Auto-Renaming**: Sessions are automatically titled based on the conversation context.
 
 *   **📚 Long-Term Memory**: Integrated vector database (FAISS + SQLite) for persistent AI memory.
@@ -60,9 +66,13 @@ NeuroCore is built on the principles of **Speed**, **Simplicity**, and **Modular
       <img src="screenshots/tools_library.png" alt="Tool Library Editor" width="100%" style="border-radius: 8px; border: 1px solid #334155;">
     </p>
     *   **Function Calling**: Full support for OpenAI-compatible function calling.
+
     *   **Visual Editor**: Create and edit tools directly in the UI with JSON schema validation.
+
     *   **Hot-Reloading**: Tools are saved as Python files and loaded dynamically.
+
     *   **Tool Dispatcher**: A dedicated flow node to execute tools requested by the LLM.
+
     *   **Import/Export**: Share tools easily by importing or exporting them as JSON or Python files.
 
 *   **📱 Telegram Integration**: Connect your AI flow to Telegram for remote access.
