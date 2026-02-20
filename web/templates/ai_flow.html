@@ -582,7 +582,8 @@
                                 ` : ''}
                                 ${nodeTypeId === 'tool_dispatcher' && (existingConfig.allowed_tools || []).length > 0 ? `
                                 <div id="tools-badge-${nodeId}" class="text-[9px] text-purple-400 mt-1 flex flex-wrap gap-1">
-                                    ${(existingConfig.allowed_tools || []).map(t => `<span class="bg-purple-900/30 px-1.5 py-0.5 rounded">${t}</span>`).join('')}
+                                    ${(existingConfig.allowed_tools || []).slice(0, 5).map(t => `<span class="bg-purple-900/30 px-1.5 py-0.5 rounded">${t}</span>`).join('')}
+                                    ${(existingConfig.allowed_tools || []).length > 5 ? `<span class="bg-purple-900/30 px-1.5 py-0.5 rounded" title="${(existingConfig.allowed_tools || []).slice(5).join(', ')}">...</span>` : ''}
                                 </div>
                                 ` : ''}
                             </div>
@@ -1400,7 +1401,8 @@
                     } else if (node.nodeTypeId === 'tool_dispatcher' && newConfig.allowed_tools && newConfig.allowed_tools.length > 0) {
                         const badgeHtml = `
                             <div id="tools-badge-${node.id}" class="text-[9px] text-purple-400 mt-1 flex flex-wrap gap-1">
-                                ${newConfig.allowed_tools.map(t => `<span class="bg-purple-900/30 px-1.5 py-0.5 rounded">${t}</span>`).join('')}
+                                ${newConfig.allowed_tools.slice(0, 5).map(t => `<span class="bg-purple-900/30 px-1.5 py-0.5 rounded">${t}</span>`).join('')}
+                                ${newConfig.allowed_tools.length > 5 ? `<span class="bg-purple-900/30 px-1.5 py-0.5 rounded" title="${newConfig.allowed_tools.slice(5).join(', ')}">...</span>` : ''}
                             </div>
                         `;
                         const titleEl = nodeElement.querySelector('[id^="explanation-"]');

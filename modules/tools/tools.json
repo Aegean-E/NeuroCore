@@ -142,5 +142,37 @@
             }
         },
         "enabled": true
+    },
+    "CurrencyConverter": {
+        "definition": {
+            "type": "function",
+            "function": {
+                "name": "CurrencyConverter",
+                "description": "Converts an amount from one currency to another using real-time rates.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "amount": {
+                            "type": "number",
+                            "description": "The amount to convert."
+                        },
+                        "from_currency": {
+                            "type": "string",
+                            "description": "Source currency code (e.g., USD, EUR, JPY)."
+                        },
+                        "to_currency": {
+                            "type": "string",
+                            "description": "Target currency code (e.g., EUR, GBP, CAD)."
+                        }
+                    },
+                    "required": [
+                        "amount",
+                        "from_currency",
+                        "to_currency"
+                    ]
+                }
+            }
+        },
+        "enabled": true
     }
 }
