@@ -215,23 +215,62 @@
                 </div>
                 <!-- Repeater Node Editor -->
                 <div id="config-repeater" class="hidden">
-                    <div class="grid grid-cols-2 gap-4">
+                    <div class="space-y-4">
                         <div>
-                            <label class="block text-sm font-medium text-slate-400 mb-2">Delay (Seconds)</label>
-                            <input type="number" id="repeater-delay-input" step="0.1" min="0.1" class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all">
+                            <label class="block text-sm font-medium text-slate-400 mb-3">Delay Interval</label>
+                            <div class="grid grid-cols-3 gap-3">
+                                <div>
+                                    <label class="block text-xs font-medium text-slate-500 mb-1">Hours</label>
+                                    <input type="number" id="repeater-hours-input" min="0" max="23" value="0" class="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all">
+                                </div>
+                                <div>
+                                    <label class="block text-xs font-medium text-slate-500 mb-1">Minutes</label>
+                                    <input type="number" id="repeater-minutes-input" min="0" max="59" value="0" class="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all">
+                                </div>
+                                <div>
+                                    <label class="block text-xs font-medium text-slate-500 mb-1">Seconds</label>
+                                    <input type="number" id="repeater-seconds-input" min="0" max="59" value="5" step="0.1" class="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all">
+                                </div>
+                            </div>
+                            <p class="text-xs text-slate-500 mt-2">Time to wait before re-triggering the flow.</p>
                         </div>
-                        <div>
+                        
+                        <div class="border-t border-slate-800 pt-4">
                             <label class="block text-sm font-medium text-slate-400 mb-2">Max Repeats</label>
-                            <input type="number" id="repeater-count-input" min="1" class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all">
+                            <input type="number" id="repeater-count-input" min="0" value="1" class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all">
+                            <p class="text-xs text-slate-500 mt-2">Maximum number of times to repeat. Set to 0 to loop indefinitely.</p>
                         </div>
                     </div>
-                    <p class="text-xs text-slate-500 mt-2">The flow will be re-triggered after the delay. Set Max Repeats to 0 to loop indefinitely.</p>
                 </div>
         <!-- Tool Dispatcher Editor -->
         <div id="config-tools" class="hidden">
             <label class="block text-sm font-medium text-slate-400 mb-2">Enabled Tools</label>
             <div id="tools-checklist" class="space-y-2 max-h-60 overflow-y-auto custom-scrollbar bg-slate-950 border border-slate-700 rounded-xl p-4"></div>
             <p class="text-xs text-slate-500 mt-2">Select which tools this dispatcher is allowed to execute. Leave all unchecked to allow all.</p>
+        </div>
+        <!-- Conditional Router Editor -->
+        <div id="config-conditional-router" class="hidden">
+            <div class="space-y-4">
+                <div class="bg-slate-950 border border-slate-700 rounded-xl p-4">
+                    <p class="text-sm text-slate-300 font-semibold mb-1">✓ Tool Exists</p>
+                    <p class="text-xs text-slate-500">Routes based on whether tools were called. True if tool_calls field is present, False otherwise.</p>
+                </div>
+                
+                <div>
+                    <label class="block text-sm font-medium text-slate-400 mb-2">Field to Check</label>
+                    <input type="text" id="router-check-field" class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" placeholder="tool_calls">
+                    <p class="text-xs text-slate-500 mt-2">The field name to check for existence in the data.</p>
+                </div>
+                
+                <div class="border-t border-slate-800 pt-4 mt-4">
+                    <label class="block text-sm font-medium text-slate-400 mb-3">Route to Multiple Nodes</label>
+                    <p class="text-xs text-slate-500 mb-4">Select which nodes receive data for each condition result (true/false). A node can receive data from both.</p>
+                    
+                    <div id="router-branches-container" class="space-y-4">
+                        Loading connected nodes...
+                    </div>
+                </div>
+            </div>
         </div>
             </div>
             <div class="flex justify-end space-x-3">
@@ -1070,6 +1109,77 @@
                 breakBtn.classList.toggle('cursor-not-allowed', !isConnectionSelected);
             }
         }
+        
+        function loadConnectedNodes(routerNodeId) {
+            // Find all connections FROM this router node
+            const connectedNodeIds = connections
+                .filter(c => c.from === routerNodeId)
+                .map(c => c.to);
+            
+            // Get node details for connected nodes
+            const connectedNodesList = connectedNodeIds
+                .map(id => {
+                    const node = nodes.find(n => n.id === id);
+                    return node ? { id, name: node.name } : null;
+                })
+                .filter(n => n !== null);
+            
+            const container = document.getElementById('router-branches-container');
+            
+            if (connectedNodesList.length === 0) {
+                container.innerHTML = '<div class="text-slate-500 italic text-sm">No connected output nodes yet. Create connections first.</div>';
+                return;
+            }
+            
+            // Build the UI with checkboxes for each connected node
+            let html = '<div class="space-y-3">';
+            
+            connectedNodesList.forEach(node => {
+                html += `
+                    <div class="border border-slate-700 rounded-xl p-3 bg-slate-950/50">
+                        <div class="font-semibold text-sm text-slate-300 mb-2">${node.name}</div>
+                        <div class="grid grid-cols-2 gap-2">
+                            <label class="flex items-center space-x-2 cursor-pointer hover:bg-slate-900 p-2 rounded transition-colors">
+                                <input type="checkbox" 
+                                       class="router-true-branch h-4 w-4 text-blue-600 bg-slate-900 border-slate-600 rounded focus:ring-blue-500"
+                                       value="${node.id}"
+                                       data-node-id="${node.id}">
+                                <span class="text-xs text-slate-400">True Path</span>
+                            </label>
+                            <label class="flex items-center space-x-2 cursor-pointer hover:bg-slate-900 p-2 rounded transition-colors">
+                                <input type="checkbox" 
+                                       class="router-false-branch h-4 w-4 text-emerald-600 bg-slate-900 border-slate-600 rounded focus:ring-emerald-500"
+                                       value="${node.id}"
+                                       data-node-id="${node.id}">
+                                <span class="text-xs text-slate-400">False Path</span>
+                            </label>
+                        </div>
+                    </div>
+                `;
+            });
+            
+            html += '</div>';
+            container.innerHTML = html;
+            
+            // Get the current node's config and check the appropriate boxes
+            const node = nodes.find(n => n.id === activeConfigNodeId);
+            if (node) {
+                const trueBranches = node.config.true_branches || [];
+                const falseBranches = node.config.false_branches || [];
+                
+                document.querySelectorAll('.router-true-branch').forEach(checkbox => {
+                    if (trueBranches.includes(checkbox.value)) {
+                        checkbox.checked = true;
+                    }
+                });
+                
+                document.querySelectorAll('.router-false-branch').forEach(checkbox => {
+                    if (falseBranches.includes(checkbox.value)) {
+                        checkbox.checked = true;
+                    }
+                });
+            }
+        }
 
         // --- Config Modal Logic ---
         window.openConfigModal = function(nodeId) {
@@ -1086,6 +1196,7 @@
             document.getElementById('config-script').classList.add('hidden');
             document.getElementById('config-repeater').classList.add('hidden');
             document.getElementById('config-tools').classList.add('hidden');
+            document.getElementById('config-conditional-router').classList.add('hidden');
 
             if (node.nodeTypeId === 'delay_node') {
                 document.getElementById('config-delay').classList.remove('hidden');
@@ -1114,7 +1225,16 @@
                 document.getElementById('script-code-input').value = node.config.code || '';
             } else if (node.nodeTypeId === 'repeater_node') {
                 document.getElementById('config-repeater').classList.remove('hidden');
-                document.getElementById('repeater-delay-input').value = node.config.delay || 5.0;
+                
+                // Convert delay to hours, minutes, seconds
+                const totalSeconds = node.config.delay || 5.0;
+                const hours = Math.floor(totalSeconds / 3600);
+                const minutes = Math.floor((totalSeconds % 3600) / 60);
+                const seconds = (totalSeconds % 60);
+                
+                document.getElementById('repeater-hours-input').value = hours;
+                document.getElementById('repeater-minutes-input').value = minutes;
+                document.getElementById('repeater-seconds-input').value = seconds.toFixed(1);
                 document.getElementById('repeater-count-input').value = node.config.max_repeats || 1;
             } else if (node.nodeTypeId === 'tool_dispatcher') {
                 document.getElementById('config-tools').classList.remove('hidden');
@@ -1136,11 +1256,17 @@
                             </label>`;
                     });
                 });
+            } else if (node.nodeTypeId === 'conditional_router') {
+                document.getElementById('config-conditional-router').classList.remove('hidden');
+                document.getElementById('router-check-field').value = node.config.check_field || 'tool_calls';
+                
+                // Load connected nodes and restore saved selections
+                loadConnectedNodes(node.id);
             } else {
                 document.getElementById('config-default').classList.remove('hidden');
                 document.getElementById('node-config-input').value = JSON.stringify(node.config || {}, null, 4);
             }
-
+            
             const modal = document.getElementById('config-modal');
             const backdrop = document.getElementById('config-modal-backdrop');
             const panel = document.getElementById('config-modal-panel');
@@ -1188,13 +1314,42 @@
                 } else if (node.nodeTypeId === 'script_node') {
                     newConfig = { code: document.getElementById('script-code-input').value };
                 } else if (node.nodeTypeId === 'repeater_node') {
-                    const d = parseFloat(document.getElementById('repeater-delay-input').value);
+                    const hours = parseInt(document.getElementById('repeater-hours-input').value) || 0;
+                    const minutes = parseInt(document.getElementById('repeater-minutes-input').value) || 0;
+                    const seconds = parseFloat(document.getElementById('repeater-seconds-input').value) || 0;
                     const c = parseInt(document.getElementById('repeater-count-input').value);
-                    newConfig = { delay: isNaN(d) ? 5.0 : d, max_repeats: isNaN(c) ? 1 : c };
+                    
+                    // Convert to total seconds
+                    const totalDelay = (hours * 3600) + (minutes * 60) + seconds;
+                    newConfig = { 
+                        delay: totalDelay || 5.0, 
+                        max_repeats: isNaN(c) ? 1 : c 
+                    };
                 } else if (node.nodeTypeId === 'tool_dispatcher') {
                     const checkboxes = document.querySelectorAll('#tools-checklist input:checked');
                     const allowed = Array.from(checkboxes).map(cb => cb.value);
                     newConfig = { allowed_tools: allowed };
+                } else if (node.nodeTypeId === 'conditional_router') {
+                    const checkField = document.getElementById('router-check-field').value || 'tool_calls';
+                    
+                    // Collect all selected true branches
+                    const trueBranches = Array.from(document.querySelectorAll('.router-true-branch:checked'))
+                        .map(cb => cb.value);
+                    
+                    // Collect all selected false branches
+                    const falseBranches = Array.from(document.querySelectorAll('.router-false-branch:checked'))
+                        .map(cb => cb.value);
+                    
+                    newConfig = {
+                        check_field: checkField
+                    };
+                    
+                    if (trueBranches.length > 0) {
+                        newConfig.true_branches = trueBranches;
+                    }
+                    if (falseBranches.length > 0) {
+                        newConfig.false_branches = falseBranches;
+                    }
                 } else {
                     newConfig = JSON.parse(document.getElementById('node-config-input').value);
                 }

@@ -93,56 +93,20 @@ class RepeaterExecutor:
 class ConditionalRouterExecutor:
     async def receive(self, input_data: dict, config: dict = None) -> dict:
         """
-        Routes data flow based on conditional logic. Returns None to stop the branch,
-        or passes data through if condition is met.
+        Routes data flow based on tool existence.
+        Returns the input_data if tool exists, None otherwise.
         
         Config options:
-        - condition_type: "tool_exists", "tool_results", "field_equals", "expression"
-        - check_field: field to evaluate (for tool_exists, tool_results, field_equals)
-        - expected_value: value to compare against (for field_equals)
-        - expression: Python expression to evaluate (for expression type)
-        - invert: if true, inverts the condition result (true -> false, false -> true)
+        - check_field: field to check for existence (default: "tool_calls")
         """
         if input_data is None:
             return None
             
         config = config or {}
-        condition_type = config.get("condition_type", "tool_exists")
-        invert = config.get("invert", False)
-        
-        result = False
+        check_field = config.get("check_field", "tool_calls")
         
         try:
-            if condition_type == "tool_exists":
-                check_field = config.get("check_field", "tool_results")
-                result = check_field in input_data and input_data[check_field] is not None
-            
-            elif condition_type == "tool_results":
-                check_field = config.get("check_field", "tool_results")
-                tool_results = input_data.get(check_field)
-                result = isinstance(tool_results, list) and len(tool_results) > 0
-            
-            elif condition_type == "field_equals":
-                check_field = config.get("check_field")
-                expected_value = config.get("expected_value")
-                if check_field and check_field in input_data:
-                    result = input_data[check_field] == expected_value
-            
-            elif condition_type == "field_exists":
-                check_field = config.get("check_field")
-                result = check_field in input_data
-            
-            elif condition_type == "expression":
-                expression = config.get("expression", "False")
-                local_scope = {"data": input_data, "json": json, "re": re}
-                try:
-                    result = eval(expression, {"__builtins__": {}}, local_scope)
-                except Exception as e:
-                    print(f"ConditionalRouter expression error: {e}")
-                    result = False
-            
-            if invert:
-                result = not result
+            result = check_field in input_data and input_data[check_field] is not None
             
             if result:
                 return input_data
