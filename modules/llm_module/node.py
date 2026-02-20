@@ -3,16 +3,26 @@ import json
 from core.llm import LLMBridge
 from core.settings import settings
 
-class LLMExecutor:
-    def __init__(self):
-        self.module_config = {}
+class ConfigLoader:
+    _cache = {"mtime": 0, "data": {}}
+    _path = os.path.join(os.path.dirname(__file__), "module.json")
+
+    @classmethod
+    def get_config(cls):
         try:
-            module_path = os.path.join(os.path.dirname(__file__), "module.json")
-            if os.path.exists(module_path):
-                with open(module_path, "r") as f:
-                    self.module_config = json.load(f).get("config", {})
+            if os.path.exists(cls._path):
+                mtime = os.path.getmtime(cls._path)
+                if mtime > cls._cache["mtime"]:
+                    with open(cls._path, "r") as f:
+                        cls._cache["data"] = json.load(f).get("config", {})
+                    cls._cache["mtime"] = mtime
         except Exception as e:
             print(f"Error loading llm_module config: {e}")
+        return cls._cache["data"]
+
+class LLMExecutor:
+    def __init__(self):
+        self.module_config = ConfigLoader.get_config()
 
     async def receive(self, input_data: dict, config: dict = None) -> dict:
         config = config or {}
@@ -34,11 +44,11 @@ class LLMExecutor:
         # Helper to resolve priority: config > input_data > module_config > default
         # Handles 0 values correctly (unlike 'or' operator)
         def get_val(key, default, type_cast=None):
-            val = config.get(key)
+            val = config.get(key) if config else None
             if val is None:
-                val = input_data.get(key)
+                val = input_data.get(key) if input_data else None
             if val is None:
-                val = self.module_config.get(key)
+                val = self.module_config.get(key) if self.module_config else None
             
             if val is None:
                 return default

@@ -41,6 +41,20 @@ class MemoryConsolidator:
             if emb is not None:
                 memories.append({"id": r[0], "text": r[1]})
                 embeddings.append(emb)
+        
+        if not embeddings:
+            return [], None
+
+        # Ensure consistent dimensions to prevent np.stack errors
+        first_dim = len(embeddings[0])
+        valid_indices = [i for i, e in enumerate(embeddings) if len(e) == first_dim]
+        
+        if len(valid_indices) != len(embeddings):
+            memories = [memories[i] for i in valid_indices]
+            embeddings = [embeddings[i] for i in valid_indices]
+            
+        if len(memories) < 2:
+            return [], None
                 
         # 2. Compute Similarity Matrix
         # Stack embeddings (N x D)

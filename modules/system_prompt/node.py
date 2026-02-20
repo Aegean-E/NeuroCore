@@ -3,12 +3,17 @@ class SystemPromptExecutor:
         """
         Receives the current conversation state and prepends a system message.
         """
+        if input_data is None:
+            input_data = {}
+            
         config = config or {}
         # Default prompt if none is configured
         prompt_text = config.get("system_prompt", "You are NeuroCore, a helpful and intelligent AI assistant.")
         
         # Get existing messages from the flow data
-        messages = input_data.get("messages", [])
+        messages = input_data.get("messages")
+        if not isinstance(messages, list):
+            messages = []
         
         # Create the system message
         system_message = {"role": "system", "content": prompt_text}

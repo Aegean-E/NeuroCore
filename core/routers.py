@@ -12,6 +12,14 @@ from core.llm import LLMBridge
 router = APIRouter()
 templates = Jinja2Templates(directory="web/templates")
 
+# Centralized definition of config keys that should be hidden from the generic JSON editor
+HIDDEN_CONFIG_KEYS = {
+    'memory': ['save_default_confidence', 'save_confidence_threshold', 'recall_limit', 'recall_min_score', 'consolidation_threshold', 'auto_consolidation_hours', 'arbiter_model', 'arbiter_prompt'],
+    'llm_module': ['temperature', 'max_tokens'],
+    'chat': ['auto_rename_turns'],
+    'telegram': ['bot_token', 'chat_id']
+}
+
 # --- System & Navigation ---
 
 @router.get("/", response_class=HTMLResponse)
@@ -49,18 +57,9 @@ async def get_module_details(request: Request, module_id: str, module_manager: M
         raise HTTPException(status_code=404, detail="Module not found")
     
     config_display = module.get('config', {}).copy()
-    if module_id == 'memory':
-        for key in ['save_default_confidence', 'save_confidence_threshold', 'recall_limit', 'recall_min_score', 'consolidation_threshold', 'auto_consolidation_hours', 'arbiter_model', 'arbiter_prompt']:
-            config_display.pop(key, None)
-    elif module_id == 'llm_module':
-        for key in ['temperature', 'max_tokens']:
-            config_display.pop(key, None)
-    elif module_id == 'chat':
-        for key in ['auto_rename_turns']:
-            config_display.pop(key, None)
-    elif module_id == 'telegram':
-        for key in ['bot_token', 'chat_id']:
-            config_display.pop(key, None)
+    keys_to_hide = HIDDEN_CONFIG_KEYS.get(module_id, [])
+    for key in keys_to_hide:
+        config_display.pop(key, None)
         
     formatted_config = json.dumps(config_display, indent=4)
     
@@ -72,6 +71,28 @@ async def get_module_details(request: Request, module_id: str, module_manager: M
         "formatted_config": formatted_config,
         "has_visible_config": has_visible_config
     })
+
+@router.post("/modules/{module_id}/config")
+async def save_module_config(request: Request, module_id: str, config_json: str = Form(...), module_manager: ModuleManager = Depends(get_module_manager)):
+    try:
+        new_config = json.loads(config_json)
+        
+        # Preserve hidden keys by merging from existing config
+        keys_to_preserve = HIDDEN_CONFIG_KEYS.get(module_id, [])
+        current_module = module_manager.modules.get(module_id)
+        
+        if current_module:
+            current_config = current_module.get('config', {})
+            for key in keys_to_preserve:
+                if key in current_config:
+                    new_config[key] = current_config[key]
+                    
+        module_manager.update_module_config(module_id, new_config)
+        return Response(status_code=200, headers={"HX-Trigger": json.dumps({"showMessage": {"level": "success", "message": "Configuration saved"}})})
+    except json.JSONDecodeError:
+        return Response(status_code=400, headers={"HX-Trigger": json.dumps({"showMessage": {"level": "error", "message": "Invalid JSON format"}})})
+    except Exception as e:
+        return Response(status_code=500, headers={"HX-Trigger": json.dumps({"showMessage": {"level": "error", "message": str(e)}})})
 
 @router.post("/modules/{module_id}/{action}")
 async def toggle_module(request: Request, module_id: str, action: str, module_manager: ModuleManager = Depends(get_module_manager)):
@@ -89,48 +110,6 @@ async def toggle_module(request: Request, module_id: str, action: str, module_ma
     return templates.TemplateResponse(
         request, "module_details.html", {"module": module, "formatted_config": formatted_config}, headers={"HX-Trigger": json.dumps({"modulesChanged": None, "showMessage": {"level": "success", "message": f"Module {action}d"}})}
     )
-
-@router.post("/modules/{module_id}/config")
-async def save_module_config(request: Request, module_id: str, config_json: str = Form(...), module_manager: ModuleManager = Depends(get_module_manager)):
-    try:
-        new_config = json.loads(config_json)
-        
-        # Preserve hidden keys for memory module
-        if module_id == 'memory':
-            current_module = module_manager.modules.get(module_id)
-            if current_module:
-                current_config = current_module.get('config', {})
-                for key in ['save_default_confidence', 'save_confidence_threshold', 'recall_limit', 'recall_min_score', 'consolidation_threshold', 'auto_consolidation_hours', 'arbiter_model', 'arbiter_prompt']:
-                    if key in current_config:
-                        new_config[key] = current_config[key]
-        elif module_id == 'llm_module':
-            current_module = module_manager.modules.get(module_id)
-            if current_module:
-                current_config = current_module.get('config', {})
-                for key in ['temperature', 'max_tokens']:
-                    if key in current_config:
-                        new_config[key] = current_config[key]
-        elif module_id == 'chat':
-            current_module = module_manager.modules.get(module_id)
-            if current_module:
-                current_config = current_module.get('config', {})
-                for key in ['auto_rename_turns']:
-                    if key in current_config:
-                        new_config[key] = current_config[key]
-        elif module_id == 'telegram':
-            current_module = module_manager.modules.get(module_id)
-            if current_module:
-                current_config = current_module.get('config', {})
-                for key in ['bot_token', 'chat_id']:
-                    if key in current_config:
-                        new_config[key] = current_config[key]
-                    
-        module_manager.update_module_config(module_id, new_config)
-        return Response(status_code=200, headers={"HX-Trigger": json.dumps({"showMessage": {"level": "success", "message": "Configuration saved"}})})
-    except json.JSONDecodeError:
-        return Response(status_code=400, headers={"HX-Trigger": json.dumps({"showMessage": {"level": "error", "message": "Invalid JSON format"}})})
-    except Exception as e:
-        return Response(status_code=500, headers={"HX-Trigger": json.dumps({"showMessage": {"level": "error", "message": str(e)}})})
 
 
 # --- AI Flow ---
@@ -155,7 +134,11 @@ async def get_flow_data(flow_id: str):
 async def save_ai_flow(request: Request, name: str = Form(...), nodes: str = Form(...), connections: str = Form(...), flow_id: str = Form(None)):
     if not flow_id:
         flow_id = None
-    flow_manager.save_flow(name=name, nodes=json.loads(nodes), connections=json.loads(connections), flow_id=flow_id)
+    
+    try:
+        flow_manager.save_flow(name=name, nodes=json.loads(nodes), connections=json.loads(connections), flow_id=flow_id)
+    except json.JSONDecodeError:
+        return Response(status_code=400, headers={"HX-Trigger": json.dumps({"showMessage": {"level": "error", "message": "Invalid JSON in flow data"}})})
     
     return templates.TemplateResponse(request, "ai_flow_list.html", {
         "flows": flow_manager.list_flows(),

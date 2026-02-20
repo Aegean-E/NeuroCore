@@ -31,12 +31,18 @@ async def list_memories(
     q: str = Query(None),
     filter_date: str = Query("ALL")
 ):
-    loop = asyncio.get_running_loop()
-    memories = await loop.run_in_executor(memory_store.executor, partial(memory_store.browse, search_text=q, filter_date=filter_date, limit=50))
-    return templates.TemplateResponse(request, "memory_list.html", {"memories": memories})
+    try:
+        loop = asyncio.get_running_loop()
+        memories = await loop.run_in_executor(memory_store.executor, partial(memory_store.browse, search_text=q, filter_date=filter_date, limit=50))
+        return templates.TemplateResponse(request, "memory_list.html", {"memories": memories})
+    except Exception as e:
+        return HTMLResponse(f"<div class='p-4 text-red-400 italic'>Error loading memories: {str(e)}</div>")
 
 @router.delete("/delete/{memory_id}")
 async def delete_memory(request: Request, memory_id: int):
-    loop = asyncio.get_running_loop()
-    await loop.run_in_executor(memory_store.executor, partial(memory_store.delete_entry, memory_id))
-    return Response(status_code=200, headers={"HX-Trigger": json.dumps({"showMessage": {"level": "info", "message": "Memory deleted"}})})
+    try:
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(memory_store.executor, partial(memory_store.delete_entry, memory_id))
+        return Response(status_code=200, headers={"HX-Trigger": json.dumps({"showMessage": {"level": "info", "message": "Memory deleted"}})})
+    except Exception as e:
+        return Response(status_code=200, headers={"HX-Trigger": json.dumps({"showMessage": {"level": "error", "message": f"Delete failed: {str(e)}"}})})

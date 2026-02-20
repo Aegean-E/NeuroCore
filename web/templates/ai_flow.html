@@ -55,17 +55,27 @@
                                         {% for node in module.provides_nodes %}
                                             <div draggable="true" 
                                                  ondragstart="onDragStart(event, '{{ module.id }}', '{{ node.name }}', '{{ node.id }}')"
-                                                 class="px-3 py-2 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-lg cursor-grab active:cursor-grabbing transition-all text-xs flex items-center">
-                                                <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 mr-2"></span>
-                                                {{ node.name }}
+                                                 class="px-3 py-2 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-lg cursor-grab active:cursor-grabbing transition-all text-xs flex flex-col items-start">
+                                                <div class="flex items-center w-full">
+                                                    <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 mr-2 flex-shrink-0"></span>
+                                                    <span class="font-semibold">{{ node.name }}</span>
+                                                </div>
+                                                {% if node.description %}
+                                                <p class="text-[10px] text-slate-400 mt-1 pl-3.5 leading-snug w-full break-words" title="{{ node.description }}">{{ node.description }}</p>
+                                                {% endif %}
                                             </div>
                                         {% endfor %}
                                     {% elif module.get('is_flow_node') %}
                                          <div draggable="true" 
                                               ondragstart="onDragStart(event, '{{ module.id }}', '{{ module.name }}', '{{ module.id }}')"
-                                              class="px-3 py-2 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-lg cursor-grab active:cursor-grabbing transition-all text-xs flex items-center">
-                                             <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 mr-2"></span>
-                                             {{ module.name }}
+                                              class="px-3 py-2 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-lg cursor-grab active:cursor-grabbing transition-all text-xs flex flex-col items-start">
+                                             <div class="flex items-center w-full">
+                                                 <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 mr-2 flex-shrink-0"></span>
+                                                 <span class="font-semibold">{{ module.name }}</span>
+                                             </div>
+                                             {% if module.description %}
+                                             <p class="text-[10px] text-slate-400 mt-1 pl-3.5 leading-snug w-full break-words" title="{{ module.description }}">{{ module.description }}</p>
+                                             {% endif %}
                                          </div>
                                     {% endif %}
                                 </div>
@@ -116,10 +126,10 @@
         <!-- AI Flow Area -->
         <div id="canvas" 
              class="flex-grow canvas-grid relative overflow-hidden">
-            <svg id="canvas-svg" class="absolute inset-0 w-full h-full pointer-events-none"></svg>
-            <div id="canvas-bin" class="absolute bottom-5 right-5 w-20 h-20 bg-red-900/50 border-2 border-dashed border-red-700 rounded-full flex items-center justify-center text-red-500 opacity-50 transition-all pointer-events-none z-20">
-                <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
-            </div>
+            <svg id="canvas-svg" class="absolute inset-0 w-full h-full pointer-events-none overflow-visible"></svg>
+        </div>
+        <div id="canvas-bin" class="absolute bottom-5 right-5 w-20 h-20 bg-red-900/50 border-2 border-dashed border-red-700 rounded-full flex items-center justify-center text-red-500 opacity-50 transition-all pointer-events-none z-40">
+            <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
         </div>
     </main>
 
@@ -161,9 +171,48 @@
                 </button>
             </div>
             <div class="mb-4">
-                <label class="block text-sm font-medium text-slate-400 mb-2">Configuration (JSON)</label>
-                <textarea id="node-config-input" rows="10" class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all custom-scrollbar"></textarea>
-                <p class="text-xs text-slate-500 mt-2">Enter valid JSON. Example: {"model": "gpt-4", "temperature": 0.5}</p>
+                <div class="mb-4 pb-4 border-b border-slate-800">
+                    <label class="block text-sm font-medium text-slate-400 mb-2">Explanation (Optional)</label>
+                    <input type="text" id="node-explanation-input" class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" placeholder="Short description of this step...">
+                </div>
+                <!-- Default JSON Editor -->
+                <div id="config-default">
+                    <label class="block text-sm font-medium text-slate-400 mb-2">Configuration (JSON)</label>
+                    <textarea id="node-config-input" rows="10" class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all custom-scrollbar"></textarea>
+                    <p class="text-xs text-slate-500 mt-2">Enter valid JSON. Example: {"model": "gpt-4", "temperature": 0.5}</p>
+                </div>
+                <!-- Delay Node Editor -->
+                <div id="config-delay" class="hidden">
+                    <label class="block text-sm font-medium text-slate-400 mb-2">Delay Duration (Seconds)</label>
+                    <input type="number" id="delay-seconds-input" step="0.1" min="0" class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all">
+                    <p class="text-xs text-slate-500 mt-2">Time to pause execution before proceeding.</p>
+                </div>
+                <!-- System Prompt Editor -->
+                <div id="config-system-prompt" class="hidden">
+                    <label class="block text-sm font-medium text-slate-400 mb-2">System Prompt</label>
+                    <textarea id="system-prompt-input" rows="10" class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all custom-scrollbar" placeholder="You are a helpful AI..."></textarea>
+                    <p class="text-xs text-slate-500 mt-2">Define the persona and instructions for the AI.</p>
+                </div>
+                <!-- Python Script Editor -->
+                <div id="config-script" class="hidden">
+                    <label class="block text-sm font-medium text-slate-400 mb-2">Python Code</label>
+                    <textarea id="script-code-input" rows="15" class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all custom-scrollbar whitespace-pre" placeholder="# Write your Python code here...&#10;# Available variables: data (input), result (output), json, re&#10;result['processed'] = True" spellcheck="false"></textarea>
+                    <p class="text-xs text-slate-500 mt-2">Write valid Python code. Input data is in `data` dict. Assign output to `result` dict.</p>
+                </div>
+                <!-- Repeater Node Editor -->
+                <div id="config-repeater" class="hidden">
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-sm font-medium text-slate-400 mb-2">Delay (Seconds)</label>
+                            <input type="number" id="repeater-delay-input" step="0.1" min="0.1" class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-slate-400 mb-2">Max Repeats</label>
+                            <input type="number" id="repeater-count-input" min="1" class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all">
+                        </div>
+                    </div>
+                    <p class="text-xs text-slate-500 mt-2">The flow will be re-triggered after the delay. Set Max Repeats to 0 to loop indefinitely.</p>
+                </div>
             </div>
             <div class="flex justify-end space-x-3">
                 <button type="button" onclick="closeConfigModal()" class="rounded-xl px-4 py-2 text-sm font-semibold text-slate-300 hover:bg-slate-800 transition-colors">Cancel</button>
@@ -258,6 +307,7 @@
         let activeDrawingLine = null;
 
         const svg = document.getElementById('canvas-svg');
+        const bin = document.getElementById('canvas-bin');
         
         // Create a container for all transformable elements (nodes and svg lines)
         const nodeAndSvgContainer = document.createElement('div');
@@ -268,9 +318,9 @@
         canvas.appendChild(nodeAndSvgContainer);
         nodeAndSvgContainer.appendChild(svg);
 
-        // The container must be the target for drag and drop events
-        nodeAndSvgContainer.addEventListener('dragover', onDragOver);
-        nodeAndSvgContainer.addEventListener('drop', onDrop);
+        // The canvas (viewport) must be the target for drag and drop events
+        canvas.addEventListener('dragover', onDragOver);
+        canvas.addEventListener('drop', onDrop);
 
         // --- Core Canvas and Interaction Functions ---
 
@@ -423,14 +473,21 @@
                     <div class="comment-resize-handle absolute bottom-0 right-0 w-4 h-4 cursor-se-resize"></div>
                 `;
             } else {
-                nodeElement.className = 'absolute bg-slate-800 border border-slate-700 p-4 rounded-xl shadow-2xl cursor-move w-48';
+                const displayTitle = name;
+                
+                let nodeWidthClass = 'w-48';
+
+                nodeElement.className = `absolute bg-slate-800 border border-slate-700 p-4 rounded-xl shadow-2xl cursor-move ${nodeWidthClass}`;
                 nodeElement.style.left = `${x}px`;
                 nodeElement.style.top = `${y}px`;
                 nodeElement.innerHTML = `
                     <div class="flex justify-between items-start mb-3">
-                        <div class="flex items-center">
+                        <div class="flex items-center max-w-[90%]">
                             ${iconPath ? `<svg class="w-4 h-4 text-slate-400 mr-2 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="${iconPath}"></path></svg>` : ''}
-                            <div class="font-bold text-xs uppercase text-slate-200 pointer-events-none">${name}</div>
+                            <div class="overflow-hidden w-full">
+                                <div class="font-bold text-xs uppercase text-slate-200 pointer-events-none truncate" id="title-${nodeId}">${displayTitle}</div>
+                                <div id="explanation-${nodeId}" class="text-[10px] text-slate-500 mt-0.5 leading-tight w-full line-clamp-3 break-words ${existingConfig.explanation ? '' : 'hidden'}">${existingConfig.explanation || ''}</div>
+                            </div>
                         </div>
                         ${isConfigurable ? `
                         <button class="text-slate-400 hover:text-blue-400 transition-colors config-btn" title="Configure Node">
@@ -693,6 +750,7 @@
             nodes.forEach(node => {
                 minX = Math.min(minX, node.x);
                 minY = Math.min(minY, node.y);
+                
                 maxX = Math.max(maxX, node.x + nodeWidth);
                 maxY = Math.max(maxY, node.y + nodeHeight);
             });
@@ -806,8 +864,32 @@
             const node = nodes.find(n => n.id === nodeId);
             if (!node) return;
 
-            const textarea = document.getElementById('node-config-input');
-            textarea.value = JSON.stringify(node.config || {}, null, 4);
+            document.getElementById('node-explanation-input').value = node.config.explanation || '';
+
+            // Reset visibility
+            document.getElementById('config-default').classList.add('hidden');
+            document.getElementById('config-delay').classList.add('hidden');
+            document.getElementById('config-system-prompt').classList.add('hidden');
+            document.getElementById('config-script').classList.add('hidden');
+            document.getElementById('config-repeater').classList.add('hidden');
+
+            if (node.nodeTypeId === 'delay_node') {
+                document.getElementById('config-delay').classList.remove('hidden');
+                document.getElementById('delay-seconds-input').value = node.config.seconds || 1.0;
+            } else if (node.nodeTypeId === 'system_prompt') {
+                document.getElementById('config-system-prompt').classList.remove('hidden');
+                document.getElementById('system-prompt-input').value = node.config.system_prompt || '';
+            } else if (node.nodeTypeId === 'script_node') {
+                document.getElementById('config-script').classList.remove('hidden');
+                document.getElementById('script-code-input').value = node.config.code || '';
+            } else if (node.nodeTypeId === 'repeater_node') {
+                document.getElementById('config-repeater').classList.remove('hidden');
+                document.getElementById('repeater-delay-input').value = node.config.delay || 5.0;
+                document.getElementById('repeater-count-input').value = node.config.max_repeats || 1;
+            } else {
+                document.getElementById('config-default').classList.remove('hidden');
+                document.getElementById('node-config-input').value = JSON.stringify(node.config || {}, null, 4);
+            }
 
             const modal = document.getElementById('config-modal');
             const backdrop = document.getElementById('config-modal-backdrop');
@@ -837,13 +919,39 @@
         }
 
         window.saveNodeConfig = function() {
+            const node = nodes.find(n => n.id === activeConfigNodeId);
+            if (!node) return;
+
             try {
-                const config = JSON.parse(document.getElementById('node-config-input').value);
-                const node = nodes.find(n => n.id === activeConfigNodeId);
-                if (node) node.config = config;
+                let newConfig = {};
+                if (node.nodeTypeId === 'delay_node') {
+                    const val = parseFloat(document.getElementById('delay-seconds-input').value);
+                    newConfig = { seconds: isNaN(val) ? 0 : val };
+                } else if (node.nodeTypeId === 'system_prompt') {
+                    newConfig = { system_prompt: document.getElementById('system-prompt-input').value };
+                } else if (node.nodeTypeId === 'script_node') {
+                    newConfig = { code: document.getElementById('script-code-input').value };
+                } else if (node.nodeTypeId === 'repeater_node') {
+                    const d = parseFloat(document.getElementById('repeater-delay-input').value);
+                    const c = parseInt(document.getElementById('repeater-count-input').value);
+                    newConfig = { delay: isNaN(d) ? 5.0 : d, max_repeats: isNaN(c) ? 1 : c };
+                } else {
+                    newConfig = JSON.parse(document.getElementById('node-config-input').value);
+                }
+                
+                const explanation = document.getElementById('node-explanation-input').value;
+                newConfig.explanation = explanation;
+                
+                const explEl = document.getElementById(`explanation-${node.id}`);
+                if (explEl) {
+                    explEl.textContent = explanation;
+                    if (explanation) explEl.classList.remove('hidden'); else explEl.classList.add('hidden');
+                }
+
+                node.config = newConfig;
                 closeConfigModal();
             } catch (e) {
-                showToast("Invalid JSON: " + e.message, 'error');
+                showToast("Invalid Configuration: " + e.message, 'error');
             }
         }
 

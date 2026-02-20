@@ -2,6 +2,7 @@ import json
 import os
 import uuid
 from datetime import datetime
+import threading
 from core.settings import settings
 
 FLOWS_FILE = "ai_flows.json"
@@ -9,6 +10,7 @@ FLOWS_FILE = "ai_flows.json"
 class FlowManager:
     def __init__(self, storage_file=FLOWS_FILE):
         self.storage_file = storage_file
+        self.lock = threading.Lock()
         self.flows = self._load_flows()
 
     def _load_flows(self):
@@ -64,6 +66,7 @@ class FlowManager:
             settings.save_settings({"active_ai_flow": "default-flow-001"})
 
     def _save_flows_to_disk(self, flows):
+        # Lock should be held by caller
         with open(self.storage_file, "w") as f:
             json.dump(flows, f, indent=4)
 
@@ -71,37 +74,42 @@ class FlowManager:
         self._save_flows_to_disk(self.flows)
 
     def save_flow(self, name, nodes, connections, flow_id=None):
-        if flow_id is None:
-            flow_id = str(uuid.uuid4())
-        
-        self.flows[flow_id] = {
-            "id": flow_id,
-            "name": name,
-            "nodes": nodes,
-            "connections": connections,
-            "created_at": datetime.now().isoformat()
-        }
-        self._save_flows()
-        return self.flows[flow_id]
+        with self.lock:
+            if flow_id is None:
+                flow_id = str(uuid.uuid4())
+            
+            self.flows[flow_id] = {
+                "id": flow_id,
+                "name": name,
+                "nodes": nodes,
+                "connections": connections,
+                "created_at": datetime.now().isoformat()
+            }
+            self._save_flows()
+            return self.flows[flow_id]
 
     def rename_flow(self, flow_id, new_name):
-        if flow_id in self.flows:
-            self.flows[flow_id]["name"] = new_name
-            self._save_flows()
-            return True
-        return False
+        with self.lock:
+            if flow_id in self.flows:
+                self.flows[flow_id]["name"] = new_name
+                self._save_flows()
+                return True
+            return False
 
     def get_flow(self, flow_id):
-        return self.flows.get(flow_id)
+        with self.lock:
+            return self.flows.get(flow_id)
 
     def list_flows(self):
-        return sorted(self.flows.values(), key=lambda x: x.get('created_at', ''), reverse=True)
+        with self.lock:
+            return sorted(self.flows.values(), key=lambda x: x.get('created_at', ''), reverse=True)
 
     def delete_flow(self, flow_id):
-        if flow_id in self.flows:
-            del self.flows[flow_id]
-            self._save_flows()
-            return True
-        return False
+        with self.lock:
+            if flow_id in self.flows:
+                del self.flows[flow_id]
+                self._save_flows()
+                return True
+            return False
 
 flow_manager = FlowManager()

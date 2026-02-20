@@ -27,7 +27,8 @@ class MemoryArbiter:
         confidence: float = 1.0,
         subject: str = "User",
         source: str = "reasoning",
-        embedding: Optional[List[float]] = None
+        embedding: Optional[List[float]] = None,
+        mem_type: str = "FACT"
     ) -> Optional[int]:
         """
         Decide whether to promote reasoning into memory.
@@ -39,6 +40,10 @@ class MemoryArbiter:
         if confidence < min_conf:
             print(f"❌ [Arbiter] Confidence gate failed: {confidence} < {min_conf}")
             return None
+
+        # Type Validation: Default to FACT if unknown
+        if mem_type not in ["FACT", "RULE", "PREFERENCE", "MEMORY"]:
+            mem_type = "FACT"
 
         # 2. Identity & Duplicates
         identity = self.memory_store.compute_identity(text)
@@ -59,7 +64,8 @@ class MemoryArbiter:
                 text=text,
                 embedding=embedding,
                 confidence=confidence,
-                subject=subject
+                subject=subject,
+                mem_type=mem_type
             )
         )
 

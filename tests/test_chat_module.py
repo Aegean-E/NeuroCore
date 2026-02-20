@@ -1,6 +1,10 @@
+import asyncio
+from concurrent.futures import Future
 import pytest
 from fastapi.testclient import TestClient
+from unittest.mock import patch
 from main import app
+import os
 from core.dependencies import get_llm_bridge
 from core.llm import LLMBridge
 from modules.chat import sessions
@@ -14,6 +18,11 @@ def client():
         module_manager = c.app.state.module_manager
         module_manager.enable_module('chat')
         yield c
+
+@pytest.fixture(autouse=True)
+def clean_db():
+    if os.path.exists("data/memory.sqlite3"): os.remove("data/memory.sqlite3")
+    yield
 
 @pytest.fixture(autouse=True)
 def mock_chat_sessions(monkeypatch):
@@ -35,6 +44,16 @@ def mock_chat_sessions(monkeypatch):
     mock_sessions_dict.clear()
     yield sessions.session_manager
 
+@pytest.fixture(autouse=True)
+def mock_memory_store():
+    """Mocks the memory store to prevent flow failures during chat tests."""
+    with patch("modules.memory.node.memory_store") as mock_ms:
+        mock_executor = MagicMock()
+        mock_ms.executor = mock_executor
+        f = Future()
+        f.set_result([])
+        mock_executor.submit.return_value = f
+        yield mock_ms
 
 def test_chat_gui_route(client):
     # Test if the chat module's GUI route is accessible
@@ -49,7 +68,8 @@ def test_get_chat_sessions_route(client, mock_chat_sessions):
     assert response.status_code == 200
     assert "Test Session 1" in response.text
 
-def test_chat_send_route(client, httpx_mock, mock_chat_sessions, monkeypatch):
+@pytest.mark.asyncio
+async def test_chat_send_route(client, httpx_mock, mock_chat_sessions, monkeypatch):
     # Define a consistent, isolated URL for this test to avoid state pollution
     test_api_url = "http://test-chat-api.local/v1"
 
@@ -64,29 +84,22 @@ def test_chat_send_route(client, httpx_mock, mock_chat_sessions, monkeypatch):
     app.dependency_overrides[get_llm_bridge] = get_test_llm_bridge
 
     # Mock the LLM call that the chat module makes
-    mock_response = {
-        "choices": [
-            {"message": {"content": "Mocked AI Response"}}
-        ]
-    }
-    httpx_mock.add_response(
-        url=f"{test_api_url}/chat/completions",
-        json=mock_response,
-        method="POST"
-    )
+    httpx_mock.add_response(url=f"{test_api_url}/chat/completions", json={"choices": [{"message": {"content": "[]"}}]}, method="POST") # Extraction
+    httpx_mock.add_response(url=f"{test_api_url}/chat/completions", json={"choices": [{"message": {"content": "Mocked AI Response"}}]}, method="POST") # Flow
     
     # Mock the embedding call that MemorySaveExecutor might trigger
-    httpx_mock.add_response(
-        url=f"{test_api_url}/embeddings",
-        json={"data": [{"embedding": [0.1] * 1536}]},
-        method="POST"
-    )
+    httpx_mock.add_response(url=f"{test_api_url}/embeddings", json={"data": [{"embedding": [0.1] * 1536}]}, method="POST") # Save
+    httpx_mock.add_response(url=f"{test_api_url}/embeddings", json={"data": [{"embedding": [0.1] * 1536}]}, method="POST") # Recall
 
     # Create a session to send a message to
     session = mock_chat_sessions.create_session("Send Test")
     session_id = session['id']
 
-    response = client.post(f"/chat/send?session_id={session_id}", data={"message": "hello"})
+    # Patch create_task to avoid background tasks hanging
+    with patch("asyncio.create_task", side_effect=lambda coro: asyncio.ensure_future(coro)):
+        response = client.post(f"/chat/send?session_id={session_id}", data={"message": "hello"})
+        # Give background tasks a moment to run
+        await asyncio.sleep(0.1)
 
     # Clean up the dependency override to not affect other tests
     app.dependency_overrides.clear()

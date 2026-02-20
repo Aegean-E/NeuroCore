@@ -145,6 +145,9 @@ async def send_message(
     # Add AI response to history
     session_manager.add_message(session_id, "assistant", ai_response)
 
+    # Reload session to ensure we have the absolute latest state for auto-renaming
+    active_session = session_manager.get_session(session_id)
+
     # --- Auto-Renaming Logic ---
     # Get config for auto-rename turns
     module_manager = request.app.state.module_manager
@@ -152,7 +155,7 @@ async def send_message(
     config = chat_module.get("config", {}) if chat_module else {}
     auto_rename_turns = int(config.get("auto_rename_turns", 3))
 
-    if len(active_session["history"]) == auto_rename_turns * 2 and active_session["name"].startswith("Session "):
+    if len(active_session["history"]) >= auto_rename_turns * 2 and active_session["name"].startswith("Session "):
         try:
             # Construct a prompt to summarize the conversation
             # We use the first user message and the AI response

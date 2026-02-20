@@ -1,16 +1,30 @@
 {
     "name": "Logic & Flow",
-    "description": "Control flow nodes for branching and conditions.",
+    "description": "Control flow nodes for branching, transformation, and scripting.",
     "enabled": true,
     "id": "logic",
     "icon": "M4 6h16M4 12h16m-7 6h7",
     "is_flow_node": false,
-    "order": 6,
+    "order": 0,
     "provides_nodes": [
         {
-            "id": "condition_node",
-            "name": "Condition (If/Else)",
-            "description": "Checks a condition. If true, passes data. If false, stops this branch.",
+            "id": "delay_node",
+            "name": "Delay",
+            "description": "Pauses the workflow execution for a configurable duration (in seconds) before passing data to the next node.",
+            "singleton": false,
+            "configurable": true
+        },
+        {
+            "id": "script_node",
+            "name": "Python Script",
+            "description": "Executes a custom Python snippet. Variables 'data' (input) and 'result' (output) are available for complex logic.",
+            "singleton": false,
+            "configurable": true
+        },
+        {
+            "id": "repeater_node",
+            "name": "Repeater",
+            "description": "Re-triggers the current flow after a delay. Set Max Repeats to 0 to run forever, or a positive number for a fixed count.",
             "singleton": false,
             "configurable": true
         }

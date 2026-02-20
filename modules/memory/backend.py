@@ -45,6 +45,12 @@ class MemoryStore:
     def _connect(self):
         con = sqlite3.connect(self.db_path, check_same_thread=False)
         con.execute("PRAGMA journal_mode=WAL;")
+        
+        # Self-healing: Ensure tables exist if the file was recently deleted/created
+        res = con.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='memories'").fetchone()
+        if not res:
+            self._execute_init(con)
+            
         try:
             yield con
             con.commit()
@@ -55,33 +61,32 @@ class MemoryStore:
             con.close()
 
     def _init_db(self) -> None:
-        with self._connect() as con:
-            con.execute("""
-                CREATE TABLE IF NOT EXISTS memories (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    identity TEXT NOT NULL,
-                    type TEXT NOT NULL,
-                    subject TEXT DEFAULT 'User',
-                    text TEXT NOT NULL,
-                    confidence REAL NOT NULL,
-                    created_at INTEGER NOT NULL,
-                    embedding TEXT,
-                    deleted INTEGER DEFAULT 0,
-                    parent_id INTEGER DEFAULT NULL
-                )
-            """)
-            con.execute("CREATE INDEX IF NOT EXISTS idx_identity ON memories(identity);")
-            con.execute("CREATE INDEX IF NOT EXISTS idx_created_at ON memories(created_at);")
-            
-            # Migration: Add subject column if it doesn't exist
-            try:
-                con.execute("ALTER TABLE memories ADD COLUMN subject TEXT DEFAULT 'User'")
-            except sqlite3.OperationalError:
-                pass
-            try:
-                con.execute("ALTER TABLE memories ADD COLUMN parent_id INTEGER DEFAULT NULL")
-            except sqlite3.OperationalError:
-                pass
+        with self._connect() as _:
+            pass # _connect now handles initialization
+
+    def _execute_init(self, con) -> None:
+        con.execute("""
+            CREATE TABLE IF NOT EXISTS memories (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                identity TEXT NOT NULL,
+                type TEXT NOT NULL,
+                subject TEXT DEFAULT 'User',
+                text TEXT NOT NULL,
+                confidence REAL NOT NULL,
+                created_at INTEGER NOT NULL,
+                embedding TEXT,
+                deleted INTEGER DEFAULT 0,
+                parent_id INTEGER DEFAULT NULL
+            )
+        """)
+        con.execute("CREATE INDEX IF NOT EXISTS idx_identity ON memories(identity);")
+        con.execute("CREATE INDEX IF NOT EXISTS idx_created_at ON memories(created_at);")
+        
+        # Migration logic
+        try: con.execute("ALTER TABLE memories ADD COLUMN subject TEXT DEFAULT 'User'")
+        except sqlite3.OperationalError: pass
+        try: con.execute("ALTER TABLE memories ADD COLUMN parent_id INTEGER DEFAULT NULL")
+        except sqlite3.OperationalError: pass
 
     def _parse_embedding(self, blob) -> Optional[np.ndarray]:
         if blob is None: return None
@@ -161,10 +166,11 @@ class MemoryStore:
         text_lower = " ".join(text.lower().strip().split())
         return hashlib.sha256(text_lower.encode("utf-8")).hexdigest()
 
-    def add_entry(self, text: str, embedding: Optional[List[float]] = None, confidence: float = 1.0, subject: str = "User", created_at: int = None) -> int:
+    def add_entry(self, text: str, embedding: Optional[List[float]] = None, confidence: float = 1.0, subject: str = "User", created_at: int = None, mem_type: str = "MEMORY") -> int:
         identity = self.compute_identity(text)
         timestamp = created_at if created_at is not None else int(time.time())
         
+        final_type = mem_type if mem_type else "MEMORY"
         emb_np = np.array(embedding, dtype='float32') if embedding else None
         embedding_blob = emb_np.tobytes() if emb_np is not None else None
 
@@ -178,7 +184,7 @@ class MemoryStore:
                 cur = con.execute("""
                     INSERT INTO memories (identity, type, subject, text, confidence, created_at, embedding)
                     VALUES (?, ?, ?, ?, ?, ?, ?)
-                """, (identity, "MEMORY", subject, text, confidence, timestamp, embedding_blob))
+                """, (identity, final_type, subject, text, confidence, timestamp, embedding_blob))
                 row_id = cur.lastrowid
 
             if FAISS_AVAILABLE and emb_np is not None and self.faiss_index:
@@ -282,11 +288,11 @@ class MemoryStore:
             rows = con.execute("SELECT id, text, created_at FROM memories WHERE deleted = 0 AND parent_id IS NULL ORDER BY created_at DESC LIMIT ?", (limit,)).fetchall()
         return [{"id": r[0], "text": r[1], "created_at": r[2]} for r in rows]
 
-    def browse(self, limit: int = 50, offset: int = 0, search_text: str = None, filter_date: str = "ALL") -> List[Dict]:
+    def browse(self, limit: int = 50, offset: int = 0, search_text: str = None, filter_date: str = "ALL", mem_type: str = None) -> List[Dict]:
         """
         Retrieves memories with optional filtering for the Memory Browser UI.
         """
-        query = "SELECT id, subject, text, confidence, created_at, parent_id FROM memories WHERE deleted = 0 AND parent_id IS NULL"
+        query = "SELECT id, subject, text, confidence, created_at, parent_id, type FROM memories WHERE deleted = 0 AND parent_id IS NULL"
         params = []
         
         if filter_date == "TODAY":
@@ -306,6 +312,10 @@ class MemoryStore:
             query += " AND text LIKE ?"
             params.append(f"%{search_text}%")
             
+        if mem_type:
+            query += " AND type = ?"
+            params.append(mem_type)
+            
         query += " ORDER BY created_at DESC LIMIT ? OFFSET ?"
         params.extend([limit, offset])
         
@@ -319,7 +329,8 @@ class MemoryStore:
                 "text": r[2],
                 "confidence": r[3],
                 "created_at": r[4],
-                "is_consolidated": r[5] is not None
+                "is_consolidated": r[5] is not None,
+                "type": r[6]
             }
             for r in rows
         ]

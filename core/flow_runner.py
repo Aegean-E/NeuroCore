@@ -1,4 +1,6 @@
 import importlib
+import sys
+import types
 from collections import deque
 from .flow_manager import flow_manager
 
@@ -10,6 +12,7 @@ class FlowRunner:
         cls._executor_cache.clear()
 
     def __init__(self, flow_id: str):
+        self.flow_id = flow_id
         self.flow = flow_manager.get_flow(flow_id)
         if not self.flow:
             raise ValueError(f"Flow with id {flow_id} not found.")
@@ -58,7 +61,10 @@ class FlowRunner:
             
             if not incoming_edges:
                 # Source node: receives global initial input
-                node_input = initial_input
+                if isinstance(initial_input, dict):
+                    node_input = initial_input.copy()
+                else:
+                    node_input = initial_input
             else:
                 # Gather outputs from parents
                 parent_outputs = []
@@ -87,6 +93,9 @@ class FlowRunner:
                 if cache_key not in self._executor_cache:
                     # Dynamically import the module's node logic dispatcher
                     node_dispatcher = importlib.import_module(f"modules.{module_id}.node")
+                    # Only reload if it's a real module (not a mock during testing)
+                    if isinstance(node_dispatcher, types.ModuleType) and node_dispatcher.__name__ in sys.modules:
+                        importlib.reload(node_dispatcher) # Ensure we have the latest code
                     # Get the specific executor class for this node type
                     executor_class = await node_dispatcher.get_executor_class(node_type_id)
                     self._executor_cache[cache_key] = executor_class
@@ -98,7 +107,8 @@ class FlowRunner:
                     continue
 
                 executor = executor_class()
-                node_config = node_meta.get('config', {})
+                node_config = (node_meta.get('config') or {}).copy()
+                node_config['_flow_id'] = self.flow_id
                 
                 processed_data = await executor.receive(node_input, config=node_config)
                 

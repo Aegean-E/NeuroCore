@@ -18,36 +18,40 @@ async def get_stats(request: Request):
     except Exception as e:
         return f"<div class='text-red-400 text-sm p-4 border border-red-500/50 rounded-lg bg-red-900/20'>Error loading stats: {str(e)}</div>"
     
-    html = """
+    # Build type breakdown HTML
+    type_html = ""
+    types_dict = stats.get('types', {})
+    for t_name, count in types_dict.items():
+        type_html += f'<span class="px-2 py-0.5 bg-slate-700 text-slate-300 rounded text-[10px] font-mono">{t_name}: {count}</span> '
+
+    html = f"""
     <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4 mb-6">
         <div class="bg-slate-800 p-4 rounded-xl border border-slate-700/50">
             <div class="text-xs text-slate-400 uppercase tracking-wider mb-1">Total Memories</div>
-            <div class="text-2xl font-bold text-slate-100">{}</div>
+            <div class="text-2xl font-bold text-slate-100">{stats.get('grand_total', 0)}</div>
         </div>
         <div class="bg-slate-800 p-4 rounded-xl border border-slate-700/50">
             <div class="text-xs text-slate-400 uppercase tracking-wider mb-1">Active</div>
-            <div class="text-2xl font-bold text-emerald-400">{}</div>
+            <div class="text-2xl font-bold text-emerald-400">{stats.get('total', 0)}</div>
         </div>
         <div class="bg-slate-800 p-4 rounded-xl border border-slate-700/50">
             <div class="text-xs text-slate-400 uppercase tracking-wider mb-1">User Origin</div>
-            <div class="text-2xl font-bold text-blue-400">{}</div>
+            <div class="text-2xl font-bold text-blue-400">{stats.get('user', 0)}</div>
         </div>
         <div class="bg-slate-800 p-4 rounded-xl border border-slate-700/50">
             <div class="text-xs text-slate-400 uppercase tracking-wider mb-1">Assistant Origin</div>
-            <div class="text-2xl font-bold text-indigo-400">{}</div>
+            <div class="text-2xl font-bold text-indigo-400">{stats.get('assistant', 0)}</div>
         </div>
         <div class="bg-slate-800 p-4 rounded-xl border border-slate-700/50">
             <div class="text-xs text-slate-400 uppercase tracking-wider mb-1">Consolidated</div>
-            <div class="text-2xl font-bold text-purple-400">{}</div>
+            <div class="text-2xl font-bold text-purple-400">{stats.get('consolidated', 0)}</div>
         </div>
     </div>
-    """.format(
-        stats.get('grand_total', 0), 
-        stats.get('total', 0), 
-        stats.get('user', 0), 
-        stats.get('assistant', 0), 
-        stats.get('consolidated', 0)
-    )
+    <div class="flex flex-wrap gap-2 items-center">
+        <span class="text-xs text-slate-500 uppercase font-bold tracking-tighter">Type Breakdown:</span>
+        {type_html if type_html else '<span class="text-xs text-slate-600 italic">None</span>'}
+    </div>
+    """
     
     if stats.get('grand_total', 0) == 0:
         html = "<p class='text-slate-500 italic'>No memories stored yet.</p>"

@@ -23,23 +23,24 @@ async def test_memory_flow_integration(temp_memory_store):
     Integration test for a flow with Memory Recall -> LLM -> Memory Save.
     Verifies that data saved in one turn is available in the next.
     """
-    # Patch the global memory_store used by nodes to use our temp store
-    with patch("modules.memory.node.memory_store", temp_memory_store), \
-         patch("modules.memory.backend.memory_store", temp_memory_store):
+    # Patch settings directly to ensure all components use the mock URL
+    from core.settings import settings as global_settings
+    
+    with patch.dict(global_settings.settings, {"llm_api_url": "http://localhost:1234/v1", "embedding_api_url": "http://localhost:1234/v1"}), \
+         patch("modules.memory.node.memory_store", temp_memory_store), \
+         patch("modules.memory.backend.memory_store", temp_memory_store), \
+         patch("modules.memory.consolidation.memory_store", temp_memory_store):
         
-        # Mock LLMBridge to avoid real API calls
-        with patch("modules.memory.node.LLMBridge") as MockBridgeMem, \
-             patch("modules.llm_module.node.LLMBridge") as MockBridgeLLM:
+        # Mock LLMBridge globally to avoid real API calls from any module
+        with patch("core.llm.LLMBridge") as MockBridge:
             
-            # Setup Memory LLM Mock (for embeddings)
-            mem_bridge = MockBridgeMem.return_value
+            # Setup LLM Mock
+            bridge_instance = MockBridge.return_value
             # Return a constant embedding so search always matches
-            mem_bridge.get_embedding = AsyncMock(return_value=[0.1, 0.2, 0.3])
-            
-            # Setup Core LLM Mock (for chat completion)
-            llm_bridge = MockBridgeLLM.return_value
-            llm_bridge.chat_completion = AsyncMock(return_value={
-                "choices": [{"message": {"content": "I acknowledge."}}]
+            bridge_instance.get_embedding = AsyncMock(return_value=[0.1, 0.2, 0.3])
+            # Setup chat completion
+            bridge_instance.chat_completion = AsyncMock(return_value={
+                    "choices": [{"message": {"content": '["My secret code is 1234"]'}}]
             })
 
             # Define a linear flow
@@ -93,7 +94,7 @@ async def test_memory_flow_integration(temp_memory_store):
                 
                 # Verify that the LLM received the injected memory
                 # The LLM node calls chat_completion(messages=...)
-                call_kwargs = llm_bridge.chat_completion.call_args.kwargs
+                call_kwargs = bridge_instance.chat_completion.call_args.kwargs
                 messages_sent = call_kwargs['messages']
                 
                 # Expecting: [System Message (Memory), User Message]

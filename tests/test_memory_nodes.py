@@ -1,10 +1,13 @@
 import pytest
+from concurrent.futures import Future
 from unittest.mock import MagicMock, patch, AsyncMock
 from modules.memory.node import MemoryRecallExecutor, MemorySaveExecutor
 
 @pytest.fixture
 def mock_store():
     with patch("modules.memory.node.memory_store") as ms:
+        mock_executor = MagicMock()
+        ms.executor = mock_executor
         yield ms
 
 @pytest.fixture
@@ -19,11 +22,13 @@ async def test_memory_recall_success(mock_store, mock_llm_bridge):
     """Test that relevant memories are injected into the message history."""
     executor = MemoryRecallExecutor()
     
-    # Setup mock store results
-    mock_store.search.return_value = [
+    # Setup mock executor results
+    f = Future()
+    f.set_result([
         {"text": "User likes apples", "score": 0.9},
         {"text": "User lives in NYC", "score": 0.8}
-    ]
+    ])
+    mock_store.executor.submit.return_value = f
     
     input_data = {
         "messages": [
@@ -47,7 +52,10 @@ async def test_memory_recall_success(mock_store, mock_llm_bridge):
 async def test_memory_recall_no_results(mock_store, mock_llm_bridge):
     """Test that nothing changes if no memories are found."""
     executor = MemoryRecallExecutor()
-    mock_store.search.return_value = []
+    
+    f = Future()
+    f.set_result([])
+    mock_store.executor.submit.return_value = f
     
     input_data = {"messages": [{"role": "user", "content": "Hi"}]}
     result = await executor.receive(input_data)
@@ -123,10 +131,12 @@ async def test_memory_recall_min_score_filtering(mock_store, mock_llm_bridge):
     """Test that results below min_score are filtered out."""
     executor = MemoryRecallExecutor()
     
-    mock_store.search.return_value = [
+    f = Future()
+    f.set_result([
         {"text": "High score", "score": 0.9},
         {"text": "Low score", "score": 0.4}
-    ]
+    ])
+    mock_store.executor.submit.return_value = f
     
     input_data = {"messages": [{"role": "user", "content": "Query"}]}
     
@@ -160,13 +170,14 @@ async def test_save_background_logic(mock_store):
     executor = MemorySaveExecutor()
     
     # Mock Arbiter
-    executor.arbiter = MagicMock()
+    executor.arbiter = MagicMock(consider=AsyncMock())
     
     # Mock LLMBridge
     with patch("modules.memory.node.LLMBridge") as MockBridge:
         bridge_instance = MockBridge.return_value
         bridge_instance.get_embedding = AsyncMock(return_value=[0.1, 0.2])
-        
+        bridge_instance.chat_completion = AsyncMock(return_value={"choices": [{"message": {"content": '["Text"]'}}]})
+
         await executor._save_background("Text", subject="User", mem_type="FACT", confidence=0.9)
         
         bridge_instance.get_embedding.assert_called_with("Text")

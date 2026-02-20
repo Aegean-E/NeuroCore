@@ -1,61 +1,100 @@
 import re
+import asyncio
+import json
 
-class ConditionExecutor:
+class DelayExecutor:
     async def receive(self, input_data: dict, config: dict = None) -> dict:
         if input_data is None: return None
-        
         config = config or {}
-        target_field = config.get("target_field", "content")
-        operator = config.get("operator", "contains")
-        value = config.get("value", "")
+        try:
+            seconds = float(config.get("seconds", 1.0))
+        except:
+            seconds = 1.0
         
-        # Extract data to check
-        data_to_check = input_data.get(target_field)
-        
-        # Special handling for 'messages' list to check the last user message
-        if target_field == "messages" and isinstance(data_to_check, list):
-             # Find last user message or just last message
-             if data_to_check:
-                 data_to_check = data_to_check[-1].get("content", "")
-             else:
-                 data_to_check = ""
-        
-        # Handle nested choices (LLM output) if checking content
-        if target_field == "content" and not data_to_check and "choices" in input_data:
-             try:
-                 data_to_check = input_data["choices"][0]["message"]["content"]
-             except:
-                 pass
+        if seconds < 0:
+            seconds = 0
+        await asyncio.sleep(seconds)
+        return input_data
 
-        if data_to_check is None:
-            data_to_check = ""
-            
-        data_str = str(data_to_check)
+    async def send(self, processed_data: dict) -> dict:
+        return processed_data
+
+class ScriptExecutor:
+    async def receive(self, input_data: dict, config: dict = None) -> dict:
+        if input_data is None: return None
+        config = config or {}
+        code = config.get("code", "")
         
-        matched = False
-        if operator == "contains":
-            matched = value.lower() in data_str.lower()
-        elif operator == "equals":
-            matched = value.lower() == data_str.lower()
-        elif operator == "not_equals":
-            matched = value.lower() != data_str.lower()
-        elif operator == "regex":
-            try:
-                matched = bool(re.search(value, data_str, re.IGNORECASE))
-            except:
-                matched = False
-        elif operator == "exists":
-            matched = bool(data_to_check)
-            
-        if matched:
+        if not code:
             return input_data
+            
+        # Define scope
+        if isinstance(input_data, dict):
+            data_val = input_data.copy()
+            result_val = input_data.copy()
         else:
-            return None
+            # Handle non-dict inputs (lists, strings, etc.) gracefully
+            data_val = input_data
+            result_val = {}
+            
+        local_scope = {"data": data_val, "result": result_val, "json": json, "re": re}
+        
+        try:
+            exec(code, {}, local_scope)
+            return local_scope.get("result")
+        except Exception as e:
+            print(f"Script Node Error: {e}")
+            # Return error in data stream so it can be debugged
+            if isinstance(input_data, dict):
+                err_data = input_data.copy()
+            else:
+                err_data = {"original_input": input_data}
+            err_data["error"] = f"Script failed: {str(e)}"
+            return err_data
+
+    async def send(self, processed_data: dict) -> dict:
+        return processed_data
+
+class RepeaterExecutor:
+    async def receive(self, input_data: dict, config: dict = None) -> dict:
+        if input_data is None: return None
+        config = config or {}
+        
+        try:
+            delay = float(config.get("delay", 5.0))
+            max_repeats = int(config.get("max_repeats", 1))
+        except (ValueError, TypeError):
+            delay = 5.0
+            max_repeats = 1
+            
+        flow_id = config.get("_flow_id")
+        current_repeat = input_data.get("_repeat_count", 0)
+        
+        # If max_repeats is 0, it loops forever. Otherwise, it checks the count.
+        if flow_id and (max_repeats == 0 or current_repeat < max_repeats):
+            async def trigger_next(fid, data, count):
+                await asyncio.sleep(delay)
+                try:
+                    from core.flow_runner import FlowRunner
+                    runner = FlowRunner(fid)
+                    next_data = data.copy()
+                    next_data["_repeat_count"] = count + 1
+                    await runner.run(next_data)
+                except Exception as e:
+                    print(f"Repeater failed to trigger next run: {e}")
+            
+            asyncio.create_task(trigger_next(flow_id, input_data, current_repeat))
+            
+        return input_data
 
     async def send(self, processed_data: dict) -> dict:
         return processed_data
 
 async def get_executor_class(node_type_id: str):
-    if node_type_id == "condition_node":
-        return ConditionExecutor
+    if node_type_id == "delay_node":
+        return DelayExecutor
+    if node_type_id == "script_node":
+        return ScriptExecutor
+    if node_type_id == "repeater_node":
+        return RepeaterExecutor
     return None

@@ -25,6 +25,10 @@ NeuroCore is built on the principles of **Speed**, **Simplicity**, and **Modular
     *   **Pan & Zoom**: Effortlessly navigate large and complex flows.
     *   **Singleton Nodes**: Enforce architectural patterns by restricting certain nodes (like Chat Input/Output) to a single instance per flow.
     *   **Flow Management**: Create, save, rename, and switch between multiple AI flows to handle different tasks.
+*   **⚡ Logic & Control Flow**: Advanced nodes for complex orchestration.
+    *   **Delay**: Pause execution for a set duration.
+    *   **Python Scripting**: Execute custom Python code directly within the flow to transform data.
+    *   **Repeater**: Create loops or scheduled re-triggers of AI flows.
 *   **💬 Built-in Chat UI**: A clean, modern chat interface for direct interaction with your configured AI flow.
     *   **Multimodal Support**: Upload images to interact with vision-capable models.
     *   **Session Management**: Create, rename, and delete chat sessions to organize your conversations.
@@ -39,6 +43,7 @@ NeuroCore is built on the principles of **Speed**, **Simplicity**, and **Modular
     *   **Chat Remotely**: Interact with your AI agent from anywhere via the Telegram app.
     *   **Vision Support**: Send photos to Telegram to analyze images using vision-capable models.
     *   **Command Control**: Manage sessions (`/new_session`, `/delete_session`) directly from the chat.
+*   **📝 Annotations**: Add visual comments and documentation directly onto the AI Flow canvas using Comment nodes.
 *   **⚙️ Dynamic Configuration**: Manage LLM API endpoints, models, and other parameters through a simple, tabbed settings UI.
 *   **✅ Robust Testing**: A comprehensive test suite using `pytest` to ensure code quality and stability.
 
@@ -124,10 +129,13 @@ NeuroCore/
 ├── core/                 # Core application logic (managers, dependencies)
 ├── modules/              # Self-contained, plug-and-play feature modules
 │   ├── chat/             # The chat UI and flow nodes
+│   ├── logic/            # Scripting, delays, and flow control
 │   └── llm_module/       # The core LLM flow node
 │   ├── memory/           # Long-term memory backend and nodes
 │   ├── memory_browser/   # UI for managing memories
 │   └── system_prompt/    # System prompt injection node
+│   ├── telegram/         # Telegram bot integration
+│   └── annotations/      # Flow documentation and comments
 ├── tests/                # The pytest test suite
 ├── web/                  # Frontend files
 │   ├── static/           # Static assets (future CSS/JS)

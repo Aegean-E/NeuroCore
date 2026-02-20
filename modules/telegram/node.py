@@ -60,8 +60,8 @@ class TelegramOutputExecutor:
              except: pass
         
         if text_to_send:
-            bridge = TelegramBridge(self.bot_token, self.chat_id)
-            bridge.send_message(text_to_send)
+            with TelegramBridge(self.bot_token, self.chat_id) as bridge:
+                bridge.send_message(text_to_send)
             
         return input_data
 

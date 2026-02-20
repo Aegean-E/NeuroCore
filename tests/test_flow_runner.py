@@ -61,13 +61,15 @@ async def test_flow_run_success(mock_flow):
         mock_executor_instance.receive = AsyncMock(side_effect=lambda d, config=None: d)
         mock_executor_instance.send = AsyncMock(side_effect=lambda d, config=None: d)
         mock_executor_class = MagicMock(return_value=mock_executor_instance)
-        mock_node_dispatcher = MagicMock()
+        mock_node_dispatcher = MagicMock(__name__="test_dispatcher")
         mock_node_dispatcher.get_executor_class = AsyncMock(return_value=mock_executor_class)
         mock_import.return_value = mock_node_dispatcher
 
-        runner = FlowRunner(flow_id="test-flow")
-        initial_data = {"data": "start"}
-        result = await runner.run(initial_data)
+        # Mock reload to do nothing and ensure it covers the run call
+        with patch('importlib.reload'):
+            runner = FlowRunner(flow_id="test-flow")
+            initial_data = {"data": "start"}
+            result = await runner.run(initial_data)
 
         assert result == initial_data
         assert mock_executor_instance.receive.call_count == 3
@@ -78,7 +80,8 @@ async def test_flow_run_node_execution_error(mock_flow):
     """Tests that an error during a node's execution is caught and reported."""
     FlowRunner.clear_cache()
     with patch('core.flow_runner.flow_manager') as mock_fm, \
-         patch('importlib.import_module') as mock_import:
+         patch('importlib.import_module') as mock_import, \
+         patch('importlib.reload'):
         
         mock_fm.get_flow.return_value = mock_flow
 

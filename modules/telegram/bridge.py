@@ -20,6 +20,12 @@ class TelegramBridge:
         self.session = requests.Session()
         self._stop_event = threading.Event()
 
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.close()
+
     def stop(self):
         """Signal the listener to stop."""
         self._stop_event.set()

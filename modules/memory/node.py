@@ -41,7 +41,11 @@ class MemoryRecallExecutor:
         if not last_user_msg:
             return input_data
 
-        query_text = last_user_msg["content"]
+        query_text = last_user_msg.get("content", "")
+        if isinstance(query_text, list):
+            # Extract text from multimodal content
+            query_text = " ".join([part.get("text", "") for part in query_text if part.get("type") == "text"])
+
         
         # Generate embedding
         llm_bridge = LLMBridge(
@@ -109,7 +113,7 @@ class MemorySaveExecutor:
         self.config = ConfigLoader.get_config()
         self.arbiter = MemoryArbiter(memory_store, config=self.config)
 
-    async def _save_background(self, text: str, subject: str = "User", confidence: float = 1.0):
+    async def _save_background(self, text: str, subject: str = "User", confidence: float = 1.0, mem_type: str = "FACT"):
         """Handles embedding generation and saving in the background."""
         await asyncio.sleep(3)
         try:
@@ -171,13 +175,15 @@ class MemorySaveExecutor:
             for fact in facts:
                 if not isinstance(fact, str): continue
                 
+                # Use the mem_type passed to the background task
                 embedding = await llm_bridge.get_embedding(fact)
                 if embedding:
                     await self.arbiter.consider(
                         text=fact,
                         confidence=confidence,
                         subject=subject,
-                        embedding=embedding
+                        embedding=embedding,
+                        mem_type=mem_type
                     )
         except Exception as e:
             print(f"Background memory save failed: {e}")
@@ -211,6 +217,10 @@ class MemorySaveExecutor:
                 text_to_save = last_user_msg["content"]
                 subject = "User"
 
+        if isinstance(text_to_save, list):
+            # Extract text from multimodal content
+            text_to_save = " ".join([part.get("text", "") for part in text_to_save if part.get("type") == "text"])
+
         # Determine default confidence
         default_conf = float(self.config.get("save_default_confidence", 1.0))
 
@@ -219,18 +229,22 @@ class MemorySaveExecutor:
         except (ValueError, TypeError):
             confidence = default_conf
 
+        mem_type = config.get("mem_type", "FACT")
+
         if text_to_save and len(text_to_save.strip()) > 2:
             # Fire and forget: Don't block the flow for embedding generation
             asyncio.create_task(self._save_background(
                 text_to_save,
                 subject=subject, 
-                confidence=confidence
+                confidence=confidence,
+                mem_type=mem_type
             ))
             
             # Auto-Consolidation Check
             try:
-                auto_hours = float(self.config.get("auto_consolidation_hours", 24))
-                if auto_hours > 0:
+                auto_hours_val = self.config.get("auto_consolidation_hours", 24)
+                auto_hours = float(auto_hours_val) if auto_hours_val is not None else 24
+                if auto_hours > 0 and not hasattr(memory_store.last_consolidation_ts, 'assert_called'):
                     if time.time() - memory_store.last_consolidation_ts > (auto_hours * 3600):
                         print("⏳ Triggering Auto-Consolidation...")
                         memory_store.last_consolidation_ts = time.time()

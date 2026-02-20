@@ -1,6 +1,7 @@
 import os
 import json
 import importlib
+import threading
 from fastapi import FastAPI
 from starlette.routing import Mount
 
@@ -11,6 +12,7 @@ class ModuleManager:
     def __init__(self, app: FastAPI, modules_dir=MODULES_DIR):
         self.modules_dir = modules_dir
         self.app = app
+        self.lock = threading.Lock()
         self.modules = self._discover_modules()
 
     def _discover_modules(self):
@@ -78,25 +80,28 @@ class ModuleManager:
     def get_all_modules(self):
         """Returns a list of all discovered modules and their metadata, sorted by order key."""
         # Sort by the 'order' key in the metadata, defaulting to a high number if not present.
-        return sorted(list(self.modules.values()), key=lambda m: m.get('order', 999))
+        with self.lock:
+            return sorted(list(self.modules.values()), key=lambda m: m.get('order', 999))
 
     def _toggle_module(self, module_id: str, enabled: bool):
         """Enables or disables a module, updating the running app and the metadata file."""
-        if module_id not in self.modules:
-            return None
+        with self.lock:
+            if module_id not in self.modules:
+                return None
 
-        if enabled:
-            self._load_module_router(module_id)
-        else:
-            self._unload_module_router(module_id)
+            if enabled:
+                self._load_module_router(module_id)
+            else:
+                self._unload_module_router(module_id)
 
-        self.modules[module_id]['enabled'] = enabled
-        meta_path = os.path.join(self.modules_dir, module_id, "module.json")
-        with open(meta_path, "w") as f:
-            json.dump(self.modules[module_id], f, indent=4)
-            
-        # Clear the FlowRunner cache to ensure no stale executor classes are used
-        FlowRunner.clear_cache()
+            self.modules[module_id]['enabled'] = enabled
+            meta_path = os.path.join(self.modules_dir, module_id, "module.json")
+            with open(meta_path, "w") as f:
+                json.dump(self.modules[module_id], f, indent=4)
+                
+            # Clear the FlowRunner cache to ensure no stale executor classes are used
+            # (FlowRunner handles its own internal state, so calling this static method is safe)
+            FlowRunner.clear_cache()
 
         return self.modules[module_id]
 
@@ -108,11 +113,12 @@ class ModuleManager:
 
     def update_module_config(self, module_id: str, new_config: dict):
         """Updates the configuration for a specific module."""
-        if module_id not in self.modules:
-            return None
-        
-        self.modules[module_id]['config'] = new_config
-        meta_path = os.path.join(self.modules_dir, module_id, "module.json")
-        with open(meta_path, "w") as f:
-            json.dump(self.modules[module_id], f, indent=4)
-        return self.modules[module_id]
+        with self.lock:
+            if module_id not in self.modules:
+                return None
+            
+            self.modules[module_id]['config'] = new_config
+            meta_path = os.path.join(self.modules_dir, module_id, "module.json")
+            with open(meta_path, "w") as f:
+                json.dump(self.modules[module_id], f, indent=4)
+            return self.modules[module_id]

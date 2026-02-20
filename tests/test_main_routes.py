@@ -99,6 +99,18 @@ def test_save_ai_flow(client):
     assert response.status_code == 200
     mock_fm.save_flow.assert_called_once_with(name="My New Flow", nodes=[{"id": "node-1"}], connections=[{"from": "node-1", "to": "node-2"}], flow_id=None)
 
+def test_save_ai_flow_invalid_json(client):
+    """Tests that saving a flow with invalid JSON returns a 400 error."""
+    flow_data = {
+        "name": "Broken Flow",
+        "nodes": "{invalid-json",
+        "connections": "[]"
+    }
+    response = client.post("/ai-flow/save", data=flow_data)
+    assert response.status_code == 400
+    assert "HX-Trigger" in response.headers
+    assert "Invalid JSON" in response.headers["HX-Trigger"]
+
 
 def test_set_active_flow(client):
     """Tests setting an AI flow as active (set_active_flow)."""
