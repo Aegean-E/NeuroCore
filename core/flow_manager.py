@@ -42,7 +42,7 @@ class FlowManager:
                 "name": "Default Chat Flow",
                 "nodes": [
                     {"id": "node-0", "moduleId": "chat", "nodeTypeId": "chat_input", "name": "Chat Input", "x": -97, "y": 248, "config": {}, "isReverted": False, "outputDot": {}, "inputDot": {}},
-                    {"id": "node-1", "moduleId": "system_prompt", "nodeTypeId": "system_prompt", "name": "System Prompt", "x": 346, "y": 205, "config": {"system_prompt": "You are NeuroCore, a helpful and intelligent AI assistant.", "enabled_tools": ["Weather"], "explanation": ""}, "isReverted": False, "outputDot": {}, "inputDot": {}},
+                    {"id": "node-1", "moduleId": "system_prompt", "nodeTypeId": "system_prompt", "name": "System Prompt", "x": 343.9, "y": 203.9, "config": {"system_prompt": "You are NeuroCore, a helpful and intelligent AI assistant.", "enabled_tools": ["Weather", "Calculator", "TimeZoneConverter", "ConversionCalculator", "SystemTime", "FetchURL", "CurrencyConverter", "SaveReminder", "CheckCalendar"], "explanation": ""}, "isReverted": False, "outputDot": {}, "inputDot": {}},
                     {"id": "node-2", "moduleId": "llm_module", "nodeTypeId": "llm_module", "name": "LLM Core", "x": 551, "y": 250, "config": {}, "isReverted": False, "outputDot": {}, "inputDot": {}},
                     {"id": "node-3", "moduleId": "chat", "nodeTypeId": "chat_output", "name": "Chat Output", "x": 908, "y": 250, "config": {}, "isReverted": False, "outputDot": {}, "inputDot": {}},
                     {"id": "node-4", "moduleId": "memory", "nodeTypeId": "memory_save", "name": "Memory Save", "x": 123, "y": 163, "config": {}, "isReverted": False, "outputDot": {}, "inputDot": {}},
@@ -50,8 +50,10 @@ class FlowManager:
                     {"id": "node-6", "moduleId": "memory", "nodeTypeId": "memory_recall", "name": "Memory Recall", "x": 123, "y": 249, "config": {}, "isReverted": False, "outputDot": {}, "inputDot": {}},
                     {"id": "node-7", "moduleId": "telegram", "nodeTypeId": "telegram_output", "name": "Telegram Output", "x": 909, "y": 337, "config": {}, "isReverted": False, "outputDot": {}, "inputDot": {}},
                     {"id": "node-8", "moduleId": "telegram", "nodeTypeId": "telegram_input", "name": "Telegram Input", "x": -289, "y": 249, "config": {}, "isReverted": False, "outputDot": {}, "inputDot": {}},
-                    {"id": "node-9", "moduleId": "tools", "nodeTypeId": "tool_dispatcher", "name": "Tool Dispatcher", "x": 627, "y": 144, "config": {"allowed_tools": ["Weather"], "explanation": ""}, "isReverted": True, "outputDot": {}, "inputDot": {}},
-                    {"id": "node-10", "moduleId": "logic", "nodeTypeId": "conditional_router", "name": "Conditional Router", "x": 717, "y": 250, "config": {"check_field": "tool_calls", "true_branches": ["node-9"], "false_branches": ["node-3", "node-7"], "explanation": ""}, "isReverted": False, "outputDot": {}, "inputDot": {}}
+                    {"id": "node-9", "moduleId": "tools", "nodeTypeId": "tool_dispatcher", "name": "Tool Dispatcher", "x": 632.1, "y": -28.2, "config": {"allowed_tools": ["Weather", "Calculator", "TimeZoneConverter", "ConversionCalculator", "SystemTime", "FetchURL", "CurrencyConverter", "SaveReminder", "CheckCalendar"], "explanation": ""}, "isReverted": True, "outputDot": {}, "inputDot": {}},
+                    {"id": "node-10", "moduleId": "logic", "nodeTypeId": "conditional_router", "name": "Conditional Router", "x": 717, "y": 250, "config": {"check_field": "tool_calls", "true_branches": ["node-9"], "false_branches": ["node-3", "node-7"], "explanation": ""}, "isReverted": False, "outputDot": {}, "inputDot": {}},
+                    {"id": "node-11", "moduleId": "calendar", "nodeTypeId": "calendar_watcher", "name": "Calendar Watcher", "x": 719.2, "y": 336.8, "config": {}, "isReverted": False, "outputDot": {}, "inputDot": {}},
+                    {"id": "node-12", "moduleId": "logic", "nodeTypeId": "repeater_node", "name": "Repeater", "x": 549.9, "y": 336.0, "config": {"delay": 30, "max_repeats": 1, "explanation": ""}, "isReverted": False, "outputDot": {}, "inputDot": {}}
                 ],
                 "connections": [
                     {"from": "node-1", "to": "node-2"},
@@ -64,7 +66,9 @@ class FlowManager:
                     {"from": "node-10", "to": "node-3"},
                     {"from": "node-10", "to": "node-7"},
                     {"from": "node-2", "to": "node-10"},
-                    {"from": "node-10", "to": "node-9"}
+                    {"from": "node-10", "to": "node-9"},
+                    {"from": "node-11", "to": "node-7"},
+                    {"from": "node-12", "to": "node-11"}
                 ],
                 "created_at": datetime.now().isoformat()
             }
