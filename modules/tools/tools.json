@@ -174,5 +174,48 @@
             }
         },
         "enabled": true
+    },
+    "SaveReminder": {
+        "definition": {
+            "type": "function",
+            "function": {
+                "name": "SaveReminder",
+                "description": "Saves a reminder or calendar event.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "title": {
+                            "type": "string",
+                            "description": "The title of the event."
+                        },
+                        "time": {
+                            "type": "string",
+                            "description": "The date and time (ISO 8601 preferred). If omitted, uses current time."
+                        }
+                    },
+                    "required": [
+                        "title"
+                    ]
+                }
+            }
+        },
+        "enabled": true
+    },
+    "CheckCalendar": {
+        "definition": {
+            "type": "function",
+            "function": {
+                "name": "CheckCalendar",
+                "description": "Checks the calendar for events. Can check a specific date or list upcoming events.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "date": { "type": "string", "description": "The date to check (YYYY-MM-DD). If omitted, returns upcoming events." }
+                    },
+                    "required": []
+                }
+            }
+        },
+        "enabled": true
     }
 }

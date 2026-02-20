@@ -1,0 +1,109 @@
+import calendar
+from datetime import datetime
+from fastapi import APIRouter, Request, Form
+from fastapi.responses import HTMLResponse, Response
+from fastapi.templating import Jinja2Templates
+from core.settings import settings
+from .events import event_manager
+
+router = APIRouter()
+templates = Jinja2Templates(directory="web/templates")
+
+def get_enriched_upcoming_events():
+    """Enriches events with nav_year and nav_month for UI navigation."""
+    events = []
+    for e in event_manager.get_upcoming():
+        evt = e.copy()
+        try:
+            # Handle format "YYYY-MM-DD HH:MM" or "YYYY-MM-DD"
+            dt_str = evt.get('start_time', '').replace('T', ' ').split(' ')[0]
+            dt = datetime.strptime(dt_str, "%Y-%m-%d")
+            evt['nav_year'] = dt.year
+            evt['nav_month'] = dt.month
+        except Exception:
+            now = datetime.now()
+            evt['nav_year'] = now.year
+            evt['nav_month'] = now.month
+        events.append(evt)
+    return events
+
+@router.get("", response_class=HTMLResponse)
+async def calendar_page(request: Request):
+    module_manager = request.app.state.module_manager
+    enabled_modules = [m for m in module_manager.get_all_modules() if m.get("enabled")]
+    
+    return templates.TemplateResponse(request, "index.html", {
+        "modules": enabled_modules,
+        "active_module": "calendar",
+        "sidebar_template": "calendar_sidebar.html",
+        "upcoming_events": get_enriched_upcoming_events(),
+        "settings": settings.settings
+    })
+
+@router.get("/sidebar", response_class=HTMLResponse)
+async def get_calendar_sidebar(request: Request):
+    return templates.TemplateResponse(request, "calendar_sidebar.html", {
+        "upcoming_events": get_enriched_upcoming_events()
+    })
+
+@router.get("/gui", response_class=HTMLResponse)
+async def calendar_gui(request: Request, year: int = None, month: int = None):
+    today = datetime.now()
+    if year is None:
+        year = today.year
+    if month is None:
+        month = today.month
+        
+    # Normalize month (handle navigation overflow)
+    if month > 12:
+        year += (month - 1) // 12
+        month = (month - 1) % 12 + 1
+    elif month < 1:
+        year += (month - 12) // 12
+        month = (month - 12) % 12 + 12
+
+    cal = calendar.Calendar(firstweekday=6) # Start on Sunday
+    month_days = []
+    for d in cal.itermonthdates(year, month):
+        raw_events = event_manager.get_events_by_date(d.isoformat())
+        events_for_day = []
+        for event in raw_events:
+            evt = event.copy()
+            # Extract time for display
+            if "start_time" in evt:
+                # Handle "YYYY-MM-DD HH:MM" or "YYYY-MM-DDTHH:MM"
+                parts = evt["start_time"].replace("T", " ").split(" ")
+                evt["time_display"] = parts[1] if len(parts) > 1 else ""
+            else:
+                evt["time_display"] = ""
+            events_for_day.append(evt)
+
+        month_days.append({
+            "day": d.day,
+            "is_current_month": d.month == month,
+            "is_today": d == today.date(),
+            "date_str": d.isoformat(),
+            "events": events_for_day
+        })
+        
+    return templates.TemplateResponse(request, "calendar_gui.html", {
+        "year": year,
+        "month": month,
+        "month_name": calendar.month_name[month],
+        "days": month_days
+    })
+
+@router.post("/events/save", response_class=HTMLResponse)
+async def save_event(request: Request, title: str = Form(...), date: str = Form(...), time: str = Form(...)):
+    start_time = f"{date} {time}"
+    event_manager.add_event(title, start_time)
+    
+    dt = datetime.strptime(date, "%Y-%m-%d")
+    response = await calendar_gui(request, year=dt.year, month=dt.month)
+    response.headers["HX-Trigger"] = "eventsChanged"
+    return response
+
+@router.delete("/events/{event_id}")
+async def delete_event_route(request: Request, event_id: int):
+    event_manager.delete_event(event_id)
+    return Response(status_code=200, headers={"HX-Trigger": "eventsChanged"})

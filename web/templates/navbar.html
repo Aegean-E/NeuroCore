@@ -17,6 +17,13 @@
                     {% endif %}
                 {% endfor %}
 
+                <!-- Calendar -->
+                {% for module in modules %}
+                    {% if module.id == 'calendar' and module.enabled %}
+                    <li><a href="/calendar" class="hover:text-blue-400 transition-colors">Calendar</a></li>
+                    {% endif %}
+                {% endfor %}
+
                 <!-- Modules -->
                 <li><a href="/" class="hover:text-blue-400 transition-colors">Modules</a></li>
 
