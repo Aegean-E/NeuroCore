@@ -384,8 +384,18 @@
         });
 
         canvas.addEventListener('mousedown', (event) => {
+            // Check if clicking on empty canvas area
+            const isEmptySpace = event.target === canvas || event.target === svg || event.target.id === 'node-container';
+            
+            // Clear drawing connection on empty space
+            if (isDrawingConnection && isEmptySpace) {
+                clearConnectionState();
+                event.preventDefault();
+                return;
+            }
+            
             // Allow panning with Middle mouse (1) OR Left mouse (0) on empty space
-            if (event.button === 1 || (event.button === 0 && (event.target === canvas || event.target.id === 'node-container'))) {
+            if (event.button === 1 || (event.button === 0 && isEmptySpace)) {
                 isPanning = true;
                 canvas.style.cursor = 'grabbing';
                 
@@ -405,9 +415,6 @@
                 }
                 
                 event.preventDefault();
-            }
-            if (isDrawingConnection && event.target === canvas) {
-                clearConnectionState();
             }
         });
 
@@ -684,19 +691,25 @@
                 const outputDot = nodeElement.querySelector('.output-dot');
                 const inputDot = nodeElement.querySelector('.input-dot');
                 
-                const createStartHandler = (dot) => (e) => {
+                nodeData.outputDot = outputDot;
+                nodeData.inputDot = inputDot;
+                
+                const startConnectionHandler = (e) => {
                     e.stopPropagation();
                     if (isDrawingConnection) {
                         clearConnectionState();
                         return;
                     }
+                    // If reverted, start from input-dot; otherwise from output-dot
+                    const startDot = nodeData.isReverted ? inputDot : outputDot;
+                    
                     isDrawingConnection = true;
                     connectionStart.node = nodeData;
-                    connectionStart.element = dot;
-                    dot.classList.add('connecting');
+                    connectionStart.element = startDot;
+                    startDot.classList.add('connecting');
 
                     const canvasRect = canvas.getBoundingClientRect();
-                    const fromDotRect = dot.getBoundingClientRect();
+                    const fromDotRect = startDot.getBoundingClientRect();
                     const startX = (fromDotRect.left + fromDotRect.width / 2 - canvasRect.left - panX) / zoom;
                     const startY = (fromDotRect.top + fromDotRect.height / 2 - canvasRect.top - panY) / zoom;
 
@@ -717,20 +730,19 @@
                     };
                 };
                 
-                const createEndHandler = (dot) => (e) => {
+                const endConnectionHandler = (e) => {
                     e.stopPropagation();
                     if (isDrawingConnection) {
-                        const connectionEnd = { node: nodeData, element: dot };
+                        // If reverted, end at output-dot; otherwise at input-dot
+                        const endDot = nodeData.isReverted ? outputDot : inputDot;
+                        const connectionEnd = { node: nodeData, element: endDot };
                         createConnection(connectionStart, connectionEnd);
                         clearConnectionState();
                     }
                 };
                 
-                nodeData.startConnectionHandler = createStartHandler(outputDot);
-                nodeData.endConnectionHandler = createEndHandler(inputDot);
-                
-                outputArea.onclick = nodeData.startConnectionHandler;
-                inputArea.onclick = nodeData.endConnectionHandler;
+                outputArea.onclick = startConnectionHandler;
+                inputArea.onclick = endConnectionHandler;
             }
 
             nodeAndSvgContainer.appendChild(nodeElement);
@@ -938,7 +950,7 @@
                     const inputDot = nodeElement.querySelector('.input-dot');
                     const outputDot = nodeElement.querySelector('.output-dot');
                     
-                    if (inputDot && outputDot && nodeData && nodeData.startConnectionHandler && nodeData.endConnectionHandler) {
+                    if (inputDot && outputDot && inputArea && outputArea) {
                         // Swap colors
                         inputDot.classList.toggle('bg-blue-500');
                         inputDot.classList.toggle('bg-emerald-500');
@@ -955,12 +967,10 @@
                             outputText.textContent = temp;
                         }
                         
-                        // Swap the click handlers
-                        if (inputArea && outputArea) {
-                            const temp = inputArea.onclick;
-                            inputArea.onclick = outputArea.onclick;
-                            outputArea.onclick = temp;
-                        }
+                        // Swap the click handlers since areas visually switched positions
+                        const temp = inputArea.onclick;
+                        inputArea.onclick = outputArea.onclick;
+                        outputArea.onclick = temp;
                     }
                     
                     drawConnections();
