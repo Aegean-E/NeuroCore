@@ -12,7 +12,8 @@ DEFAULT_SETTINGS = {
     "embedding_model": "",
     "active_ai_flow": "default-flow-001",
     "temperature": 0.7,
-    "max_tokens": 2048
+    "max_tokens": 2048,
+    "debug_mode": False
 }
 
 class SettingsManager:

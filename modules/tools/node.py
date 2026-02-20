@@ -1,6 +1,7 @@
 import json
 import os
 import asyncio
+import httpx
 from .router import TOOLS_FILE, LIBRARY_DIR
 
 class ToolDispatcherExecutor:
@@ -40,7 +41,7 @@ class ToolDispatcherExecutor:
                     with open(code_path, "r") as f:
                         code = f.read()
                 # Execute custom tool logic
-                local_scope = {"args": args, "result": None, "json": json}
+                local_scope = {"args": args, "result": None, "json": json, "httpx": httpx}
                 try:
                     # We run this in a thread if it's heavy, but for now simple exec
                     exec(code, {}, local_scope)
@@ -57,9 +58,17 @@ class ToolDispatcherExecutor:
                 "content": str(output)
             })
 
+        # Update the conversation history if provided
+        messages = []
+        if "messages" in input_data:
+            messages = list(input_data["messages"])
+            messages.append(message)
+            messages.extend(results)
+
         return {
             "tool_results": results,
             "assistant_message": message,
+            "messages": messages,
             "requires_continuation": True
         }
 

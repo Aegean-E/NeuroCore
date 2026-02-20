@@ -1,0 +1,24 @@
+{% if not logs %}
+<div class="text-center py-12 opacity-50">
+    <p class="text-sm">No logs captured yet.</p>
+</div>
+{% else %}
+{% for log in logs %}
+<div class="grid grid-cols-12 gap-4 items-start p-3 rounded-lg border border-slate-800/50 hover:bg-slate-800/50 transition-colors text-sm font-mono">
+    <div class="col-span-2 text-slate-500">{{ log.timestamp }}</div>
+    <div class="col-span-2 font-semibold text-blue-400">{{ log.node_name }}</div>
+    <div class="col-span-1">
+        {% if log.event == 'start' %}
+        <span class="text-yellow-500">START</span>
+        {% elif log.event == 'end' %}
+        <span class="text-emerald-500">END</span>
+        {% elif log.event == 'error' %}
+        <span class="text-red-500">ERROR</span>
+        {% else %}
+        <span class="text-slate-500">{{ log.event|upper }}</span>
+        {% endif %}
+    </div>
+    <div class="col-span-7 text-slate-300 break-all whitespace-pre-wrap text-xs bg-slate-950 p-2 rounded border border-slate-800">{{ log.details | tojson(indent=2) }}</div>
+</div>
+{% endfor %}
+{% endif %}

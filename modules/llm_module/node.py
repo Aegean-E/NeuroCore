@@ -1,5 +1,5 @@
-import os
 import json
+import os
 from core.llm import LLMBridge
 from core.settings import settings
 
@@ -17,7 +17,7 @@ class ConfigLoader:
                         cls._cache["data"] = json.load(f).get("config", {})
                     cls._cache["mtime"] = mtime
         except Exception as e:
-            print(f"Error loading llm_module config: {e}")
+            print(f"Error loading llm config: {e}")
         return cls._cache["data"]
 
 class LLMExecutor:
@@ -25,62 +25,59 @@ class LLMExecutor:
         self.module_config = ConfigLoader.get_config()
 
     async def receive(self, input_data: dict, config: dict = None) -> dict:
-        config = config or {}
-        """
-        Receives data from an upstream node (like System Prompt or Chat Input),
-        and executes the core logic of this node (calling the LLM).
-        Gets available tools from system prompt and knows how to call tool dispatcher.
-        """
-        llm_bridge = LLMBridge(
-            base_url=settings.get("llm_api_url"),
-            api_key=settings.get("llm_api_key")
-        )
+        if not input_data:
+            return {"error": "No input data received"}
         
-        messages = input_data.get("messages")
+        messages = input_data.get("messages", [])
         if not messages:
             return {"error": "No 'messages' field provided in input_data for llm_module."}
 
-        model = config.get("model") or input_data.get("model")
+        # Merge configs: Input > Node Config > Module Config > Settings (handled by LLMBridge)
+        config = config or {}
         
-        # Helper to resolve priority: config > input_data > module_config > default
-        # Handles 0 values correctly (unlike 'or' operator)
-        def get_val(key, default, type_cast=None):
-            val = config.get(key) if config else None
-            if val is None:
-                val = input_data.get(key) if input_data else None
-            if val is None:
-                val = self.module_config.get(key) if self.module_config else None
-            
-            if val is None:
-                return default
-                
-            if type_cast:
-                try:
-                    return type_cast(val)
-                except (ValueError, TypeError):
-                    return default
-            return val
+        # Extract tools
+        tools = input_data.get("tools") or config.get("tools")
+        
+        # Initialize Bridge
+        llm = LLMBridge(
+            base_url=settings.get("llm_api_url"),
+            api_key=settings.get("llm_api_key")
+        )
 
-        temperature = get_val("temperature", 0.7, float)
-        max_tokens = get_val("max_tokens", 2048, int)
+        # Parameters
+        model = config.get("model") or self.module_config.get("default_model")
+        temperature = config.get("temperature")
+        if temperature is None:
+            temperature = self.module_config.get("temperature")
         
-        # Priority: config > input_data (from system prompt) > module_config
-        # Tools come from system prompt via input_data, or can be overridden in config
-        tools = config.get("tools") or input_data.get("tools")
-        tool_choice = config.get("tool_choice") or input_data.get("tool_choice", "auto" if tools else None)
-        
-        # Return the result of the core logic
-        return await llm_bridge.chat_completion(
+        max_tokens = config.get("max_tokens")
+        if max_tokens is None:
+            max_tokens = self.module_config.get("max_tokens")
+
+        response = await llm.chat_completion(
             messages=messages,
             model=model,
             temperature=temperature,
             max_tokens=max_tokens,
             tools=tools,
-            tool_choice=tool_choice
+            tool_choice="auto" if tools else None
         )
 
+        # Pass through messages and tools for continuity in flows (e.g. Tool Dispatcher loops)
+        if isinstance(response, dict):
+            # If the response is an error, we still might want context, but usually we stop.
+            if "error" not in response:
+                response["messages"] = messages
+                if tools:
+                    response["tools"] = tools
+                
+                # Also pass through available_tools if present (from System Prompt)
+                if "available_tools" in input_data:
+                    response["available_tools"] = input_data["available_tools"]
+
+        return response
+
     async def send(self, processed_data: dict) -> dict:
-        """Sends the processed data (the LLM response) to the next node."""
         return processed_data
 
 async def get_executor_class(node_type_id: str):

@@ -1,8 +1,9 @@
 import os
 import json
-from fastapi import APIRouter, Request, Form, UploadFile, File
+from fastapi import APIRouter, Request, Form, UploadFile, File, Query
 from fastapi.responses import HTMLResponse, Response, JSONResponse
 from fastapi.templating import Jinja2Templates
+from core.settings import settings
 
 router = APIRouter()
 templates = Jinja2Templates(directory="web/templates")
@@ -30,7 +31,8 @@ async def tools_page(request: Request):
     return templates.TemplateResponse(request, "index.html", {
         "modules": enabled_modules,
         "active_module": "tools",
-        "full_width_content": True
+        "full_width_content": True,
+        "settings": settings.settings
     })
 
 @router.get("/gui", response_class=HTMLResponse)
@@ -153,11 +155,20 @@ async def get_definitions():
     return [t["definition"] for t in tools.values() if t.get("enabled", True)]
 
 @router.get("/export")
-async def export_tools():
+async def export_tools(name: str = Query(None)):
     tools = load_tools()
     export_data = []
     
-    for name, data in tools.items():
+    if name:
+        if name not in tools:
+            return Response(status_code=404, content="Tool not found")
+        items_to_export = [(name, tools[name])]
+        filename = f"{name}.json"
+    else:
+        items_to_export = tools.items()
+        filename = "neurocore_tools.json"
+    
+    for name, data in items_to_export:
         tool_export = {
             "name": name,
             "enabled": data.get("enabled", True),
@@ -177,7 +188,7 @@ async def export_tools():
         
     return JSONResponse(
         content=export_data,
-        headers={"Content-Disposition": 'attachment; filename="neurocore_tools.json"'}
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'}
     )
 
 @router.post("/import")

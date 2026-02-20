@@ -105,17 +105,33 @@ class ConditionalRouterExecutor:
         config = config or {}
         check_field = config.get("check_field", "tool_calls")
         
-        try:
-            result = check_field in input_data and input_data[check_field] is not None
+        # Determine condition
+        condition_met = False
+        if isinstance(input_data, dict):
+            if input_data.get(check_field):
+                condition_met = True
             
-            if result:
-                return input_data
-            else:
-                return None
-                
-        except Exception as e:
-            print(f"ConditionalRouter error: {e}")
-            return None
+            # Check OpenAI format for tool_calls if not found at top level
+            elif check_field == "tool_calls":
+                try:
+                    choices = input_data.get("choices")
+                    if isinstance(choices, list) and len(choices) > 0:
+                        message = choices[0].get("message")
+                        if isinstance(message, dict) and message.get("tool_calls"):
+                            condition_met = True
+                except Exception:
+                    pass
+        
+        if config.get("invert", False):
+            condition_met = not condition_met
+            
+        # Determine targets based on config
+        targets = config.get("true_branches", []) if condition_met else config.get("false_branches", [])
+            
+        # Return data with routing info
+        result = input_data.copy() if isinstance(input_data, dict) else {"content": input_data}
+        result["_route_targets"] = targets
+        return result
 
     async def send(self, processed_data: dict) -> dict:
         return processed_data

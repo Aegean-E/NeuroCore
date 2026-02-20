@@ -31,9 +31,13 @@ class ChatOutputExecutor:
             # 2. Check for OpenAI format (LLM)
             if "choices" in input_data:
                 try:
-                    content = input_data.get("choices", [{}])[0].get("message", {}).get("content", "")
+                    message = input_data.get("choices", [{}])[0].get("message", {})
+                    content = message.get("content", "")
                     if content:
                         return {"content": content}
+                    # Fallback: Check for tool calls to give better error/info
+                    if message.get("tool_calls"):
+                        return {"content": f"<i>(Tool Call Generated: {message['tool_calls'][0]['function']['name']})</i>"}
                 except (IndexError, AttributeError, TypeError):
                     pass
             

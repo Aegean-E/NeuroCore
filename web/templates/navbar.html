@@ -1,6 +1,6 @@
 <header id="main-navbar" class="border-b border-slate-800 bg-slate-950 p-4 shadow-xl" 
         hx-get="/navbar" hx-trigger="modulesChanged from:body" hx-swap="outerHTML">
-    <div class="container mx-auto flex justify-between items-center" hx-boost="true">
+    <div class="container mx-auto flex justify-between items-center">
         {% set ns = namespace(chat_enabled=false) %}
         {% for module in modules %}
             {% if module.id == 'chat' and module.enabled %}
@@ -29,6 +29,11 @@
 
                 <!-- AI Flow -->
                 <li><a href="/ai-flow" class="hover:text-blue-400 transition-colors">AI Flow</a></li>
+
+                <!-- Debug -->
+                {% if settings.debug_mode %}
+                <li><a href="/debug" class="hover:text-blue-400 transition-colors">Debug</a></li>
+                {% endif %}
 
                 <!-- Settings -->
                 <li><a href="/settings" class="hover:text-blue-400 transition-colors">Settings</a></li>

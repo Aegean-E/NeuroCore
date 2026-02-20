@@ -1,6 +1,6 @@
 import json
 from fastapi import APIRouter, Request, Form, Depends, HTTPException, Response
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
 from core.settings import SettingsManager, settings
@@ -8,6 +8,7 @@ from core.dependencies import get_settings_manager, get_module_manager, get_llm_
 from core.module_manager import ModuleManager
 from core.flow_manager import flow_manager
 from core.llm import LLMBridge
+from core.debug import debug_logger
 
 router = APIRouter()
 templates = Jinja2Templates(directory="web/templates")
@@ -23,15 +24,16 @@ HIDDEN_CONFIG_KEYS = {
 # --- System & Navigation ---
 
 @router.get("/", response_class=HTMLResponse)
-async def read_root(request: Request, module_manager: ModuleManager = Depends(get_module_manager)):
+async def read_root(request: Request, module_manager: ModuleManager = Depends(get_module_manager), settings_man: SettingsManager = Depends(get_settings_manager)):
     return templates.TemplateResponse(request, "index.html", {
         "modules": module_manager.get_all_modules(),
-        "active_module": None
+        "active_module": None,
+        "settings": settings_man.settings
     })
 
 @router.get("/navbar", response_class=HTMLResponse)
-async def get_navbar(request: Request, module_manager: ModuleManager = Depends(get_module_manager)):
-    return templates.TemplateResponse(request, "navbar.html", {"modules": module_manager.get_all_modules()})
+async def get_navbar(request: Request, module_manager: ModuleManager = Depends(get_module_manager), settings_man: SettingsManager = Depends(get_settings_manager)):
+    return templates.TemplateResponse(request, "navbar.html", {"modules": module_manager.get_all_modules(), "settings": settings_man.settings})
 
 @router.get("/llm-status", response_class=HTMLResponse)
 async def get_llm_status(request: Request, llm: LLMBridge = Depends(get_llm_bridge)):
@@ -142,12 +144,13 @@ async def toggle_module(request: Request, module_id: str, action: str, module_ma
 # --- AI Flow ---
 
 @router.get("/ai-flow", response_class=HTMLResponse)
-async def ai_flow_page(request: Request, module_manager: ModuleManager = Depends(get_module_manager)):
-    active_flow_id = settings.get("active_ai_flow")
+async def ai_flow_page(request: Request, module_manager: ModuleManager = Depends(get_module_manager), settings_man: SettingsManager = Depends(get_settings_manager)):
+    active_flow_id = settings_man.get("active_ai_flow")
     return templates.TemplateResponse(request, "ai_flow.html", {
         "modules": module_manager.get_all_modules(),
         "flows": flow_manager.list_flows(),
-        "active_flow_id": active_flow_id
+        "active_flow_id": active_flow_id,
+        "settings": settings_man.settings
     })
 
 @router.get("/ai-flow/{flow_id}", response_class=JSONResponse)
@@ -207,9 +210,26 @@ async def get_settings(request: Request, settings_man: SettingsManager = Depends
     })
 
 @router.post("/settings/save")
-async def save_settings_route(llm_api_url: str = Form(...), llm_api_key: str = Form(""), embedding_api_url: str = Form(""), default_model: str = Form(...), embedding_model: str = Form(""), settings_man: SettingsManager = Depends(get_settings_manager)):
+async def save_settings_route(llm_api_url: str = Form(...), llm_api_key: str = Form(""), embedding_api_url: str = Form(""), default_model: str = Form(...), embedding_model: str = Form(""), debug_mode: bool = Form(False), settings_man: SettingsManager = Depends(get_settings_manager)):
     settings_man.save_settings({
         "llm_api_url": llm_api_url, "llm_api_key": llm_api_key, "embedding_api_url": embedding_api_url,
-        "default_model": default_model, "embedding_model": embedding_model
+        "default_model": default_model, "embedding_model": embedding_model, "debug_mode": debug_mode
     })
     return Response(status_code=200, headers={"HX-Trigger": json.dumps({"showMessage": {"level": "success", "message": "Settings saved successfully"}})})
+
+# --- Debug ---
+
+@router.get("/debug", response_class=HTMLResponse)
+async def debug_page(request: Request, settings_man: SettingsManager = Depends(get_settings_manager), module_manager: ModuleManager = Depends(get_module_manager)):
+    if not settings_man.get("debug_mode"):
+        return RedirectResponse("/")
+    return templates.TemplateResponse(request, "debug.html", {"settings": settings_man.settings, "modules": module_manager.get_all_modules()})
+
+@router.get("/debug/logs", response_class=HTMLResponse)
+async def get_debug_logs(request: Request):
+    return templates.TemplateResponse(request, "debug_logs.html", {"logs": debug_logger.get_logs()})
+
+@router.post("/debug/clear")
+async def clear_debug_logs(request: Request):
+    debug_logger.clear()
+    return templates.TemplateResponse(request, "debug_logs.html", {"logs": []})

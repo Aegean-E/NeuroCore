@@ -11,9 +11,9 @@
             <button onclick="document.querySelector('#import-form input').click()" class="bg-slate-800 hover:bg-slate-700 text-white px-4 py-2 rounded-lg text-sm font-bold transition-all">
                 Import Tool
             </button>
-            <a href="/tools/export" class="bg-slate-800 hover:bg-slate-700 text-white px-4 py-2 rounded-lg text-sm font-bold transition-all">
-                Export Tools
-            </a>
+            <button onclick="openExportModal()" class="bg-slate-800 hover:bg-slate-700 text-white px-4 py-2 rounded-lg text-sm font-bold transition-all">
+                Export Tool
+            </button>
             <button onclick="resetToolForm()" class="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-lg text-sm font-bold transition-all">
                 + New Tool
             </button>
@@ -66,6 +66,34 @@
     </div>
 </div>
 
+<!-- Export Modal -->
+<div id="export-modal" class="fixed inset-0 z-50 flex items-center justify-center hidden" aria-labelledby="modal-title" role="dialog" aria-modal="true">
+    <div class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm transition-opacity" onclick="closeExportModal()"></div>
+    <div class="relative bg-slate-900 border border-slate-800 rounded-2xl p-6 w-full max-w-md shadow-2xl transform transition-all scale-100">
+        <div class="flex justify-between items-center mb-4">
+            <h3 class="text-lg font-bold text-white">Export Tools</h3>
+            <button onclick="closeExportModal()" class="text-slate-500 hover:text-white">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+            </button>
+        </div>
+        
+        <div class="relative mb-3">
+            <input type="text" id="export-search" placeholder="Search tool to export..." 
+                   class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2 pl-10 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
+                   onkeyup="filterExportList()">
+            <svg class="w-4 h-4 text-slate-500 absolute left-3 top-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
+        </div>
+        
+        <div id="export-tool-list" class="max-h-60 overflow-y-auto custom-scrollbar space-y-1 pr-1 mb-4">
+            <!-- Populated by JS -->
+        </div>
+        
+        <a href="/tools/export" onclick="closeExportModal()" class="block w-full text-center bg-blue-600 hover:bg-blue-500 text-white py-3 rounded-xl font-bold transition-colors shadow-lg shadow-blue-500/20">
+            Export Entire Library
+        </a>
+    </div>
+</div>
+
 <script>
     function toggleToolForm(show) {
         const formWrapper = document.getElementById('tool-form-wrapper');
@@ -107,5 +135,53 @@
         document.getElementById('submit-btn').innerText = 'Save Tool';
         toggleToolForm(true);
         document.getElementById('tool-form-wrapper').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+
+    function openExportModal() {
+        const modal = document.getElementById('export-modal');
+        const listContainer = document.getElementById('export-tool-list');
+        
+        modal.classList.remove('hidden');
+        listContainer.innerHTML = '<div class="text-center py-4 text-slate-500 text-xs">Loading tools...</div>';
+        
+        // Fetch latest tool names
+        fetch('/tools/names')
+            .then(response => response.json())
+            .then(names => {
+                listContainer.innerHTML = '';
+                if (names.length === 0) {
+                    listContainer.innerHTML = '<div class="text-center py-4 text-slate-500 text-xs">No tools available.</div>';
+                    return;
+                }
+                
+                names.forEach(name => {
+                    const item = document.createElement('a');
+                    item.href = `/tools/export?name=${encodeURIComponent(name)}`;
+                    item.className = 'export-item block px-4 py-3 rounded-lg bg-slate-800/50 hover:bg-slate-800 border border-slate-700/50 hover:border-slate-700 text-slate-300 hover:text-white transition-all text-sm flex justify-between items-center group';
+                    item.innerHTML = `
+                        <span class="font-medium">${name}</span>
+                        <svg class="w-4 h-4 text-slate-500 group-hover:text-blue-400 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
+                    `;
+                    item.onclick = () => closeExportModal();
+                    listContainer.appendChild(item);
+                });
+            });
+    }
+
+    function closeExportModal() {
+        document.getElementById('export-modal').classList.add('hidden');
+    }
+
+    function filterExportList() {
+        const query = document.getElementById('export-search').value.toLowerCase();
+        const items = document.querySelectorAll('.export-item');
+        items.forEach(item => {
+            const name = item.querySelector('span').textContent.toLowerCase();
+            if (name.includes(query)) {
+                item.classList.remove('hidden');
+            } else {
+                item.classList.add('hidden');
+            }
+        });
     }
 </script>

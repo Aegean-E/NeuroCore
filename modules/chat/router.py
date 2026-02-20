@@ -23,7 +23,8 @@ async def chat_page(request: Request):
         "modules": enabled_modules,
         "active_module": "chat",
         "sidebar_template": "chat_sidebar.html",
-        "sessions": session_manager.list_sessions()
+        "sessions": session_manager.list_sessions(),
+        "settings": settings.settings
     })
 
 @router.get("/gui", response_class=HTMLResponse)
