@@ -15,9 +15,11 @@ Navigate to the **Tools** tab in the NeuroCore dashboard. Click **+ New Tool**.
 ### Fields
 
 *   **Function Name**: A unique identifier for the tool (e.g., `get_weather`, `calculator`, `search_db`). Use snake_case.
+
 *   **Description**: A clear explanation of what the tool does. The LLM uses this to decide which tool to call.
     *   *Good*: "Calculates the square root of a number."
     *   *Bad*: "Math function."
+
 *   **Parameters (JSON Schema)**: Defines the arguments the tool accepts.
     *   Must be a valid JSON Schema object.
     *   Example:
@@ -31,6 +33,7 @@ Navigate to the **Tools** tab in the NeuroCore dashboard. Click **+ New Tool**.
           "required": ["location"]
         }
         ```
+
 *   **Python Logic**: The code executed when the tool is triggered.
 
 ## 3. Writing Python Logic
@@ -39,8 +42,11 @@ The Python environment for tools is executed locally. You can import standard li
 
 ### Inputs & Outputs
 *   **Input**: The arguments provided by the LLM are available in the dictionary variable `args`.
+
 *   **Output**: You must assign your return value to the variable `result`.
+
 *   **Helpers**: The `json` module is pre-imported and available.
+
 *   **Imports**: You can import standard Python libraries (e.g., `math`, `datetime`) or installed packages (e.g., `httpx`) directly in your code.
 
 ### Example: Weather Tool
@@ -81,6 +87,7 @@ To make an AI agent use your tools, you need to configure the **System Prompt** 
 1.  Open your AI Flow.
 2.  Select the **System Prompt** node.
 3.  In the configuration panel, check the boxes for the tools you want this agent to have access to.
+
 4.  This injects the tool definitions into the LLM context.
 
 ### Step 2: Add the Tool Dispatcher Node
@@ -88,6 +95,7 @@ The LLM will *request* a tool call, but it cannot execute code itself. The **Too
 
 1.  Add a **Tool Dispatcher** node (from the Tools module) to your flow.
 2.  Connect the **LLM Core** output to the **Tool Dispatcher** input.
+
 3.  **Important**: You should usually use a **Conditional Router** before the dispatcher to check if the LLM actually requested a tool (check if `tool_calls` exists).
 4.  Connect the **Tool Dispatcher** output back to the **LLM Core** input (or a new LLM node) if you want the AI to interpret the tool's result and generate a natural language response.
 

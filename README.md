@@ -20,6 +20,7 @@ NeuroCore is built on the principles of **Speed**, **Simplicity**, and **Modular
 ## ✨ Key Features
 
 *   **🔌 Modular Architecture**: Easily extend the application by dropping new modules into the `modules/` directory. Enable or disable them on the fly from the UI.
+
 *   **🧠 AI Flow Editor**: A visual, node-based canvas to design and orchestrate complex LLM workflows.
     <p align="center">
       <img src="screenshots/flow_editor.png" alt="AI Flow Editor Canvas" width="100%" style="border-radius: 8px; border: 1px solid #334155;">
@@ -29,11 +30,13 @@ NeuroCore is built on the principles of **Speed**, **Simplicity**, and **Modular
     *   **Singleton Nodes**: Enforce architectural patterns by restricting certain nodes (like Chat Input/Output) to a single instance per flow.
     *   **Flow Management**: Create, save, rename, and switch between multiple AI flows to handle different tasks.
     *   **Canvas Controls**: Center the view, clear the canvas, or manage connections (Revert direction, Break link) with dedicated controls.
+
 *   **⚡ Logic & Control Flow**: Advanced nodes for complex orchestration.
     *   **Delay**: Pause execution for a set duration.
     *   **Python Scripting**: Execute custom Python code directly within the flow to transform data.
     *   **Repeater**: Create loops or scheduled re-triggers of AI flows.
     *   **Conditional Router**: Branch flows based on data conditions, tool execution results, or custom logic.
+
 *   **💬 Built-in Chat UI**: A clean, modern chat interface for direct interaction with your configured AI flow.
     <p align="center">
       <img src="screenshots/chat_ui.png" alt="Chat Interface" width="100%" style="border-radius: 8px; border: 1px solid #334155;">
@@ -41,6 +44,7 @@ NeuroCore is built on the principles of **Speed**, **Simplicity**, and **Modular
     *   **Multimodal Support**: Upload images to interact with vision-capable models.
     *   **Session Management**: Create, rename, and delete chat sessions to organize your conversations.
     *   **Auto-Renaming**: Sessions are automatically titled based on the conversation context.
+
 *   **📚 Long-Term Memory**: Integrated vector database (FAISS + SQLite) for persistent AI memory.
     *   **Automatic Storage**: Background processing saves user and assistant interactions.
     *   **Smart Extraction**: Uses an Arbiter model to extract specific facts and preferences, filtering out noise.
@@ -50,6 +54,7 @@ NeuroCore is built on the principles of **Speed**, **Simplicity**, and **Modular
       <img src="screenshots/memory_browser.png" alt="Memory Browser" width="100%" style="border-radius: 8px; border: 1px solid #334155;">
     </p>
     *   **Context Injection**: Automatically retrieves relevant memories during conversations.
+
 *   **🛠️ Tools Library**: Define and manage custom Python functions (tools) that the LLM can execute.
     <p align="center">
       <img src="screenshots/tools_library.png" alt="Tool Library Editor" width="100%" style="border-radius: 8px; border: 1px solid #334155;">
@@ -59,6 +64,7 @@ NeuroCore is built on the principles of **Speed**, **Simplicity**, and **Modular
     *   **Hot-Reloading**: Tools are saved as Python files and loaded dynamically.
     *   **Tool Dispatcher**: A dedicated flow node to execute tools requested by the LLM.
     *   **Import/Export**: Share tools easily by importing or exporting them as JSON or Python files.
+
 *   **📱 Telegram Integration**: Connect your AI flow to Telegram for remote access.
     *   **Chat Remotely**: Interact with your AI agent from anywhere via the Telegram app.
     *   **Vision Support**: Send photos to Telegram to analyze images using vision-capable models.

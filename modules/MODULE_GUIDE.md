@@ -26,11 +26,14 @@ Create a `module.json` file. This defines how NeuroCore loads and displays your 
     "enabled": true,
     "id": "my_new_module",
     "icon": "M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5", // Optional: SVG path data for the sidebar icon
+
     "is_flow_node": false,  // Set to true if the module itself acts as a single node
     "order": 10,            // Sort order in the UI
+
     "config": {             // Optional: Default configuration values exposed in Module Details
         "my_setting": "default_value"
     },
+
     "provides_nodes": [     // List of nodes this module adds to the AI Flow editor (Optional)
         {
             "id": "my_custom_node",
@@ -40,6 +43,7 @@ Create a `module.json` file. This defines how NeuroCore loads and displays your 
             "configurable": true // If true, shows a settings gear in the UI
         }
     ],
+
     "load_error": null      // System managed field for tracking load status
 }
 ```
