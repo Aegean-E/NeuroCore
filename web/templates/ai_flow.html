@@ -712,7 +712,7 @@
             nodes = [];
             connections = [];
             selectedConnection = null;
-            nodeAndSvgContainer.querySelectorAll('.absolute.bg-slate-800').forEach(el => el.remove());
+            nodeAndSvgContainer.querySelectorAll('div[id^="node-"]').forEach(el => el.remove());
             drawConnections();
             nextNodeId = 0;
             document.querySelector('#save-flow-form input[name="name"]').value = '';
