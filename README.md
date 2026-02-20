@@ -21,6 +21,9 @@ NeuroCore is built on the principles of **Speed**, **Simplicity**, and **Modular
 
 *   **🔌 Modular Architecture**: Easily extend the application by dropping new modules into the `modules/` directory. Enable or disable them on the fly from the UI.
 *   **🧠 AI Flow Editor**: A visual, node-based canvas to design and orchestrate complex LLM workflows.
+    <p align="center">
+      <img src="screenshots/flow_editor.png" alt="AI Flow Editor Canvas" width="100%" style="border-radius: 8px; border: 1px solid #334155;">
+    </p>
     *   **Drag-and-Drop Interface**: Build flows by dragging functions onto the canvas.
     *   **Pan & Zoom**: Effortlessly navigate large and complex flows.
     *   **Singleton Nodes**: Enforce architectural patterns by restricting certain nodes (like Chat Input/Output) to a single instance per flow.
@@ -32,6 +35,9 @@ NeuroCore is built on the principles of **Speed**, **Simplicity**, and **Modular
     *   **Repeater**: Create loops or scheduled re-triggers of AI flows.
     *   **Conditional Router**: Branch flows based on data conditions, tool execution results, or custom logic.
 *   **💬 Built-in Chat UI**: A clean, modern chat interface for direct interaction with your configured AI flow.
+    <p align="center">
+      <img src="screenshots/chat_ui.png" alt="Chat Interface" width="100%" style="border-radius: 8px; border: 1px solid #334155;">
+    </p>
     *   **Multimodal Support**: Upload images to interact with vision-capable models.
     *   **Session Management**: Create, rename, and delete chat sessions to organize your conversations.
     *   **Auto-Renaming**: Sessions are automatically titled based on the conversation context.
@@ -40,8 +46,14 @@ NeuroCore is built on the principles of **Speed**, **Simplicity**, and **Modular
     *   **Smart Extraction**: Uses an Arbiter model to extract specific facts and preferences, filtering out noise.
     *   **Semantic Consolidation**: Intelligent merging of redundant memories to prevent database bloat and maintain coherence.
     *   **Memory Browser**: A dedicated UI to search, filter, and delete stored memories.
+    <p align="center">
+      <img src="screenshots/memory_browser.png" alt="Memory Browser" width="100%" style="border-radius: 8px; border: 1px solid #334155;">
+    </p>
     *   **Context Injection**: Automatically retrieves relevant memories during conversations.
 *   **🛠️ Tools Library**: Define and manage custom Python functions (tools) that the LLM can execute.
+    <p align="center">
+      <img src="screenshots/tools_library.png" alt="Tool Library Editor" width="100%" style="border-radius: 8px; border: 1px solid #334155;">
+    </p>
     *   **Function Calling**: Full support for OpenAI-compatible function calling.
     *   **Visual Editor**: Create and edit tools directly in the UI with JSON schema validation.
     *   **Hot-Reloading**: Tools are saved as Python files and loaded dynamically.
@@ -56,6 +68,13 @@ NeuroCore is built on the principles of **Speed**, **Simplicity**, and **Modular
 *   **✅ Robust Testing**: A comprehensive test suite using `pytest` to ensure code quality and stability.
 
 ## 🛠️ Tech Stack
+
+<p align="center">
+  <img src="https://img.shields.io/badge/Python-3.12+-3776AB?style=for-the-badge&logo=python&logoColor=white" alt="Python">
+  <img src="https://img.shields.io/badge/FastAPI-009688?style=for-the-badge&logo=fastapi&logoColor=white" alt="FastAPI">
+  <img src="https://img.shields.io/badge/HTMX-333333?style=for-the-badge&logo=htmx&logoColor=white" alt="HTMX">
+  <img src="https://img.shields.io/badge/Tailwind_CSS-38B2AC?style=for-the-badge&logo=tailwind-css&logoColor=white" alt="Tailwind CSS">
+</p>
 
 *   **Backend**:
     *   Python 3.12+
