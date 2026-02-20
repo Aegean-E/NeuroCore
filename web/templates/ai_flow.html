@@ -800,6 +800,14 @@
                         outputText.textContent = temp;
                     }
                 }
+                
+                // For reverted nodes, swap the click handlers since the visual layout is reversed
+                if (inputArea && outputArea) {
+                    const originalOutputHandler = outputArea.onclick;
+                    const originalInputHandler = inputArea.onclick;
+                    outputArea.onclick = originalInputHandler;
+                    inputArea.onclick = originalOutputHandler;
+                }
             }
         }
 

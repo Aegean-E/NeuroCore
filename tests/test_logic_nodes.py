@@ -2,7 +2,7 @@ import pytest
 import asyncio
 import time
 from unittest.mock import patch, AsyncMock
-from modules.logic.node import DelayExecutor, ScriptExecutor, RepeaterExecutor
+from modules.logic.node import DelayExecutor, ScriptExecutor, RepeaterExecutor, ConditionalRouterExecutor
 
 @pytest.mark.asyncio
 async def test_delay_executor_valid():
@@ -77,3 +77,132 @@ async def test_repeater_executor_trigger():
         # Check that repeat count was incremented in the next run's data
         args, _ = runner_instance.run.call_args
         assert args[0]["_repeat_count"] == 1
+
+@pytest.mark.asyncio
+async def test_conditional_router_tool_exists():
+    """Test router detects when tool_results field exists."""
+    executor = ConditionalRouterExecutor()
+    
+    input_data = {
+        "messages": [],
+        "tool_results": [{"name": "Weather", "result": "Sunny"}]
+    }
+    
+    config = {
+        "condition_type": "tool_exists",
+        "check_field": "tool_results"
+    }
+    
+    result = await executor.receive(input_data, config)
+    assert result is not None
+    assert result == input_data
+
+@pytest.mark.asyncio
+async def test_conditional_router_tool_not_exists():
+    """Test router blocks flow when tool_results doesn't exist."""
+    executor = ConditionalRouterExecutor()
+    
+    input_data = {
+        "messages": [{"role": "user", "content": "Hello"}]
+    }
+    
+    config = {
+        "condition_type": "tool_exists",
+        "check_field": "tool_results"
+    }
+    
+    result = await executor.receive(input_data, config)
+    assert result is None
+
+@pytest.mark.asyncio
+async def test_conditional_router_tool_results_count():
+    """Test router checks for non-empty tool_results list."""
+    executor = ConditionalRouterExecutor()
+    
+    config = {
+        "condition_type": "tool_results",
+        "check_field": "tool_results"
+    }
+    
+    input_with_results = {
+        "tool_results": [{"tool": "Weather", "output": "Sunny"}]
+    }
+    result = await executor.receive(input_with_results, config)
+    assert result is not None
+    
+    input_without_results = {
+        "tool_results": []
+    }
+    result = await executor.receive(input_without_results, config)
+    assert result is None
+
+@pytest.mark.asyncio
+async def test_conditional_router_field_equals():
+    """Test router compares field value."""
+    executor = ConditionalRouterExecutor()
+    
+    config = {
+        "condition_type": "field_equals",
+        "check_field": "status",
+        "expected_value": "ready"
+    }
+    
+    input_matching = {"status": "ready", "data": "test"}
+    result = await executor.receive(input_matching, config)
+    assert result is not None
+    
+    input_not_matching = {"status": "busy", "data": "test"}
+    result = await executor.receive(input_not_matching, config)
+    assert result is None
+
+@pytest.mark.asyncio
+async def test_conditional_router_invert_condition():
+    """Test router inverts condition when invert is True."""
+    executor = ConditionalRouterExecutor()
+    
+    config = {
+        "condition_type": "tool_exists",
+        "check_field": "tool_results",
+        "invert": True
+    }
+    
+    input_with_tools = {
+        "tool_results": [{"tool": "Weather"}]
+    }
+    result = await executor.receive(input_with_tools, config)
+    assert result is None
+    
+    input_without_tools = {
+        "messages": []
+    }
+    result = await executor.receive(input_without_tools, config)
+    assert result is not None
+
+@pytest.mark.asyncio
+async def test_conditional_router_expression():
+    """Test router evaluates custom Python expressions."""
+    executor = ConditionalRouterExecutor()
+    
+    config = {
+        "condition_type": "expression",
+        "expression": "len(data.get('messages', [])) > 0"
+    }
+    
+    input_with_messages = {
+        "messages": [{"role": "user", "content": "Hi"}]
+    }
+    result = await executor.receive(input_with_messages, config)
+    assert result is not None
+    
+    input_without_messages = {
+        "messages": []
+    }
+    result = await executor.receive(input_without_messages, config)
+    assert result is None
+
+@pytest.mark.asyncio
+async def test_conditional_router_none_input():
+    """Test router returns None for None input."""
+    executor = ConditionalRouterExecutor()
+    result = await executor.receive(None, {})
+    assert result is None
