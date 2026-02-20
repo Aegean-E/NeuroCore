@@ -20,7 +20,10 @@ NeuroCore is built on the principles of **Speed**, **Simplicity**, and **Modular
 ## ✨ Key Features
 
 ### 🔌 Modular Architecture
-Easily extend the application by dropping new modules into the `modules/` directory. Enable or disable them on the fly from the UI.
+NeuroCore is built around a powerful, plugin-based architecture.
+*   **Self-Contained Modules**: Each feature (Chat, Memory, Tools) is an isolated package containing its own backend logic, API routes, and frontend templates.
+*   **Hot-Swapping**: Modules can be enabled, disabled, or updated at runtime without restarting the server.
+*   **Easy Extensibility**: Create new capabilities by simply dropping a folder into the `modules/` directory with a `module.json` definition.
 
 ### 🧠 AI Flow Editor
 A visual, node-based canvas to design and orchestrate complex LLM workflows.
@@ -84,9 +87,11 @@ Connect your AI flow to Telegram for remote access.
 *   **Command Control**: Manage sessions (`/new_session`, `/delete_session`) directly from the chat.
 
 ### ⚙️ Core Capabilities
-*   **📝 Annotations**: Add visual comments and documentation directly onto the AI Flow canvas using Comment nodes.
 *   **⚙️ Dynamic Configuration**: Manage LLM API endpoints, models, and other parameters through a simple, tabbed settings UI.
 *   **✅ Robust Testing**: A comprehensive test suite using `pytest` to ensure code quality and stability.
+*   **🌐 Universal LLM Support**: Connect to any OpenAI-compatible API, including local servers (LM Studio, Ollama, LocalAI) and remote providers (OpenAI, Anthropic, Groq).
+*   **⚡ High-Performance Backend**: Powered by FastAPI and Uvicorn for asynchronous, non-blocking execution.
+*   **🚀 Lightweight Frontend**: Uses HTMX for server-side rendering, eliminating the need for complex build steps or heavy client-side frameworks.
 
 
 ## 🛠️ Tech Stack
