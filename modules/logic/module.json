@@ -24,14 +24,14 @@
         {
             "id": "repeater_node",
             "name": "Repeater",
-            "description": "Re-triggers the flow after a configurable delay (hours, minutes, seconds). Set Max Repeats to 0 for infinite loops.",
+            "description": "Re-triggers the current flow after a delay. Set Max Repeats to 0 to run forever, or a positive number for a fixed count.",
             "singleton": false,
             "configurable": true
         },
         {
             "id": "conditional_router",
             "name": "Conditional Router",
-            "description": "Routes data to multiple nodes based on tool existence. Splits flow into true path (tools found) and false path (no tools).",
+            "description": "Routes data based on conditional logic (tool existence, field comparison, custom expressions). Returns data if condition is true, blocks flow if false.",
             "singleton": false,
             "configurable": true
         }
