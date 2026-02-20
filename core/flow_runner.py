@@ -43,7 +43,10 @@ class FlowRunner:
                     queue.append(v)
         
         if len(sorted_order) != len(self.nodes):
-            raise Exception("Flow contains a cycle and cannot be executed.")
+            # Identify nodes involved in the cycle for better error reporting
+            remaining_nodes = set(self.nodes.keys()) - set(sorted_order)
+            remaining_names = [self.nodes[nid].get('name', nid) for nid in remaining_nodes]
+            raise Exception(f"Flow contains a cycle and cannot be executed. Cycle detected involving: {', '.join(remaining_names)}")
 
         return sorted_order
 

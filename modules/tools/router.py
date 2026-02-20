@@ -1,7 +1,7 @@
 import os
 import json
-from fastapi import APIRouter, Request, Form
-from fastapi.responses import HTMLResponse, Response
+from fastapi import APIRouter, Request, Form, UploadFile, File
+from fastapi.responses import HTMLResponse, Response, JSONResponse
 from fastapi.templating import Jinja2Templates
 
 router = APIRouter()
@@ -57,6 +57,11 @@ async def save_tool(
         params_json = json.loads(parameters)
         tools = load_tools()
         
+        # Preserve enabled state
+        is_enabled = True
+        if name in tools:
+            is_enabled = tools[name].get("enabled", True)
+        
         # OpenAI Function Calling Format
         tools[name] = {
             "definition": {
@@ -66,7 +71,8 @@ async def save_tool(
                     "description": description,
                     "parameters": params_json
                 }
-            }
+            },
+            "enabled": is_enabled
         }
         
         # Save Python logic to standalone file
@@ -77,6 +83,15 @@ async def save_tool(
         return await tools_list(request)
     except Exception as e:
         return Response(status_code=400, headers={"HX-Trigger": json.dumps({"showMessage": {"level": "error", "message": f"Failed to save tool: {str(e)}"}})})
+
+@router.post("/{name}/toggle")
+async def toggle_tool(request: Request, name: str):
+    tools = load_tools()
+    if name in tools:
+        current_state = tools[name].get("enabled", True)
+        tools[name]["enabled"] = not current_state
+        save_tools(tools)
+    return await tools_list(request)
 
 @router.delete("/{name}")
 async def delete_tool(request: Request, name: str):
@@ -123,6 +138,8 @@ async def get_tools_with_descriptions():
     tools = load_tools()
     result = []
     for name, tool_data in tools.items():
+        if not tool_data.get("enabled", True):
+            continue
         desc = ""
         if "definition" in tool_data and "function" in tool_data["definition"]:
             desc = tool_data["definition"]["function"].get("description", "")
@@ -133,4 +150,71 @@ async def get_tools_with_descriptions():
 async def get_definitions():
     """Returns the JSON definitions for all tools to be used in LLM config."""
     tools = load_tools()
-    return [t["definition"] for t in tools.values()]
+    return [t["definition"] for t in tools.values() if t.get("enabled", True)]
+
+@router.get("/export")
+async def export_tools():
+    tools = load_tools()
+    export_data = []
+    
+    for name, data in tools.items():
+        tool_export = {
+            "name": name,
+            "enabled": data.get("enabled", True),
+            "description": data["definition"]["function"]["description"],
+            "parameters": data["definition"]["function"]["parameters"]
+        }
+        
+        # Read code
+        code_path = os.path.join(LIBRARY_DIR, f"{name}.py")
+        if os.path.exists(code_path):
+            with open(code_path, "r") as f:
+                tool_export["code"] = f.read()
+        else:
+            tool_export["code"] = ""
+            
+        export_data.append(tool_export)
+        
+    return JSONResponse(
+        content=export_data,
+        headers={"Content-Disposition": 'attachment; filename="neurocore_tools.json"'}
+    )
+
+@router.post("/import")
+async def import_tools(request: Request, file: UploadFile = File(...)):
+    try:
+        content = await file.read()
+        import_data = json.loads(content)
+        
+        if isinstance(import_data, dict):
+            import_data = [import_data]
+            
+        tools = load_tools()
+        
+        for tool_data in import_data:
+            name = tool_data.get("name")
+            if not name: continue
+            
+            # Update tools.json structure
+            tools[name] = {
+                "definition": {
+                    "type": "function",
+                    "function": {
+                        "name": name,
+                        "description": tool_data.get("description", ""),
+                        "parameters": tool_data.get("parameters", {"type": "object", "properties": {}})
+                    }
+                },
+                "enabled": tool_data.get("enabled", True)
+            }
+            
+            # Save code
+            code = tool_data.get("code", "")
+            with open(os.path.join(LIBRARY_DIR, f"{name}.py"), "w") as f:
+                f.write(code)
+                
+        save_tools(tools)
+        
+        return await tools_list(request)
+    except Exception as e:
+        return Response(status_code=400, headers={"HX-Trigger": json.dumps({"showMessage": {"level": "error", "message": f"Import failed: {str(e)}"}})})

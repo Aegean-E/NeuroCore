@@ -5,9 +5,15 @@
             <p class="text-slate-400 text-sm">Define functions that the AI can execute.</p>
         </div>
         <div class="flex items-center space-x-2">
-            <button hx-get="/tools/list" hx-target="#tools-list" hx-indicator="#tools-list" class="bg-slate-800 hover:bg-slate-700 text-white px-4 py-2 rounded-lg text-sm font-bold transition-all">
-                Load Tools
+            <form id="import-form" hx-post="/tools/import" hx-encoding="multipart/form-data" hx-target="#tools-list" class="hidden">
+                <input type="file" name="file" accept=".json" onchange="this.form.requestSubmit(); this.value=''">
+            </form>
+            <button onclick="document.querySelector('#import-form input').click()" class="bg-slate-800 hover:bg-slate-700 text-white px-4 py-2 rounded-lg text-sm font-bold transition-all">
+                Import Tool
             </button>
+            <a href="/tools/export" class="bg-slate-800 hover:bg-slate-700 text-white px-4 py-2 rounded-lg text-sm font-bold transition-all">
+                Export Tools
+            </a>
             <button onclick="resetToolForm()" class="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-lg text-sm font-bold transition-all">
                 + New Tool
             </button>
