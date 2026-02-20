@@ -84,6 +84,7 @@ class MyCustomNodeExecutor:
         """
         Receives data from the previous node.
         input_data usually contains keys like 'messages', 'content', etc.
+        config contains the node's settings and system metadata (e.g., '_flow_id').
         """
         # Process data
         result = input_data.copy()

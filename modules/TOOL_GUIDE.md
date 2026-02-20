@@ -41,6 +41,7 @@ The Python environment for tools is executed locally. You can import standard li
 *   **Input**: The arguments provided by the LLM are available in the dictionary variable `args`.
 *   **Output**: You must assign your return value to the variable `result`.
 *   **Helpers**: The `json` module is pre-imported and available.
+*   **Imports**: You can import standard Python libraries (e.g., `math`, `datetime`) or installed packages (e.g., `httpx`) directly in your code.
 
 ### Example: Weather Tool
 
@@ -91,3 +92,15 @@ The LLM will *request* a tool call, but it cannot execute code itself. The **Too
 4.  Connect the **Tool Dispatcher** output back to the **LLM Core** input (or a new LLM node) if you want the AI to interpret the tool's result and generate a natural language response.
 
 *Note: The Tool Dispatcher node can also be configured to only allow specific tools, adding a layer of security.*
+
+## 5. Importing and Exporting Tools
+
+You can share tools between NeuroCore instances or back them up using the Import/Export feature.
+
+### Exporting
+*   Click **Export Tool** in the Tools tab.
+*   Search for a specific tool to export it individually, or click **Export Entire Library** to download all tools as a single JSON file.
+
+### Importing
+*   Click **Import Tool** and select a `.json` (NeuroCore export) or `.py` (Python script) file.
+*   If importing a `.py` file, NeuroCore will attempt to wrap it as a tool, but you may need to adjust the parameter schema manually.

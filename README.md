@@ -25,6 +25,7 @@ NeuroCore is built on the principles of **Speed**, **Simplicity**, and **Modular
     *   **Pan & Zoom**: Effortlessly navigate large and complex flows.
     *   **Singleton Nodes**: Enforce architectural patterns by restricting certain nodes (like Chat Input/Output) to a single instance per flow.
     *   **Flow Management**: Create, save, rename, and switch between multiple AI flows to handle different tasks.
+    *   **Canvas Controls**: Center the view, clear the canvas, or manage connections (Revert direction, Break link) with dedicated controls.
 *   **⚡ Logic & Control Flow**: Advanced nodes for complex orchestration.
     *   **Delay**: Pause execution for a set duration.
     *   **Python Scripting**: Execute custom Python code directly within the flow to transform data.
@@ -45,6 +46,7 @@ NeuroCore is built on the principles of **Speed**, **Simplicity**, and **Modular
     *   **Visual Editor**: Create and edit tools directly in the UI with JSON schema validation.
     *   **Hot-Reloading**: Tools are saved as Python files and loaded dynamically.
     *   **Tool Dispatcher**: A dedicated flow node to execute tools requested by the LLM.
+    *   **Import/Export**: Share tools easily by importing or exporting them as JSON or Python files.
 *   **📱 Telegram Integration**: Connect your AI flow to Telegram for remote access.
     *   **Chat Remotely**: Interact with your AI agent from anywhere via the Telegram app.
     *   **Vision Support**: Send photos to Telegram to analyze images using vision-capable models.
