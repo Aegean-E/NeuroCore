@@ -29,6 +29,7 @@ NeuroCore is built on the principles of **Speed**, **Simplicity**, and **Modular
     *   **Delay**: Pause execution for a set duration.
     *   **Python Scripting**: Execute custom Python code directly within the flow to transform data.
     *   **Repeater**: Create loops or scheduled re-triggers of AI flows.
+    *   **Conditional Router**: Branch flows based on data conditions, tool execution results, or custom logic.
 *   **💬 Built-in Chat UI**: A clean, modern chat interface for direct interaction with your configured AI flow.
     *   **Multimodal Support**: Upload images to interact with vision-capable models.
     *   **Session Management**: Create, rename, and delete chat sessions to organize your conversations.
@@ -39,6 +40,11 @@ NeuroCore is built on the principles of **Speed**, **Simplicity**, and **Modular
     *   **Semantic Consolidation**: Intelligent merging of redundant memories to prevent database bloat and maintain coherence.
     *   **Memory Browser**: A dedicated UI to search, filter, and delete stored memories.
     *   **Context Injection**: Automatically retrieves relevant memories during conversations.
+*   **🛠️ Tools Library**: Define and manage custom Python functions (tools) that the LLM can execute.
+    *   **Function Calling**: Full support for OpenAI-compatible function calling.
+    *   **Visual Editor**: Create and edit tools directly in the UI with JSON schema validation.
+    *   **Hot-Reloading**: Tools are saved as Python files and loaded dynamically.
+    *   **Tool Dispatcher**: A dedicated flow node to execute tools requested by the LLM.
 *   **📱 Telegram Integration**: Connect your AI flow to Telegram for remote access.
     *   **Chat Remotely**: Interact with your AI agent from anywhere via the Telegram app.
     *   **Vision Support**: Send photos to Telegram to analyze images using vision-capable models.
@@ -134,6 +140,7 @@ NeuroCore/
 │   ├── memory/           # Long-term memory backend and nodes
 │   ├── memory_browser/   # UI for managing memories
 │   └── system_prompt/    # System prompt injection node
+│   ├── tools/            # Tool library and dispatcher
 │   ├── telegram/         # Telegram bot integration
 │   └── annotations/      # Flow documentation and comments
 ├── tests/                # The pytest test suite
@@ -213,6 +220,16 @@ Create a `module.json` file inside your new folder. This file tells NeuroCore ab
         return None
     ```
 
+## 🔧 Tool Library
+
+NeuroCore includes a powerful **Tool Library** that implements OpenAI-compatible function calling. This allows your AI agents to interact with external APIs, databases, or perform calculations.
+
+1.  **Define**: Create tools in the **Tools** tab using a visual editor. You define the JSON schema for parameters and the Python code to execute.
+2.  **Enable**: In your AI Flow, select the **System Prompt** node and enable the specific tools you want the agent to use.
+3.  **Execute**: Add a **Tool Dispatcher** node to your flow. When the LLM decides to call a function, the dispatcher executes your Python code and returns the result to the LLM.
+
+For a comprehensive guide on creating and using tools, see modules/TOOL_GUIDE.md.
+
 ## 🧪 Testing
 
 The project includes a robust test suite using `pytest`. To run the tests, execute the provided runner script:
@@ -229,6 +246,6 @@ python tests/run_tests.py --coverage
 
 ## 📜 License
 
-This project is licensed under the **GNU General Public License v3.0**. See the LICENSE file for full details.
+This project is licensed under the **Apache License, Version 2.0**. See the LICENSE file for full details.
 
 ---
