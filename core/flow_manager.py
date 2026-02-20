@@ -42,7 +42,7 @@ class FlowManager:
                 "name": "Default Chat Flow",
                 "nodes": [
                     {"id": "node-0", "moduleId": "chat", "nodeTypeId": "chat_input", "name": "Chat Input", "x": -97, "y": 248, "config": {}},
-                    {"id": "node-1", "moduleId": "system_prompt", "nodeTypeId": "system_prompt", "name": "System Prompt", "x": 336, "y": 249, "config": {"system_prompt": "You are NeuroCore, a helpful and intelligent AI assistant."}},
+                    {"id": "node-1", "moduleId": "system_prompt", "nodeTypeId": "system_prompt", "name": "System Prompt", "x": 336, "y": 249, "config": {"system_prompt": "You are NeuroCore, a helpful and intelligent AI assistant.", "enabled_tools": []}},
                     {"id": "node-2", "moduleId": "llm_module", "nodeTypeId": "llm_module", "name": "LLM Core", "x": 550, "y": 250, "config": {}},
                     {"id": "node-3", "moduleId": "chat", "nodeTypeId": "chat_output", "name": "Chat Output", "x": 765, "y": 250, "config": {}},
                     {"id": "node-4", "moduleId": "memory", "nodeTypeId": "memory_save", "name": "Memory Save", "x": 113, "y": 165, "config": {}},

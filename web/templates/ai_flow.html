@@ -200,6 +200,12 @@
                     <label class="block text-sm font-medium text-slate-400 mb-2">System Prompt</label>
                     <textarea id="system-prompt-input" rows="10" class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all custom-scrollbar" placeholder="You are a helpful AI..."></textarea>
                     <p class="text-xs text-slate-500 mt-2">Define the persona and instructions for the AI.</p>
+                    
+                    <div class="mt-4 pt-4 border-t border-slate-800">
+                        <label class="block text-sm font-medium text-slate-400 mb-2">Available Tools</label>
+                        <p class="text-xs text-slate-500 mb-3">Select which tools to include in the system prompt:</p>
+                        <div id="system-prompt-tools-checklist" class="space-y-2 max-h-40 overflow-y-auto custom-scrollbar bg-slate-950 border border-slate-700 rounded-xl p-3"></div>
+                    </div>
                 </div>
                 <!-- Python Script Editor -->
                 <div id="config-script" class="hidden">
@@ -472,7 +478,7 @@
             createNode(data.moduleId, data.nodeName, data.nodeTypeId, x, y);
         }
 
-        function createNode(moduleId, name, nodeTypeId, x, y, existingId = null, existingConfig = {}) {
+        function createNode(moduleId, name, nodeTypeId, x, y, existingId = null, existingConfig = {}, isReverted = false) {
             // Rule: If a node is marked as a singleton, only one can exist in the flow.
             // We check !existingId to ensure this rule only applies when a user drags a new node.
             if (!existingId && singletonNodeTypeIds.has(nodeTypeId)) {
@@ -522,11 +528,24 @@
                 nodeElement.style.top = `${y}px`;
                 nodeElement.innerHTML = `
                     <div class="flex justify-between items-start mb-3">
-                        <div class="flex items-center max-w-[90%]">
-                            ${iconPath ? `<svg class="w-4 h-4 text-slate-400 mr-2 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="${iconPath}"></path></svg>` : ''}
+                        <div class="flex items-start max-w-[90%]">
+                            ${iconPath ? `<svg class="w-4 h-4 text-slate-400 mr-2 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="${iconPath}"></path></svg>` : ''}
                             <div class="overflow-hidden w-full">
                                 <div class="font-bold text-xs uppercase text-slate-200 pointer-events-none truncate" id="title-${nodeId}">${displayTitle}</div>
                                 <div id="explanation-${nodeId}" class="text-[10px] text-slate-500 mt-0.5 leading-tight w-full line-clamp-3 break-words ${existingConfig.explanation ? '' : 'hidden'}">${existingConfig.explanation || ''}</div>
+                                ${nodeTypeId === 'system_prompt' ? `
+                                <div id="prompt-preview-${nodeId}" class="text-[9px] text-slate-400 mt-1 line-clamp-2 break-words">${existingConfig.system_prompt ? existingConfig.system_prompt.substring(0, 50) + (existingConfig.system_prompt.length > 50 ? '...' : '') : 'No prompt'}</div>
+                                ${(existingConfig.enabled_tools || []).length > 0 ? `
+                                <div id="tools-badge-${nodeId}" class="text-[9px] text-blue-400 mt-1">
+                                    <span class="bg-blue-900/30 px-2 py-0.5 rounded">${(existingConfig.enabled_tools || []).length} tools</span>
+                                </div>
+                                ` : ''}
+                                ` : ''}
+                                ${nodeTypeId === 'tool_dispatcher' && (existingConfig.allowed_tools || []).length > 0 ? `
+                                <div id="tools-badge-${nodeId}" class="text-[9px] text-purple-400 mt-1 flex flex-wrap gap-1">
+                                    ${(existingConfig.allowed_tools || []).map(t => `<span class="bg-purple-900/30 px-1.5 py-0.5 rounded">${t}</span>`).join('')}
+                                </div>
+                                ` : ''}
                             </div>
                         </div>
                         ${isConfigurable ? `
@@ -547,7 +566,16 @@
                 `;
             }
             
-            const nodeData = { id: nodeId, moduleId: moduleId, nodeTypeId: nodeTypeId, name: name, x: x, y: y, config: existingConfig };
+            const nodeData = { id: nodeId, moduleId: moduleId, nodeTypeId: nodeTypeId, name: name, x: x, y: y, config: existingConfig, isReverted: isReverted };
+            
+            // Initialize default configs for specific node types
+            if (nodeTypeId === 'system_prompt' && !nodeData.config.enabled_tools) {
+                nodeData.config.enabled_tools = [];
+            }
+            if (nodeTypeId === 'tool_dispatcher' && !nodeData.config.allowed_tools) {
+                nodeData.config.allowed_tools = [];
+            }
+            
             nodes.push(nodeData);
 
             let isDragging = false;
@@ -746,6 +774,33 @@
             }
 
             nodeAndSvgContainer.appendChild(nodeElement);
+            
+            // Restore visual state if node was reverted
+            if (isReverted && !nodeTypeId.includes('comment')) {
+                const areasContainer = nodeElement.querySelector('.flex.justify-between');
+                if (areasContainer) {
+                    areasContainer.classList.add('flex-row-reverse');
+                }
+                
+                const inputDot = nodeElement.querySelector('.input-dot');
+                const outputDot = nodeElement.querySelector('.output-dot');
+                
+                if (inputDot && outputDot) {
+                    inputDot.classList.toggle('bg-blue-500');
+                    inputDot.classList.toggle('bg-emerald-500');
+                    
+                    outputDot.classList.toggle('bg-emerald-500');
+                    outputDot.classList.toggle('bg-blue-500');
+                    
+                    const inputText = nodeElement.querySelector('.input-area span');
+                    const outputText = nodeElement.querySelector('.output-area span');
+                    if (inputText && outputText) {
+                        const temp = inputText.textContent;
+                        inputText.textContent = outputText.textContent;
+                        outputText.textContent = temp;
+                    }
+                }
+            }
         }
 
         window.loadFlowById = async function(flowId) {
@@ -766,7 +821,7 @@
 
                 if (flowData.nodes) {
                     flowData.nodes.forEach(node => {
-                        createNode(node.moduleId, node.name, node.nodeTypeId, node.x, node.y, node.id, node.config || {});
+                        createNode(node.moduleId, node.name, node.nodeTypeId, node.x, node.y, node.id, node.config || {}, node.isReverted || false);
                     });
                 }
 
@@ -1030,6 +1085,22 @@
             } else if (node.nodeTypeId === 'system_prompt') {
                 document.getElementById('config-system-prompt').classList.remove('hidden');
                 document.getElementById('system-prompt-input').value = node.config.system_prompt || '';
+                
+                const toolsChecklist = document.getElementById('system-prompt-tools-checklist');
+                toolsChecklist.innerHTML = '<div class="animate-pulse text-slate-600 text-xs">Loading tools...</div>';
+                
+                fetch('/tools/names').then(r => r.json()).then(names => {
+                    toolsChecklist.innerHTML = '';
+                    const enabled = node.config.enabled_tools || [];
+                    names.forEach(name => {
+                        const checked = enabled.includes(name) ? 'checked' : '';
+                        toolsChecklist.innerHTML += `
+                            <label class="flex items-center space-x-3 cursor-pointer hover:bg-slate-900 p-1 rounded transition-colors">
+                                <input type="checkbox" value="${name}" ${checked} class="form-checkbox h-4 w-4 text-blue-600 bg-slate-900 border-slate-700 rounded focus:ring-blue-500">
+                                <span class="text-sm text-slate-300">${name}</span>
+                            </label>`;
+                    });
+                });
             } else if (node.nodeTypeId === 'script_node') {
                 document.getElementById('config-script').classList.remove('hidden');
                 document.getElementById('script-code-input').value = node.config.code || '';
@@ -1042,15 +1113,18 @@
                 const checklist = document.getElementById('tools-checklist');
                 checklist.innerHTML = '<div class="animate-pulse text-slate-600 text-xs">Loading tools...</div>';
                 
-                fetch('/tools/names').then(r => r.json()).then(names => {
+                fetch('/tools/with-descriptions').then(r => r.json()).then(tools => {
                     checklist.innerHTML = '';
                     const allowed = node.config.allowed_tools || [];
-                    names.forEach(name => {
-                        const checked = allowed.includes(name) ? 'checked' : '';
+                    tools.forEach(tool => {
+                        const checked = allowed.includes(tool.name) ? 'checked' : '';
                         checklist.innerHTML += `
-                            <label class="flex items-center space-x-3 cursor-pointer hover:bg-slate-900 p-1 rounded transition-colors">
-                                <input type="checkbox" value="${name}" ${checked} class="form-checkbox h-4 w-4 text-blue-600 bg-slate-900 border-slate-700 rounded focus:ring-blue-500">
-                                <span class="text-sm text-slate-300">${name}</span>
+                            <label class="flex items-start space-x-3 cursor-pointer hover:bg-slate-900 p-2 rounded transition-colors">
+                                <input type="checkbox" value="${tool.name}" ${checked} class="form-checkbox h-4 w-4 text-blue-600 bg-slate-900 border-slate-700 rounded focus:ring-blue-500 mt-0.5 flex-shrink-0">
+                                <div class="flex-1">
+                                    <div class="text-sm text-slate-300">${tool.name}</div>
+                                    ${tool.description ? `<div class="text-xs text-slate-500 mt-0.5">${tool.description}</div>` : ''}
+                                </div>
                             </label>`;
                     });
                 });
@@ -1096,7 +1170,13 @@
                     const val = parseFloat(document.getElementById('delay-seconds-input').value);
                     newConfig = { seconds: isNaN(val) ? 0 : val };
                 } else if (node.nodeTypeId === 'system_prompt') {
-                    newConfig = { system_prompt: document.getElementById('system-prompt-input').value };
+                    const checkboxes = document.querySelectorAll('#system-prompt-tools-checklist input:checked');
+                    const enabled = Array.from(checkboxes).map(cb => cb.value);
+                    newConfig = { 
+                        system_prompt: document.getElementById('system-prompt-input').value,
+                        enabled_tools: enabled
+                    };
+                    console.log('System Prompt Config Saved:', newConfig);
                 } else if (node.nodeTypeId === 'script_node') {
                     newConfig = { code: document.getElementById('script-code-input').value };
                 } else if (node.nodeTypeId === 'repeater_node') {
@@ -1121,6 +1201,52 @@
                 }
 
                 node.config = newConfig;
+                console.log('Node Config Updated:', node.id, node.config);
+                
+                // Update visual badges for system_prompt and tool_dispatcher nodes
+                const nodeElement = document.getElementById(node.id);
+                if (nodeElement) {
+                    const existingBadge = nodeElement.querySelector('[id^="tools-badge-"]');
+                    const existingPromptPreview = nodeElement.querySelector('[id^="prompt-preview-"]');
+                    if (existingBadge) existingBadge.remove();
+                    if (existingPromptPreview) existingPromptPreview.remove();
+                    
+                    if (node.nodeTypeId === 'system_prompt') {
+                        // Update prompt preview
+                        const promptText = newConfig.system_prompt ? newConfig.system_prompt.substring(0, 50) + (newConfig.system_prompt.length > 50 ? '...' : '') : 'No prompt';
+                        const promptPreviewHtml = `
+                            <div id="prompt-preview-${node.id}" class="text-[9px] text-slate-400 mt-1 line-clamp-2 break-words">${promptText}</div>
+                        `;
+                        const titleEl = nodeElement.querySelector('[id^="explanation-"]');
+                        if (titleEl) {
+                            titleEl.insertAdjacentHTML('afterend', promptPreviewHtml);
+                        }
+                        
+                        // Update tools badge
+                        if (newConfig.enabled_tools && newConfig.enabled_tools.length > 0) {
+                            const badgeHtml = `
+                                <div id="tools-badge-${node.id}" class="text-[9px] text-blue-400 mt-1">
+                                    <span class="bg-blue-900/30 px-2 py-0.5 rounded">${newConfig.enabled_tools.length} tools</span>
+                                </div>
+                            `;
+                            const promptPreviewEl = nodeElement.querySelector('[id^="prompt-preview-"]');
+                            if (promptPreviewEl) {
+                                promptPreviewEl.insertAdjacentHTML('afterend', badgeHtml);
+                            }
+                        }
+                    } else if (node.nodeTypeId === 'tool_dispatcher' && newConfig.allowed_tools && newConfig.allowed_tools.length > 0) {
+                        const badgeHtml = `
+                            <div id="tools-badge-${node.id}" class="text-[9px] text-purple-400 mt-1 flex flex-wrap gap-1">
+                                ${newConfig.allowed_tools.map(t => `<span class="bg-purple-900/30 px-1.5 py-0.5 rounded">${t}</span>`).join('')}
+                            </div>
+                        `;
+                        const titleEl = nodeElement.querySelector('[id^="explanation-"]');
+                        if (titleEl) {
+                            titleEl.insertAdjacentHTML('afterend', badgeHtml);
+                        }
+                    }
+                }
+                
                 closeConfigModal();
             } catch (e) {
                 showToast("Invalid Configuration: " + e.message, 'error');

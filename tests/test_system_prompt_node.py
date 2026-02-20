@@ -55,3 +55,52 @@ async def test_system_prompt_bad_messages_type():
     result = await executor.receive({"messages": None})
     assert len(result["messages"]) == 1
     assert result["messages"][0]["role"] == "system"
+
+@pytest.mark.asyncio
+async def test_system_prompt_with_enabled_tools():
+    """Test that enabled tools are included in the system prompt."""
+    executor = SystemPromptExecutor()
+    
+    input_data = {
+        "messages": [
+            {"role": "user", "content": "What's the weather?"}
+        ]
+    }
+    
+    config = {
+        "system_prompt": "You are a helpful assistant.",
+        "enabled_tools": ["Weather"]
+    }
+    
+    result = await executor.receive(input_data, config)
+    
+    messages = result["messages"]
+    assert len(messages) == 2
+    assert messages[0]["role"] == "system"
+    # Check that the system message includes the tools section
+    system_content = messages[0]["content"]
+    assert "You are a helpful assistant." in system_content
+    assert "Available Tools" in system_content
+    assert "Weather" in system_content
+
+@pytest.mark.asyncio
+async def test_system_prompt_with_empty_tools():
+    """Test that no tools section is added when enabled_tools is empty."""
+    executor = SystemPromptExecutor()
+    
+    input_data = {
+        "messages": []
+    }
+    
+    config = {
+        "system_prompt": "You are a helpful assistant.",
+        "enabled_tools": []
+    }
+    
+    result = await executor.receive(input_data, config)
+    
+    messages = result["messages"]
+    assert messages[0]["role"] == "system"
+    # Should just contain the system prompt without tools section
+    assert messages[0]["content"] == "You are a helpful assistant."
+    assert "Available Tools" not in messages[0]["content"]

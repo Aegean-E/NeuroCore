@@ -1,7 +1,40 @@
+import json
+import os
+
 class SystemPromptExecutor:
+    def _load_available_tools(self):
+        """Load available tools from the tools module."""
+        tools_file = os.path.join(os.path.dirname(__file__), "..", "tools", "tools.json")
+        if os.path.exists(tools_file):
+            try:
+                with open(tools_file, "r") as f:
+                    return json.load(f)
+            except:
+                return {}
+        return {}
+    
+    def _format_tools_section(self, enabled_tool_names: list) -> str:
+        """Format available tools into a readable section for the system prompt."""
+        all_tools = self._load_available_tools()
+        
+        if not enabled_tool_names:
+            return ""
+        
+        tools_text = "\n## Available Tools\nYou have access to the following tools:\n"
+        
+        for tool_name in enabled_tool_names:
+            if tool_name in all_tools:
+                tool_data = all_tools[tool_name]
+                if "definition" in tool_data and "function" in tool_data["definition"]:
+                    func_def = tool_data["definition"]["function"]
+                    desc = func_def.get("description", "No description available")
+                    tools_text += f"- **{tool_name}**: {desc}\n"
+        
+        return tools_text
+
     async def receive(self, input_data: dict, config: dict = None) -> dict:
         """
-        Receives the current conversation state and prepends a system message.
+        Receives the current conversation state and prepends a system message with available tools.
         """
         if input_data is None:
             input_data = {}
@@ -10,13 +43,20 @@ class SystemPromptExecutor:
         # Default prompt if none is configured
         prompt_text = config.get("system_prompt", "You are NeuroCore, a helpful and intelligent AI assistant.")
         
+        # Get enabled tools from config
+        enabled_tools = config.get("enabled_tools", [])
+        tools_section = self._format_tools_section(enabled_tools)
+        
+        # Combine prompt with tools section
+        full_prompt = prompt_text + tools_section
+        
         # Get existing messages from the flow data
         messages = input_data.get("messages")
         if not isinstance(messages, list):
             messages = []
         
         # Create the system message
-        system_message = {"role": "system", "content": prompt_text}
+        system_message = {"role": "system", "content": full_prompt}
         
         # Prepend the system message to the history
         new_messages = [system_message] + messages

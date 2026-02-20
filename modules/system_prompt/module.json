@@ -7,5 +7,9 @@
     "is_flow_node": true,
     "order": 1,
     "singleton": false,
-    "configurable": true
+    "configurable": true,
+    "config": {
+        "system_prompt": "You are NeuroCore, a helpful and intelligent AI assistant.",
+        "enabled_tools": []
+    }
 }

@@ -73,9 +73,26 @@ async def get_module_details(request: Request, module_id: str, module_manager: M
     })
 
 @router.post("/modules/{module_id}/config")
-async def save_module_config(request: Request, module_id: str, config_json: str = Form(...), module_manager: ModuleManager = Depends(get_module_manager)):
+async def save_module_config(request: Request, module_id: str, module_manager: ModuleManager = Depends(get_module_manager)):
     try:
-        new_config = json.loads(config_json)
+        form_data = await request.form()
+        
+        # Handle system_prompt module specially
+        if module_id == "system_prompt":
+            new_config = {}
+            if "system_prompt" in form_data:
+                new_config["system_prompt"] = form_data["system_prompt"]
+            if "enabled_tools" in form_data:
+                try:
+                    new_config["enabled_tools"] = json.loads(form_data["enabled_tools"])
+                except json.JSONDecodeError:
+                    new_config["enabled_tools"] = []
+        else:
+            # Standard JSON config
+            if "config_json" not in form_data:
+                return Response(status_code=400, headers={"HX-Trigger": json.dumps({"showMessage": {"level": "error", "message": "Missing config_json field"}})})
+            
+            new_config = json.loads(form_data["config_json"])
         
         # Preserve hidden keys by merging from existing config
         keys_to_preserve = HIDDEN_CONFIG_KEYS.get(module_id, [])

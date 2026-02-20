@@ -111,6 +111,24 @@ async def edit_tool(name: str):
         "code": code
     }
 
+@router.get("/names")
+async def get_tool_names():
+    """Returns a list of all tool names."""
+    tools = load_tools()
+    return list(tools.keys())
+
+@router.get("/with-descriptions")
+async def get_tools_with_descriptions():
+    """Returns all tools with their names and descriptions."""
+    tools = load_tools()
+    result = []
+    for name, tool_data in tools.items():
+        desc = ""
+        if "definition" in tool_data and "function" in tool_data["definition"]:
+            desc = tool_data["definition"]["function"].get("description", "")
+        result.append({"name": name, "description": desc})
+    return result
+
 @router.get("/definitions")
 async def get_definitions():
     """Returns the JSON definitions for all tools to be used in LLM config."""
