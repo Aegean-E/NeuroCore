@@ -26,10 +26,11 @@
         <!-- Sidebar -->
         {% if not full_width_content %}
         <aside class="w-64 flex flex-col space-y-4 border-r border-slate-800 pr-4">
+            {% if sidebar_template or not hide_module_list %}
             <div class="flex-grow bg-slate-900/50 rounded-xl border border-slate-800 overflow-hidden flex flex-col relative">
                 {% if sidebar_template %}
                     {% include sidebar_template %}
-            {% elif not hide_module_list %}
+                {% else %}
                 <div id="module-list-container"
                      hx-get="/modules/list"
                      hx-trigger="load, modulesChanged from:body"
@@ -38,6 +39,7 @@
                 </div>
                 {% endif %}
             </div>
+            {% endif %}
             
             <!-- Connection Status -->
             <div class="mt-auto p-4 bg-slate-800/50 rounded-xl border border-slate-700/50 space-y-2">

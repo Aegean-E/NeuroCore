@@ -24,6 +24,13 @@
                     {% endif %}
                 {% endfor %}
 
+                <!-- Knowledge Base -->
+                {% for module in modules %}
+                    {% if module.id == 'knowledge_base' and module.enabled %}
+                    <li><a href="/knowledge_base" class="hover:text-blue-400 transition-colors">Knowledge</a></li>
+                    {% endif %}
+                {% endfor %}
+
                 <!-- Modules -->
                 <li><a href="/" class="hover:text-blue-400 transition-colors">Modules</a></li>
 
