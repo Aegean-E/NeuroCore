@@ -9,19 +9,21 @@
 
 NeuroCore is built on the principles of **Speed**, **Simplicity**, and **Modularity**. It provides a solid foundation for building custom AI-powered applications with a fast, modern web stack and a powerful visual workflow editor.
 
+Whether you are building a simple chatbot or a complex autonomous agent with long-term memory and tool access, NeuroCore provides the building blocks.
+
 ---
 
 ## 🚀 Core Philosophy
 
 *   **Speed**: The backend is built with **FastAPI**, one of the fastest Python web frameworks available. The frontend uses **HTMX** to deliver fast, server-rendered partials, avoiding a heavy client-side JavaScript footprint.
-*   **Simplicity**: The project maintains a clean, logical structure. Data is stored in simple JSON files for easy setup and inspection. The frontend logic is co-located with the HTML, making it easy to understand and maintain.
+*   **Simplicity**: The project maintains a clean, logical structure. Data is stored in simple JSON/SQLite files for easy setup and inspection. The frontend logic is co-located with the HTML, making it easy to understand and maintain.
 *   **Modularity**: The entire system is designed around a powerful module manager. Features can be enabled, disabled, and created as self-contained packages. This "hot-swapping" capability allows for dynamic extension of the core application without requiring a server restart.
 
 ## ✨ Key Features
 
 ### 🔌 Modular Architecture
 NeuroCore is built around a powerful, plugin-based architecture.
-*   **Self-Contained Modules**: Each feature (Chat, Memory, Tools) is an isolated package containing its own backend logic, API routes, and frontend templates.
+*   **Self-Contained Modules**: Each feature (Chat, Memory, Tools, Calendar, Knowledge Base) is an isolated package containing its own backend logic, API routes, and frontend templates.
 *   **Hot-Swapping**: Modules can be enabled, disabled, or updated at runtime without restarting the server.
 *   **Easy Extensibility**: Create new capabilities by simply dropping a folder into the `modules/` directory with a `module.json` definition.
 
@@ -35,6 +37,7 @@ A visual, node-based canvas to design and orchestrate complex LLM workflows.
 *   **Pan & Zoom**: Effortlessly navigate large and complex flows.
 *   **Singleton Nodes**: Enforce architectural patterns by restricting certain nodes (like Chat Input/Output) to a single instance per flow.
 *   **Flow Management**: Create, save, rename, and switch between multiple AI flows to handle different tasks.
+*   **Annotations**: Add comment nodes to document your logic directly on the canvas.
 *   **Canvas Controls**: Center the view, clear the canvas, or manage connections (Revert direction, Break link) with dedicated controls.
 
 ### ⚡ Logic & Control Flow
@@ -53,10 +56,10 @@ A clean, modern chat interface for direct interaction with your configured AI fl
 
 *   **Multimodal Support**: Upload images to interact with vision-capable models.
 *   **Session Management**: Create, rename, and delete chat sessions to organize your conversations.
-*   **Auto-Renaming**: Sessions are automatically titled based on the conversation context.
+*   **Auto-Renaming**: Sessions are automatically titled based on the conversation context using a background LLM call.
 
 ### 📚 Long-Term Memory
-Integrated vector database (FAISS + SQLite) for persistent AI memory.
+Integrated vector database (FAISS + SQLite) for persistent AI memory regarding user facts and preferences.
 
 *   **Automatic Storage**: Background processing saves user and assistant interactions.
 *   **Smart Extraction**: Uses an Arbiter model to extract specific facts and preferences, filtering out noise.
@@ -65,7 +68,20 @@ Integrated vector database (FAISS + SQLite) for persistent AI memory.
     <p align="center">
       <img src="screenshots/memory_browser.png" alt="Memory Browser" width="100%" style="border-radius: 8px; border: 1px solid #334155;">
     </p>
-*   **Context Injection**: Automatically retrieves relevant memories during conversations.
+*   **Context Injection**: Automatically retrieves relevant memories during conversations based on semantic similarity.
+
+### 🧠 Knowledge Base (RAG)
+Retrieval-Augmented Generation support for working with documents.
+
+*   **Document Ingestion**: Upload PDF, Markdown, or Text files directly via the UI.
+*   **Vector Search**: Documents are chunked and embedded into a FAISS index for fast retrieval.
+*   **Context Injection**: Use the **Knowledge Query** node in your AI Flow to inject relevant document snippets into the LLM's context based on the user's query.
+
+### 📅 Calendar & Scheduling
+Manage time-sensitive tasks and events.
+
+*   **Visual Calendar**: A full GUI to view and manage events.
+*   **Event Watcher**: A flow node that can check for upcoming events and trigger specific actions or reminders within your AI agent.
 
 ### 🛠️ Tools Library
 Define and manage custom Python functions (tools) that the LLM can execute.
@@ -114,6 +130,9 @@ Connect your AI flow to Telegram for remote access.
     *   **Vanilla JavaScript**: Used exclusively for the interactive AI Flow canvas.
 *   **Templating**:
     *   Jinja2: For server-side HTML templating.
+*   **Data & Search**:
+    *   SQLite: For structured data storage.
+    *   FAISS: For efficient vector similarity search.
 
 ## ⚙️ Getting Started
 
@@ -144,9 +163,8 @@ Follow these steps to get NeuroCore up and running on your local machine.
     ```
 
 3.  **Install the required dependencies:**
-    *(You may need to create a `requirements.txt` file based on the libraries used, such as `fastapi`, `uvicorn`, `httpx`, `jinja2`, `pytest`, etc.)*
     ```bash
-    pip install fastapi uvicorn httpx jinja2 numpy faiss-cpu "pytest<9" "pytest-cov" "pytest-httpx" "pytest-asyncio"
+    pip install fastapi uvicorn httpx jinja2 numpy faiss-cpu "pytest<9" "pytest-cov" "pytest-httpx" "pytest-asyncio" python-multipart
     ```
 
 ### 3. Configuration
