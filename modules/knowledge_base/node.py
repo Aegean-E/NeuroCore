@@ -38,11 +38,13 @@ class KnowledgeQueryExecutor:
 
         # Generate embedding for the query
         embedding = await self.llm.get_embedding(query)
-        if not embedding:
-            return input_data
 
         limit = int(config.get("limit", 3))
-        results = document_store.search(embedding, limit)
+        
+        if embedding:
+            results = document_store.search_hybrid(query, embedding, limit)
+        else:
+            results = document_store.search_keyword(query, limit)
         
         context_str = "\n\n".join([f"--- Source: {r['source']} (Page {r.get('page', '?')}) ---\n{r['content']}" for r in results])
         

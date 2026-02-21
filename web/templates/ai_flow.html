@@ -23,6 +23,15 @@
             box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.4);
             z-index: 20 !important;
         }
+        .node-executing {
+            box-shadow: 0 0 15px 2px rgba(16, 185, 129, 0.6); /* emerald-500 */
+            border-color: #10b981 !important;
+            transition: all 0.3s ease;
+        }
+        .node-error {
+            box-shadow: 0 0 15px 2px rgba(239, 68, 68, 0.6); /* red-500 */
+            border-color: #ef4444 !important;
+        }
     </style>
 </head>
 <body class="bg-slate-900 text-slate-100 min-h-screen flex flex-col font-sans">
@@ -1575,6 +1584,49 @@
             updateButtonStates();
         }
 
+    })();
+    </script>
+
+    <!-- Visual Debugger -->
+    <script>
+    (function() {
+        const debugMode = {{ 'true' if settings.debug_mode else 'false' }};
+        if (!debugMode) return;
+
+        let lastTimestamp = Date.now() / 1000;
+
+        function pollDebugEvents() {
+            fetch(`/debug/events?since=${lastTimestamp}`)
+                .then(r => r.json())
+                .then(events => {
+                    if (events.length > 0) {
+                        lastTimestamp = events[events.length - 1].timestamp_raw;
+                        
+                        events.forEach(event => {
+                            const nodeEl = document.getElementById(event.node_id);
+                            if (nodeEl) {
+                                if (event.event === 'start') {
+                                    nodeEl.classList.add('node-executing');
+                                    nodeEl.classList.remove('node-error');
+                                } else if (event.event === 'end') {
+                                    setTimeout(() => {
+                                        nodeEl.classList.remove('node-executing');
+                                    }, 500); 
+                                } else if (event.event === 'error') {
+                                    nodeEl.classList.remove('node-executing');
+                                    nodeEl.classList.add('node-error');
+                                }
+                            }
+                        });
+                    }
+                })
+                .catch(console.error)
+                .finally(() => {
+                    setTimeout(pollDebugEvents, 500);
+                });
+        }
+
+        pollDebugEvents();
     })();
     </script>
 </body>

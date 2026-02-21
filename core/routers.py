@@ -242,6 +242,10 @@ async def debug_page(request: Request, settings_man: SettingsManager = Depends(g
 async def get_debug_logs(request: Request):
     return templates.TemplateResponse(request, "debug_logs.html", {"logs": debug_logger.get_logs()})
 
+@router.get("/debug/events", response_class=JSONResponse)
+async def get_debug_events(request: Request, since: float = 0):
+    return debug_logger.get_recent_logs(since)
+
 @router.post("/debug/clear")
 async def clear_debug_logs(request: Request):
     debug_logger.clear()

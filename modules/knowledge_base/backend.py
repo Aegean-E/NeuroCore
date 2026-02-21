@@ -41,6 +41,7 @@ class FaissDocumentStore:
 
         self._load_faiss_index()
         self._sync_faiss_index()
+        self._sync_fts_index()
 
     # --------------------------
     # Database Initialization
@@ -244,6 +245,21 @@ class FaissDocumentStore:
                 self._rebuild_index()
         except Exception as e:
             logging.error(f"⚠️ Error syncing FAISS index: {e}")
+
+    def _sync_fts_index(self):
+        """Ensure FTS index is populated."""
+        try:
+            with self._connect() as con:
+                # Check if FTS is empty but chunks are not
+                fts_count = con.execute("SELECT COUNT(*) FROM chunks_fts").fetchone()[0]
+                chunks_count = con.execute("SELECT COUNT(*) FROM chunks").fetchone()[0]
+                
+                if chunks_count > 0 and fts_count == 0:
+                    logging.info("🔧 Populating FTS5 index...")
+                    con.execute("INSERT INTO chunks_fts(chunks_fts) VALUES('rebuild')")
+                    con.commit()
+        except Exception as e:
+            logging.warning(f"⚠️ FTS sync failed: {e}")
 
     def _rebuild_index(self):
         """Rebuild FAISS index from SQLite chunks."""
@@ -605,6 +621,7 @@ class FaissDocumentStore:
             for r in rows:
                 chunk_id = r[0]
                 results.append({
+                    "id": chunk_id,
                     "content": r[1],
                     "source": r[2],
                     "page": r[3],
@@ -614,6 +631,81 @@ class FaissDocumentStore:
         # Sort by score descending (SQL IN does not guarantee order)
         results.sort(key=lambda x: x["score"], reverse=True)
         return results
+
+    def search_keyword(self, query: str, limit: int = 5) -> List[Dict]:
+        """
+        Search for chunks using SQLite FTS5 (Keyword Search).
+        """
+        if not query.strip():
+            return []
+        
+        # Basic sanitization for FTS5
+        # Remove characters that might interfere with standard query syntax if not intended
+        safe_query = query.replace('"', '').replace("'", "").replace("*", "")
+        
+        results = []
+        with self._connect() as con:
+            try:
+                # chunks_fts is virtual table. rowid maps to chunks.id
+                # We use the 'rank' column for ordering (lower is better in FTS5)
+                rows = con.execute("""
+                    SELECT c.id, c.text, d.filename, c.page_number, chunks_fts.rank
+                    FROM chunks_fts
+                    JOIN chunks c ON c.id = chunks_fts.rowid
+                    JOIN documents d ON c.document_id = d.id
+                    WHERE chunks_fts MATCH ?
+                    ORDER BY chunks_fts.rank
+                    LIMIT ?
+                """, (safe_query, limit)).fetchall()
+                
+                for r in rows:
+                    results.append({
+                        "id": r[0],
+                        "content": r[1],
+                        "source": r[2],
+                        "page": r[3],
+                        "score": r[4] # FTS rank
+                    })
+            except sqlite3.OperationalError as e:
+                logging.warning(f"FTS5 Search failed: {e}")
+                return []
+        return results
+
+    def search_hybrid(self, query_text: str, query_embedding: List[float], limit: int = 5, rrf_k: int = 60) -> List[Dict]:
+        """
+        Combine Vector Search and Keyword Search using Reciprocal Rank Fusion (RRF).
+        """
+        # 1. Get Vector Results
+        vector_results = self.search(query_embedding, limit=limit)
+        
+        # 2. Get Keyword Results
+        keyword_results = self.search_keyword(query_text, limit=limit)
+        
+        # 3. RRF Fusion
+        scores = {}
+        chunk_map = {}
+        
+        def add_scores(results):
+            for rank, res in enumerate(results):
+                cid = res['id']
+                if cid not in scores:
+                    scores[cid] = 0.0
+                    chunk_map[cid] = res
+                scores[cid] += 1.0 / (rrf_k + rank + 1)
+
+        add_scores(vector_results)
+        add_scores(keyword_results)
+        
+        # Sort by RRF score
+        sorted_ids = sorted(scores.keys(), key=lambda x: scores[x], reverse=True)
+        
+        final_results = []
+        for cid in sorted_ids[:limit]:
+            item = chunk_map[cid]
+            item['rrf_score'] = scores[cid]
+            final_results.append(item)
+            
+        return final_results
 
 # Global instance
 document_store = FaissDocumentStore()
