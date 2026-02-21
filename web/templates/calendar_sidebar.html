@@ -1,9 +1,6 @@
 <div id="calendar-sidebar" class="flex flex-col h-full py-3" hx-get="/calendar/sidebar" hx-trigger="eventsChanged from:body">
     <div class="flex justify-between items-center px-4 mb-4">
         <h2 class="text-xs font-semibold text-slate-500 uppercase tracking-wider">Upcoming Events</h2>
-        <button class="text-blue-400 hover:text-blue-300 transition-colors" title="Add Event">
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path></svg>
-        </button>
     </div>
     
     <div class="flex-grow overflow-y-auto custom-scrollbar space-y-2 px-2">

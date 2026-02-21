@@ -103,7 +103,26 @@ async def save_event(request: Request, title: str = Form(...), date: str = Form(
     response.headers["HX-Trigger"] = "eventsChanged"
     return response
 
-@router.delete("/events/{event_id}")
-async def delete_event_route(request: Request, event_id: int):
+@router.delete("/events/{event_id}", response_class=HTMLResponse)
+async def delete_event_route(request: Request, event_id: str):
+    event = event_manager.get_event_by_id(event_id)
     event_manager.delete_event(event_id)
-    return Response(status_code=200, headers={"HX-Trigger": "eventsChanged"})
+    
+    if event and event.get("start_time"):
+        try:
+            dt_str = event.get("start_time", "").split(" ")[0]
+            dt = datetime.strptime(dt_str, "%Y-%m-%d")
+            year = dt.year
+            month = dt.month
+        except:
+            now = datetime.now()
+            year = now.year
+            month = now.month
+    else:
+        now = datetime.now()
+        year = now.year
+        month = now.month
+    
+    response = await calendar_gui(request, year=year, month=month)
+    response.headers["HX-Trigger"] = "eventsChanged"
+    return response

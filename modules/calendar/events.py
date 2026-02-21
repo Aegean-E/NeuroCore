@@ -51,4 +51,16 @@ class EventManager:
         upcoming = [e for e in sorted_events if e.get("start_time", "") >= now]
         return upcoming[:limit]
 
+    def get_event_by_id(self, event_id):
+        events = self._load_events()
+        for e in events:
+            if e.get("id") == event_id:
+                return e
+        return None
+
+    def delete_event(self, event_id):
+        events = self._load_events()
+        events = [e for e in events if e.get("id") != event_id]
+        self._save_events(events)
+
 event_manager = EventManager()
