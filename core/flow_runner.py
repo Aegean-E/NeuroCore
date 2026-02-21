@@ -79,12 +79,19 @@ class FlowRunner:
 
         return sorted_order
 
-    async def run(self, initial_input: dict):
+    async def run(self, initial_input: dict, start_node_id: str = None):
         """Executes the flow in order, passing data between nodes."""
         node_outputs = {}
         
         # Use a queue for execution to support cycles (re-execution of nodes)
-        execution_queue = deque(self.execution_order)
+        if start_node_id:
+            if start_node_id not in self.nodes:
+                raise ValueError(f"Start node {start_node_id} not found in flow.")
+            
+            # Start execution FROM this node (so it runs and triggers its logic)
+            execution_queue = deque([start_node_id])
+        else:
+            execution_queue = deque(self.execution_order)
         
         # Track how many times a node has run to prevent infinite loops
         node_run_counts = {node_id: 0 for node_id in self.nodes}
@@ -109,7 +116,13 @@ class FlowRunner:
             # 1. Determine Input Data (DAG Logic)
             incoming_edges = [c for c in self.connections if c['to'] == node_id]
             
-            if not incoming_edges:
+            if node_id == start_node_id:
+                # Forced start node receives the initial input directly
+                if isinstance(initial_input, dict):
+                    node_input = initial_input.copy()
+                else:
+                    node_input = initial_input
+            elif not incoming_edges:
                 # Source node: receives global initial input
                 if isinstance(initial_input, dict):
                     node_input = initial_input.copy()
@@ -162,6 +175,7 @@ class FlowRunner:
                 executor = executor_class()
                 node_config = (node_meta.get('config') or {}).copy()
                 node_config['_flow_id'] = self.flow_id
+                node_config['_node_id'] = node_id
                 
                 processed_data = await executor.receive(node_input, config=node_config)
                 

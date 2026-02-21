@@ -1,6 +1,7 @@
 import json
 import os
 from datetime import datetime
+from core.debug import debug_logger
 
 EVENTS_FILE = "calendar_events.json"
 
@@ -11,6 +12,7 @@ class CalendarWatcherExecutor:
     async def receive(self, input_data: dict, config: dict = None) -> dict:
         # This node is designed to be triggered periodically (e.g., by a Repeater node).
         # It checks if any events in calendar_events.json match the current minute.
+        flow_id = config.get("_flow_id", "unknown")
 
         if not os.path.exists(EVENTS_FILE):
             return None
@@ -27,19 +29,26 @@ class CalendarWatcherExecutor:
             return None
 
         now_str = datetime.now().strftime("%Y-%m-%d %H:%M")
+        
+        # Log the check to the Debug tab so we know it's running
+        debug_logger.log(flow_id, "calendar_watcher", "Calendar Watcher", "info", f"Checking time: {now_str} against {len(events)} events")
+
         due_events = []
         events_updated = False
 
         for event in events:
             # Normalize time format (handle T separator if present)
             start_time = event.get("start_time", "").replace("T", " ")
-            if start_time.startswith(now_str) and not event.get("notified", False):
+            
+            # Check if time is now or in the past, and not yet notified
+            if start_time and start_time <= now_str and not event.get("notified", False):
                 due_events.append(event)
                 event["notified"] = True
                 events_updated = True
 
         if not due_events:
             # Return None to stop the flow execution for this branch
+            # debug_logger.log(flow_id, "calendar_watcher", "Calendar Watcher", "info", "No events due.")
             return None
 
         # Save the updated events back to the file if any were modified
@@ -49,6 +58,8 @@ class CalendarWatcherExecutor:
                     json.dump(events, f, indent=4)
             except Exception as e:
                 return {"error": f"Failed to update calendar: {str(e)}"}
+
+        debug_logger.log(flow_id, "calendar_watcher", "Calendar Watcher", "success", f"Found {len(due_events)} due events")
 
         # Format the output message
         messages = [f"🔔 Reminder: {e.get('title', 'Untitled Event')}" for e in due_events]

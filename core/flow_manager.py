@@ -53,7 +53,7 @@ class FlowManager:
                     {"id": "node-9", "moduleId": "tools", "nodeTypeId": "tool_dispatcher", "name": "Tool Dispatcher", "x": 632.1, "y": -28.2, "config": {"allowed_tools": ["Weather", "Calculator", "TimeZoneConverter", "ConversionCalculator", "SystemTime", "FetchURL", "CurrencyConverter", "SaveReminder", "CheckCalendar"], "explanation": ""}, "isReverted": True, "outputDot": {}, "inputDot": {}},
                     {"id": "node-10", "moduleId": "logic", "nodeTypeId": "conditional_router", "name": "Conditional Router", "x": 717, "y": 250, "config": {"check_field": "tool_calls", "true_branches": ["node-9"], "false_branches": ["node-3", "node-7"], "explanation": ""}, "isReverted": False, "outputDot": {}, "inputDot": {}},
                     {"id": "node-11", "moduleId": "calendar", "nodeTypeId": "calendar_watcher", "name": "Calendar Watcher", "x": 719.2, "y": 336.8, "config": {}, "isReverted": False, "outputDot": {}, "inputDot": {}},
-                    {"id": "node-12", "moduleId": "logic", "nodeTypeId": "repeater_node", "name": "Repeater", "x": 549.9, "y": 336.0, "config": {"delay": 30, "max_repeats": 1, "explanation": ""}, "isReverted": False, "outputDot": {}, "inputDot": {}}
+                    {"id": "node-12", "moduleId": "logic", "nodeTypeId": "repeater_node", "name": "Repeater", "x": 549.9, "y": 336.0, "config": {"delay": 30, "max_repeats": 0, "explanation": ""}, "isReverted": False, "outputDot": {}, "inputDot": {}}
                 ],
                 "connections": [
                     {"from": "node-1", "to": "node-2"},

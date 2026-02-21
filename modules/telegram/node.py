@@ -1,67 +1,51 @@
-import os
 import json
-import threading
+import os
 from .bridge import TelegramBridge
 
 class ConfigLoader:
-    _cache = {"mtime": 0, "data": {}}
-    _path = os.path.join(os.path.dirname(__file__), "module.json")
-
-    @classmethod
-    def get_config(cls):
+    @staticmethod
+    def get_config():
         try:
-            if os.path.exists(cls._path):
-                mtime = os.path.getmtime(cls._path)
-                if mtime > cls._cache["mtime"]:
-                    with open(cls._path, "r") as f:
-                        cls._cache["data"] = json.load(f).get("config", {})
-                    cls._cache["mtime"] = mtime
-        except Exception as e:
-            print(f"Error loading telegram config: {e}")
-        return cls._cache["data"]
+            with open("modules/telegram/module.json", "r") as f:
+                return json.load(f).get("config", {})
+        except:
+            return {}
 
-    @classmethod
-    def is_enabled(cls):
+    @staticmethod
+    def is_enabled():
         try:
-            if os.path.exists(cls._path):
-                with open(cls._path, "r") as f:
-                    data = json.load(f)
-                    return data.get("enabled", False)
+            with open("modules/telegram/module.json", "r") as f:
+                return json.load(f).get("enabled", False)
         except:
             return False
-        return False
 
 class TelegramInputExecutor:
     async def receive(self, input_data: dict, config: dict = None) -> dict:
+        # Ignore if triggered by Repeater
+        if input_data.get("_repeat_count", 0) > 0:
+            return None
         return input_data
 
     async def send(self, processed_data: dict) -> dict:
-        if "messages" not in processed_data:
+        # Double-check: ignore repeats here too to prevent error generation
+        if processed_data and processed_data.get("_repeat_count", 0) > 0:
+            return processed_data
+        if "messages" not in processed_data and "text" not in processed_data:
              return {"error": "Flow started without 'messages'. 'Telegram Input' node requires it."}
         return processed_data
 
 class TelegramOutputExecutor:
-    def __init__(self):
-        self.config = ConfigLoader.get_config()
-        self.bot_token = self.config.get("bot_token")
-        self.chat_id = self.config.get("chat_id")
-
     async def receive(self, input_data: dict, config: dict = None) -> dict:
-        if not self.bot_token or not self.chat_id:
-            print("Telegram Output: Missing bot_token or chat_id configuration.")
+        if not input_data or "content" not in input_data:
             return input_data
-
-        text_to_send = None
-        if "content" in input_data:
-            text_to_send = input_data["content"]
-        elif "choices" in input_data:
-             try:
-                text_to_send = input_data["choices"][0]["message"]["content"]
-             except: pass
+            
+        mod_config = ConfigLoader.get_config()
+        bot_token = mod_config.get("bot_token")
+        chat_id = mod_config.get("chat_id")
         
-        if text_to_send:
-            with TelegramBridge(self.bot_token, self.chat_id) as bridge:
-                bridge.send_message(text_to_send)
+        if bot_token and chat_id:
+            bridge = TelegramBridge(bot_token, chat_id)
+            bridge.send_message(input_data["content"])
             
         return input_data
 
@@ -69,8 +53,8 @@ class TelegramOutputExecutor:
         return processed_data
 
 async def get_executor_class(node_type_id: str):
-    if node_type_id == "telegram_input":
+    if node_type_id == 'telegram_input':
         return TelegramInputExecutor
-    if node_type_id == "telegram_output":
+    if node_type_id == 'telegram_output':
         return TelegramOutputExecutor
     return None

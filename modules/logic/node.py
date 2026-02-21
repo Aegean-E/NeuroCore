@@ -1,6 +1,7 @@
 import re
 import asyncio
 import json
+from core.debug import debug_logger
 
 class DelayExecutor:
     async def receive(self, input_data: dict, config: dict = None) -> dict:
@@ -68,22 +69,24 @@ class RepeaterExecutor:
             max_repeats = 1
             
         flow_id = config.get("_flow_id")
+        node_id = config.get("_node_id")
         current_repeat = input_data.get("_repeat_count", 0)
         
         # If max_repeats is 0, it loops forever. Otherwise, it checks the count.
         if flow_id and (max_repeats == 0 or current_repeat < max_repeats):
-            async def trigger_next(fid, data, count):
+            async def trigger_next(fid, data, count, start_node):
                 await asyncio.sleep(delay)
                 try:
                     from core.flow_runner import FlowRunner
                     runner = FlowRunner(fid)
                     next_data = data.copy()
                     next_data["_repeat_count"] = count + 1
-                    await runner.run(next_data)
+                    await runner.run(next_data, start_node_id=start_node)
                 except Exception as e:
                     print(f"Repeater failed to trigger next run: {e}")
+                    debug_logger.log(fid, "repeater_node", "Repeater", "error", f"Loop failed: {str(e)}")
             
-            asyncio.create_task(trigger_next(flow_id, input_data, current_repeat))
+            asyncio.create_task(trigger_next(flow_id, input_data, current_repeat, node_id))
             
         return input_data
 

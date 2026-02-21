@@ -3,6 +3,11 @@ class ChatInputExecutor:
     Node to start a flow with chat data.
     """
     async def receive(self, input_data: dict, config: dict = None) -> dict:
+        # Ignore if triggered by Repeater (background loop) or if upstream failed
+        if input_data.get("_repeat_count", 0) > 0:
+            return None
+        if "error" in input_data:
+            return None
         # This node's main job is to start the flow, so receive just accepts the data.
         return input_data
 
@@ -17,6 +22,10 @@ class ChatOutputExecutor:
     Node to format the final AI response for the chat UI.
     """
     async def receive(self, input_data: dict, config: dict = None) -> dict:
+        # Ignore background repeats to prevent log spam
+        if input_data and input_data.get("_repeat_count", 0) > 0:
+            return None
+            
         if input_data is None:
             return {"content": "Error: No data received from flow."}
         

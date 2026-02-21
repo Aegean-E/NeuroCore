@@ -1,9 +1,13 @@
 import os
+import asyncio
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from core.module_manager import ModuleManager
 from core.routers import router as core_router
+from core.settings import settings
+from core.flow_manager import flow_manager
+from core.flow_runner import FlowRunner
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -12,6 +16,21 @@ async def lifespan(app: FastAPI):
     module_manager = ModuleManager(app=app)
     app.state.module_manager = module_manager
     module_manager.load_enabled_modules()
+
+    # Auto-start active flow if it contains a Repeater node
+    active_flow_id = settings.get("active_ai_flow")
+    if active_flow_id:
+        flow = flow_manager.get_flow(active_flow_id)
+        if flow:
+            # Find the repeater node to start specifically from it
+            repeater_node = next((n for n in flow.get("nodes", []) if n.get("nodeTypeId") == "repeater_node"), None)
+            
+            if repeater_node:
+                print(f"[System] Auto-starting flow '{flow.get('name')}' from Repeater node '{repeater_node['id']}'.")
+                # Start with _repeat_count=1 to skip Chat Input nodes and prevent ghost replies
+                runner = FlowRunner(active_flow_id)
+                asyncio.create_task(runner.run({"_repeat_count": 1}, start_node_id=repeater_node['id']))
+
     yield
     # Add shutdown logic here if needed in the future
 
