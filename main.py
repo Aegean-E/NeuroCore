@@ -45,6 +45,24 @@ os.makedirs("web/static", exist_ok=True)
 app.mount("/static", StaticFiles(directory="web/static"), name="static")
 app.include_router(core_router)
 
+# Debug Endpoint to manually fire the active flow
+@app.post("/debug/fire-flow")
+async def debug_fire_flow():
+    active_flow_id = settings.get("active_ai_flow")
+    if active_flow_id:
+        flow = flow_manager.get_flow(active_flow_id)
+        if flow:
+            background_node_types = ["repeater_node"]
+            start_nodes = [n for n in flow.get("nodes", []) if n.get("nodeTypeId") in background_node_types]
+            
+            if start_nodes:
+                node = start_nodes[0]
+                print(f"[Debug] Manually firing flow '{flow.get('name')}' from {node['nodeTypeId']} '{node['id']}'.")
+                runner = FlowRunner(active_flow_id)
+                asyncio.create_task(runner.run({"_repeat_count": 1}, start_node_id=node['id']))
+                return {"status": "fired", "node": node['id']}
+    return {"status": "failed"}
+
 # --- Server Startup ---
 if __name__ == "__main__":
     import uvicorn
