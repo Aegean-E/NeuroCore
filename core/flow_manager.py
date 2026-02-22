@@ -37,13 +37,40 @@ class FlowManager:
 
     def _create_default_flows(self):
         flow_id = "default-flow-001"
+        
+        system_prompt = (
+            "You are an **Autonomous Recursive Thinking Agent**.\n"
+            "Your goal is to solve complex problems by breaking them down, executing steps, and iterating until the solution is found.\n\n"
+            "### 🧠 CONTEXT AWARENESS\n"
+            "You have access to the following dynamic context streams. Use them to maintain continuity:\n"
+            "1. **Past Reasoning**: Review your previous thoughts to ensure logical progression and avoid loops.\n"
+            "2. **Long-Term Memory**: Recall facts and preferences about the project.\n"
+            "3. **Knowledge Base**: Use retrieved document snippets to ground your answers in facts.\n\n"
+            "### 🔄 OPERATIONAL LOOP\n"
+            "Your existence is a continuous loop of thought and action. In each cycle, perform **ONE** of the following:\n\n"
+            "**OPTION A: ACTION (Tool Call)**\n"
+            "If you need external information (e.g., check time, search web, read file) or need to perform an action:\n"
+            "- CALL THE APPROPRIATE TOOL.\n"
+            "- Do not output reasoning text if you are calling a tool (unless the tool requires it).\n\n"
+            "**OPTION B: REASONING (Internal Thought)**\n"
+            "If you have enough information to proceed or need to analyze data:\n"
+            "1. **Synthesize**: Combine new tool outputs with your Past Reasoning.\n"
+            "2. **Plan**: Determine the immediate next step.\n"
+            "3. **Output**: Write a clear, concise reasoning entry. This text will be saved to your reasoning history for the next cycle.\n\n"
+            "### 🛑 CRITICAL RULES\n"
+            "- **AUTONOMY**: Do not ask the user for input or clarification. If information is missing, use tools to find it or make a reasonable assumption to proceed.\n"
+            "- **NO REPETITION**: Check Past Reasoning. If you have already tried something that failed, try a different approach.\n"
+            "- **INCREMENTAL PROGRESS**: Do not try to solve everything at once. Take one logical step per cycle.\n"
+            "- **TERMINATION**: When the objective is fully satisfied, output a final summary and explicitly state \"TASK COMPLETED\"."
+        )
+
         return {
             flow_id: {
                 "id": flow_id,
                 "name": "Default Chat Flow",
                 "nodes": [
                     {"id": "node-0", "moduleId": "chat", "nodeTypeId": "chat_input", "name": "Chat Input", "x": -97, "y": 248, "config": {}, "isReverted": False, "outputDot": {}, "inputDot": {}},
-                    {"id": "node-1", "moduleId": "system_prompt", "nodeTypeId": "system_prompt", "name": "System Prompt", "x": 343.9, "y": 203.9, "config": {"system_prompt": "You are NeuroCore, a helpful and intelligent AI assistant.", "enabled_tools": ["Weather", "Calculator", "TimeZoneConverter", "ConversionCalculator", "SystemTime", "FetchURL", "CurrencyConverter", "SaveReminder", "CheckCalendar"], "explanation": ""}, "isReverted": False, "outputDot": {}, "inputDot": {}},
+                    {"id": "node-1", "moduleId": "system_prompt", "nodeTypeId": "system_prompt", "name": "System Prompt", "x": 343.9, "y": 203.9, "config": {"system_prompt": system_prompt, "enabled_tools": ["Weather", "Calculator", "TimeZoneConverter", "ConversionCalculator", "SystemTime", "FetchURL", "CurrencyConverter", "SaveReminder", "CheckCalendar"], "explanation": ""}, "isReverted": False, "outputDot": {}, "inputDot": {}},
                     {"id": "node-2", "moduleId": "llm_module", "nodeTypeId": "llm_module", "name": "LLM Core", "x": 551, "y": 250, "config": {}, "isReverted": False, "outputDot": {}, "inputDot": {}},
                     {"id": "node-3", "moduleId": "chat", "nodeTypeId": "chat_output", "name": "Chat Output", "x": 908, "y": 250, "config": {}, "isReverted": False, "outputDot": {}, "inputDot": {}},
                     {"id": "node-4", "moduleId": "memory", "nodeTypeId": "memory_save", "name": "Memory Save", "x": 123, "y": 163, "config": {}, "isReverted": False, "outputDot": {}, "inputDot": {}},

@@ -1853,7 +1853,9 @@
         const debugMode = {{ 'true' if settings.debug_mode else 'false' }};
         if (!debugMode) return;
 
-        let lastTimestamp = Date.now() / 1000;
+        // Initialize to 0 to sync with server time on first poll
+        let lastTimestamp = 0;
+        let isFirstPoll = true;
 
         function pollDebugEvents() {
             fetch(`/debug/events?since=${lastTimestamp}`)
@@ -1862,23 +1864,27 @@
                     if (events.length > 0) {
                         lastTimestamp = events[events.length - 1].timestamp_raw;
                         
-                        events.forEach(event => {
-                            const nodeEl = document.getElementById(event.node_id);
-                            if (nodeEl) {
-                                if (event.event === 'start') {
-                                    nodeEl.classList.add('node-executing');
-                                    nodeEl.classList.remove('node-error');
-                                } else if (event.event === 'end') {
-                                    setTimeout(() => {
+                        // Skip visualization on first poll to avoid flashing old history
+                        if (!isFirstPoll) {
+                            events.forEach(event => {
+                                const nodeEl = document.getElementById(event.node_id);
+                                if (nodeEl) {
+                                    if (event.event === 'start') {
+                                        nodeEl.classList.add('node-executing');
+                                        nodeEl.classList.remove('node-error');
+                                    } else if (event.event === 'end') {
+                                        setTimeout(() => {
+                                            nodeEl.classList.remove('node-executing');
+                                        }, 500); 
+                                    } else if (event.event === 'error') {
                                         nodeEl.classList.remove('node-executing');
-                                    }, 500); 
-                                } else if (event.event === 'error') {
-                                    nodeEl.classList.remove('node-executing');
-                                    nodeEl.classList.add('node-error');
+                                        nodeEl.classList.add('node-error');
+                                    }
                                 }
-                            }
-                        });
+                            });
+                        }
                     }
+                    isFirstPoll = false;
                 })
                 .catch(console.error)
                 .finally(() => {
