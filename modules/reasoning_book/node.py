@@ -1,6 +1,6 @@
 from .service import service
 
-class LogThoughtExecutor:
+class ReasoningSaveExecutor:
     async def receive(self, data: dict, config: dict = None) -> dict:
         config = config or {}
         content = "No content"
@@ -24,7 +24,30 @@ class LogThoughtExecutor:
     async def send(self, data: dict) -> dict:
         return data
 
+class ReasoningLoadExecutor:
+    async def receive(self, data: dict, config: dict = None) -> dict:
+        config = config or {}
+        last_n = int(config.get("last_n", 5))
+        
+        # Get thoughts from service (newest first)
+        thoughts = service.get_thoughts()
+        recent_thoughts = thoughts[:last_n]
+        
+        if isinstance(data, dict):
+            result = data.copy()
+            # Inject as a list of content strings
+            result["reasoning_history"] = [t["content"] for t in recent_thoughts]
+            # Inject as a formatted string for prompts (Chronological order)
+            result["reasoning_context"] = "\n".join([f"[{t['timestamp']}] {t['content']}" for t in reversed(recent_thoughts)])
+            return result
+        return data
+
+    async def send(self, data: dict) -> dict:
+        return data
+
 async def get_executor_class(node_type_id: str):
-    if node_type_id == "log_thought":
-        return LogThoughtExecutor
+    if node_type_id == "reasoning_save":
+        return ReasoningSaveExecutor
+    if node_type_id == "reasoning_load":
+        return ReasoningLoadExecutor
     return None

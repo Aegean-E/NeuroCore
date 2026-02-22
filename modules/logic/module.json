@@ -15,13 +15,6 @@
             "configurable": false
         },
         {
-            "id": "reasoning_load",
-            "name": "Reasoning Load",
-            "description": "Loads and filters the last N reasoning steps from the flow context.",
-            "singleton": false,
-            "configurable": true
-        },
-        {
             "id": "delay_node",
             "name": "Delay",
             "description": "Pauses the workflow execution for a configurable duration (in seconds) before passing data to the next node.",

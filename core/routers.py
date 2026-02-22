@@ -318,7 +318,10 @@ async def save_settings_route(request: Request, settings_man: SettingsManager = 
             updates[field] = form_data[field]
             
     if "request_timeout" in form_data:
-        updates["request_timeout"] = float(form_data["request_timeout"])
+        try:
+            updates["request_timeout"] = float(form_data["request_timeout"])
+        except (ValueError, TypeError):
+            pass
             
     # Handle debug_mode checkbox (only if the form intended to submit it)
     if "save_debug_mode" in form_data:

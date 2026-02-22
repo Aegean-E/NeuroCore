@@ -35,6 +35,11 @@ def patch_settings_url(monkeypatch):
     monkeypatch.setitem(global_settings.settings, "default_model", "test-model")
     monkeypatch.setitem(global_settings.settings, "active_ai_flow", "test-flow")
 
+    # Prevent saving these patched settings to disk
+    def mock_save(new_settings):
+        global_settings.settings.update(new_settings)
+    monkeypatch.setattr(global_settings, "save_settings", mock_save)
+
 @pytest.mark.asyncio
 async def test_multimodal_image_upload(client, mock_chat_sessions, httpx_mock, monkeypatch):
     """Test sending an image file results in multimodal content structure."""

@@ -1,74 +1,62 @@
 import json
 import os
 from datetime import datetime
-from core.debug import debug_logger
 
 EVENTS_FILE = "calendar_events.json"
 
 class CalendarWatcherExecutor:
-    """
-    Checks for calendar events scheduled for the current time.
-    """
     async def receive(self, input_data: dict, config: dict = None) -> dict:
-        # This node is designed to be triggered periodically (e.g., by a Repeater node).
-        # It checks if any events in calendar_events.json match the current minute.
-        flow_id = config.get("_flow_id", "unknown")
-
+        """
+        Checks for calendar events scheduled for the current time.
+        Returns None if no events are found, stopping the flow.
+        """
         if not os.path.exists(EVENTS_FILE):
             return None
-
+            
         try:
             with open(EVENTS_FILE, "r") as f:
                 events = json.load(f)
-        except Exception as e:
-            # Log to console but return None to stop the flow and prevent Telegram spam
-            print(f"[Calendar Watcher] Error loading file: {e}")
+        except Exception:
             return None
 
-        if not isinstance(events, list):
-            return None
-
-        now_str = datetime.now().strftime("%Y-%m-%d %H:%M")
+        now = datetime.now()
+        triggered_events = []
         
-        # Log the check to the Debug tab so we know it's running
-        debug_logger.log(flow_id, "calendar_watcher", "Calendar Watcher", "info", f"Checking time: {now_str} against {len(events)} events")
-
-        due_events = []
-        events_updated = False
-
         for event in events:
-            # Normalize time format (handle T separator if present)
-            start_time = event.get("start_time", "").replace("T", " ")
-            
-            # Check if time is now or in the past, and not yet notified
-            if start_time and start_time <= now_str and not event.get("notified", False):
-                due_events.append(event)
-                event["notified"] = True
-                events_updated = True
-
-        if not due_events:
-            # Return None to stop the flow execution for this branch
-            # debug_logger.log(flow_id, "calendar_watcher", "Calendar Watcher", "info", "No events due.")
-            return None
-
-        # Save the updated events back to the file if any were modified
-        if events_updated:
             try:
-                with open(EVENTS_FILE, "w") as f:
-                    json.dump(events, f, indent=4)
-            except Exception as e:
-                return {"error": f"Failed to update calendar: {str(e)}"}
-
-        debug_logger.log(flow_id, "calendar_watcher", "Calendar Watcher", "success", f"Found {len(due_events)} due events")
-
-        # Format the output message
-        messages = [f"🔔 Reminder: {e.get('title', 'Untitled Event')}" for e in due_events]
-        return {"content": "\n".join(messages)}
+                # Expected format: "date": "YYYY-MM-DD", "time": "HH:MM"
+                if "date" not in event or "time" not in event:
+                    continue
+                    
+                event_dt_str = f"{event['date']} {event['time']}"
+                event_dt = datetime.strptime(event_dt_str, "%Y-%m-%d %H:%M")
+                
+                # Check if the event is within the current minute
+                # We compare minutes to avoid second-level precision issues and double firing
+                if event_dt.date() == now.date() and event_dt.hour == now.hour and event_dt.minute == now.minute:
+                    triggered_events.append(event)
+            except ValueError:
+                continue
+        
+        if not triggered_events:
+            # No events found for this minute. Return None to stop the flow.
+            # The Repeater node will trigger this again later.
+            return None
+            
+        # Events found! Construct the output.
+        titles = [e.get("title", "Untitled Event") for e in triggered_events]
+        message = f"📅 Calendar Alert: {', '.join(titles)}"
+        
+        return {
+            "content": message,
+            "events": triggered_events,
+            "event_count": len(triggered_events)
+        }
 
     async def send(self, processed_data: dict) -> dict:
         return processed_data
 
 async def get_executor_class(node_type_id: str):
-    if node_type_id == 'calendar_watcher':
+    if node_type_id == "calendar_watcher":
         return CalendarWatcherExecutor
     return None

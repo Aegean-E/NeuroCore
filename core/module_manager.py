@@ -25,6 +25,9 @@ class ModuleManager:
         for name in os.listdir(self.modules_dir):
             module_path = os.path.join(self.modules_dir, name)
             if os.path.isdir(module_path):
+                # Skip if DISABLED file exists
+                if os.path.exists(os.path.join(module_path, "DISABLED")):
+                    continue
                 meta_path = os.path.join(module_path, "module.json")
                 if os.path.exists(meta_path):
                     with open(meta_path, "r") as f:
