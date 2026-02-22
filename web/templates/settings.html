@@ -6,6 +6,8 @@
     <title>Settings - NeuroCore</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/htmx.org@2.0.2"></script>
+    <!-- Sortable.js for module reordering -->
+    <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.2/Sortable.min.js"></script>
     <style>
         .custom-scrollbar::-webkit-scrollbar { width: 4px; }
         .custom-scrollbar::-webkit-scrollbar-thumb { background: #4a5568; border-radius: 2px; }
@@ -21,15 +23,16 @@
         <aside class="w-64 flex-shrink-0 bg-slate-950/50 rounded-xl border border-slate-800 p-4 flex flex-col gap-2">
             <h3 class="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2 px-2">Configuration</h3>
             <a href="#" onclick="switchTab(event, 'general')" class="settings-nav-link block px-3 py-2 rounded-lg bg-slate-800 text-white text-sm font-medium transition-all">General</a>
+            <a href="#" onclick="switchTab(event, 'modules')" class="settings-nav-link block px-3 py-2 rounded-lg text-slate-400 hover:bg-slate-800 hover:text-white text-sm font-medium transition-all">Modules</a>
         </aside>
 
         <!-- Settings Content -->
         <div class="flex-grow bg-slate-950/50 rounded-xl border border-slate-800 shadow-2xl relative overflow-hidden flex flex-col">
-            <div class="overflow-y-auto custom-scrollbar flex-grow p-8 scroll-smooth relative" id="settings-scroll-container">
-                <form hx-post="/settings/save" hx-swap="none" class="max-w-3xl">
-                    
-                    <!-- General Section -->
-                    <section id="general" class="settings-tab">
+            
+            <!-- General Section -->
+            <div id="general" class="settings-tab flex flex-col h-full relative">
+                <div class="overflow-y-auto custom-scrollbar flex-grow p-8 scroll-smooth pb-24" id="settings-scroll-container">
+                    <form id="general-settings-form" hx-post="/settings/save" hx-swap="none" class="max-w-3xl">
                         <div class="mb-6">
                             <h2 class="text-xl font-bold text-white">General Settings</h2>
                             <p class="text-sm text-slate-500">System-wide configurations.</p>
@@ -55,19 +58,32 @@
                                 <p class="text-xs text-slate-600 mt-2 pl-14">Enables detailed logging of AI Flow execution and shows the Debug tab.</p>
                             </div>
                         </div>
-                    </section>
-
-                    
-                    <!-- Spacer for bottom scrolling -->
-                    <div class="h-20"></div>
-                </form>
+                    </form>
+                </div>
+                <!-- Sticky Footer for General -->
+                <div class="p-6 border-t border-slate-800 bg-slate-950/80 backdrop-blur absolute bottom-0 left-0 right-0 flex justify-end">
+                    <button onclick="document.getElementById('general-settings-form').requestSubmit()" class="bg-blue-600 hover:bg-blue-500 text-white px-8 py-3 rounded-xl text-sm font-semibold transition-all shadow-lg shadow-blue-500/20">
+                        Save Settings
+                    </button>
+                </div>
             </div>
 
-            <!-- Sticky Footer -->
-            <div class="p-6 border-t border-slate-800 bg-slate-950/80 backdrop-blur absolute bottom-0 left-0 right-0 flex justify-end">
-                <button onclick="document.querySelector('form').requestSubmit()" class="bg-blue-600 hover:bg-blue-500 text-white px-8 py-3 rounded-xl text-sm font-semibold transition-all shadow-lg shadow-blue-500/20">
-                    Save Settings
-                </button>
+            <!-- Modules Section -->
+            <div id="modules" class="settings-tab hidden flex h-full">
+                <!-- Module List Sidebar -->
+                <aside class="w-64 flex-shrink-0 border-r border-slate-800 bg-slate-900/30 flex flex-col">
+                     <div id="module-list-container" hx-get="/modules/list" hx-trigger="load, modulesChanged from:body" class="flex-grow overflow-y-auto custom-scrollbar py-3"></div>
+                </aside>
+
+                <!-- Module Details Content -->
+                <section class="flex-grow relative bg-slate-950/30">
+                    <div id="module-content" class="absolute inset-0 p-6 overflow-y-auto custom-scrollbar">
+                        <div class="flex flex-col items-center justify-center h-full text-center space-y-4 opacity-50">
+                            <svg class="w-16 h-16 text-slate-700" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"></path></svg>
+                            <p class="text-slate-500">Select a module to configure</p>
+                        </div>
+                    </div>
+                </section>
             </div>
         </div>
     </main>
