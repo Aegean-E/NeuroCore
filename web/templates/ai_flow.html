@@ -645,7 +645,7 @@
 
             const isConfigurable = configurableNodeTypeIds.has(nodeTypeId);
             const isTriggerable = nodeTypeId === 'trigger_node' || nodeTypeId === 'repeater_node';
-            const isSyncNode = ['reasoning_load', 'memory_recall', 'knowledge_query', 'query_knowledge', 'system_prompt'].includes(nodeTypeId);
+            const isSyncNode = ['reasoning_load', 'reasoning_save', 'memory_recall', 'memory_save', 'knowledge_query', 'query_knowledge', 'system_prompt'].includes(nodeTypeId);
             const iconPath = moduleIcons[moduleId];
 
             const nodeElement = document.createElement('div');
