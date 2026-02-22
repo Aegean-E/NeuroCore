@@ -215,6 +215,53 @@ async def export_tools(name: str = Query(None)):
         headers={"Content-Disposition": f'attachment; filename="{filename}"'}
     )
 
+@router.get("/config/{name}", response_class=HTMLResponse)
+async def get_tool_config(request: Request, name: str):
+    """Returns the configuration form for a tool."""
+    if name == "SendEmail":
+        smtp_server = os.getenv("SMTP_SERVER", "smtp.gmail.com")
+        smtp_port = os.getenv("SMTP_PORT", "587")
+        smtp_email = os.getenv("SMTP_EMAIL", "")
+        smtp_password = os.getenv("SMTP_PASSWORD", "")
+        
+        return templates.TemplateResponse(request, "tool_config_sendemail.html", {
+            "smtp_server": smtp_server,
+            "smtp_port": smtp_port,
+            "smtp_email": smtp_email,
+            "smtp_password": smtp_password
+        })
+    
+    return Response(status_code=404, content="Configuration not available for this tool")
+
+@router.post("/config/{name}", response_class=HTMLResponse)
+async def save_tool_config(request: Request, name: str):
+    """Saves the configuration for a tool."""
+    try:
+        form_data = await request.form()
+        
+        if name == "SendEmail":
+            smtp_server = form_data.get("smtp_server", "smtp.gmail.com")
+            smtp_port = form_data.get("smtp_port", "587")
+            smtp_email = form_data.get("smtp_email", "")
+            smtp_password = form_data.get("smtp_password", "")
+            
+            os.environ["SMTP_SERVER"] = smtp_server
+            os.environ["SMTP_PORT"] = smtp_port
+            os.environ["SMTP_EMAIL"] = smtp_email
+            os.environ["SMTP_PASSWORD"] = smtp_password
+            
+            with open(".env.local", "a") as f:
+                f.write(f"\nSMTP_SERVER={smtp_server}\n")
+                f.write(f"SMTP_PORT={smtp_port}\n")
+                f.write(f"SMTP_EMAIL={smtp_email}\n")
+                f.write(f"SMTP_PASSWORD={smtp_password}\n")
+            
+            return Response(content="<div class='text-center py-8 text-emerald-400 font-semibold'>Configuration saved successfully!</div>", status_code=200)
+        
+        return Response(status_code=404, content="Configuration not available for this tool")
+    except Exception as e:
+        return Response(status_code=400, content=f"<div class='text-center py-8 text-red-500'>Error saving configuration: {str(e)}</div>")
+
 @router.post("/import")
 async def import_tools(request: Request, file: UploadFile = File(...)):
     try:

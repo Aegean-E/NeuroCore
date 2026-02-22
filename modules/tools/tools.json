@@ -210,12 +210,48 @@
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "date": { "type": "string", "description": "The date to check (YYYY-MM-DD). If omitted, returns upcoming events." }
+                        "date": {
+                            "type": "string",
+                            "description": "The date to check (YYYY-MM-DD). If omitted, returns upcoming events."
+                        }
                     },
                     "required": []
                 }
             }
         },
         "enabled": true
+    },
+    "SendEmail": {
+        "definition": {
+            "type": "function",
+            "function": {
+                "name": "SendEmail",
+                "description": "Sends an email to a specified recipient using the configured SMTP server.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "to_email": {
+                            "type": "string",
+                            "description": "The recipient's email address."
+                        },
+                        "subject": {
+                            "type": "string",
+                            "description": "The subject of the email."
+                        },
+                        "body": {
+                            "type": "string",
+                            "description": "The content of the email."
+                        }
+                    },
+                    "required": [
+                        "to_email",
+                        "subject",
+                        "body"
+                    ]
+                }
+            }
+        },
+        "enabled": true,
+        "configurable": true
     }
 }
