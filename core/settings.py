@@ -15,7 +15,8 @@ DEFAULT_SETTINGS = {
     "max_tokens": 2048,
     "debug_mode": True,
     "ui_wide_mode": False,
-    "ui_show_footer": True
+    "ui_show_footer": True,
+    "request_timeout": 60.0
 }
 
 class SettingsManager:

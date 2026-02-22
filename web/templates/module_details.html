@@ -67,6 +67,12 @@
                     <input type="text" name="default_model" value="{{ settings.default_model }}" 
                            class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all">
                 </div>
+
+                <div>
+                    <label class="block text-sm font-medium text-slate-400 mb-2">Request Timeout (Seconds)</label>
+                    <input type="number" name="request_timeout" value="{{ settings.request_timeout }}" min="1"
+                           class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all">
+                </div>
             </div>
             <div class="mt-4 flex justify-end">
                 <button type="submit" class="bg-blue-600 hover:bg-blue-500 text-white px-6 py-2 rounded-lg text-sm font-semibold transition-colors">Save Connection</button>

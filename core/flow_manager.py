@@ -101,6 +101,13 @@ class FlowManager:
             self._save_flows()
             return self.flows[flow_id]
 
+    def import_flows(self, flows_data: dict):
+        """Replaces all flows with the provided dictionary."""
+        with self.lock:
+            self.flows = flows_data
+            self._save_flows()
+            self._ensure_default_active()
+
     def rename_flow(self, flow_id, new_name):
         with self.lock:
             if flow_id in self.flows:

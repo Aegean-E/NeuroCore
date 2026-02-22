@@ -1,6 +1,8 @@
 import json
+import sys
+import platform
 from datetime import datetime
-from fastapi import APIRouter, Request, Form, Depends, HTTPException, Response, BackgroundTasks
+from fastapi import APIRouter, Request, Form, Depends, HTTPException, Response, BackgroundTasks, UploadFile, File
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
@@ -207,9 +209,15 @@ async def delete_flow(request: Request, flow_id: str, settings_man: SettingsMana
 
 @router.get("/settings", response_class=HTMLResponse)
 async def get_settings(request: Request, settings_man: SettingsManager = Depends(get_settings_manager), module_manager: ModuleManager = Depends(get_module_manager)):
+    system_info = {
+        "platform": platform.platform(),
+        "python_version": sys.version.split()[0],
+        "processor": platform.processor() or "Unknown"
+    }
     return templates.TemplateResponse(request, "settings.html", {
         "settings": settings_man.settings, "modules": module_manager.get_all_modules(),
-        "system_time": datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S %Z")
+        "system_time": datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S %Z"),
+        "system_info": system_info
     })
 
 @router.get("/system-time", response_class=HTMLResponse)
@@ -224,6 +232,30 @@ async def get_settings_modules_nav(request: Request, module_manager: ModuleManag
 async def get_footer(request: Request, settings_man: SettingsManager = Depends(get_settings_manager)):
     return templates.TemplateResponse(request, "footer.html", {"settings": settings_man.settings})
 
+@router.get("/settings/export/config")
+async def export_config(settings_man: SettingsManager = Depends(get_settings_manager)):
+    """Downloads the current settings.json file."""
+    return JSONResponse(
+        content=settings_man.settings,
+        headers={"Content-Disposition": 'attachment; filename="neurocore_settings.json"'}
+    )
+
+@router.post("/settings/import/config")
+async def import_config(request: Request, file: UploadFile = File(...), settings_man: SettingsManager = Depends(get_settings_manager)):
+    """Imports settings from a JSON file."""
+    try:
+        content = await file.read()
+        new_settings = json.loads(content)
+        if not isinstance(new_settings, dict):
+             return Response(status_code=400, headers={"HX-Trigger": json.dumps({"showMessage": {"level": "error", "message": "Invalid format: Root must be a dictionary"}})})
+        
+        settings_man.save_settings(new_settings)
+        return Response(status_code=200, headers={"HX-Trigger": json.dumps({"settingsChanged": None, "showMessage": {"level": "success", "message": "Configuration imported successfully"}})})
+    except json.JSONDecodeError:
+        return Response(status_code=400, headers={"HX-Trigger": json.dumps({"showMessage": {"level": "error", "message": "Invalid JSON file"}})})
+    except Exception as e:
+        return Response(status_code=500, headers={"HX-Trigger": json.dumps({"showMessage": {"level": "error", "message": str(e)}})})
+
 @router.get("/settings/export/flows")
 async def export_flows():
     """Downloads the current ai_flows.json file."""
@@ -237,6 +269,30 @@ async def export_flows():
         headers={"Content-Disposition": 'attachment; filename="ai_flows_backup.json"'}
     )
 
+@router.post("/settings/import/flows")
+async def import_flows(request: Request, file: UploadFile = File(...)):
+    """Imports flows from a JSON file."""
+    try:
+        content = await file.read()
+        flows_data = json.loads(content)
+        if not isinstance(flows_data, dict):
+             return Response(status_code=400, headers={"HX-Trigger": json.dumps({"showMessage": {"level": "error", "message": "Invalid format: Root must be a dictionary"}})})
+        
+        flow_manager.import_flows(flows_data)
+        return Response(status_code=200, headers={"HX-Trigger": json.dumps({"showMessage": {"level": "success", "message": "Flows imported successfully"}})})
+    except json.JSONDecodeError:
+        return Response(status_code=400, headers={"HX-Trigger": json.dumps({"showMessage": {"level": "error", "message": "Invalid JSON file"}})})
+    except Exception as e:
+        return Response(status_code=500, headers={"HX-Trigger": json.dumps({"showMessage": {"level": "error", "message": str(e)}})})
+
+@router.post("/settings/reset")
+async def reset_settings(request: Request, settings_man: SettingsManager = Depends(get_settings_manager)):
+    """Resets settings to defaults."""
+    from core.settings import DEFAULT_SETTINGS
+    # Preserve the file path but overwrite content
+    settings_man.save_settings(DEFAULT_SETTINGS)
+    return Response(status_code=200, headers={"HX-Trigger": json.dumps({"settingsChanged": None, "showMessage": {"level": "success", "message": "Settings reset to defaults"}})})
+
 @router.post("/settings/save")
 async def save_settings_route(request: Request, settings_man: SettingsManager = Depends(get_settings_manager)):
     form_data = await request.form()
@@ -247,6 +303,9 @@ async def save_settings_route(request: Request, settings_man: SettingsManager = 
     for field in text_fields:
         if field in form_data:
             updates[field] = form_data[field]
+            
+    if "request_timeout" in form_data:
+        updates["request_timeout"] = float(form_data["request_timeout"])
             
     # Handle debug_mode checkbox (only if the form intended to submit it)
     if "save_debug_mode" in form_data:

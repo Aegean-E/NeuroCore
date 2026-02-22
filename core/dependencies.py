@@ -17,6 +17,7 @@ def get_llm_bridge(settings: SettingsManager = Depends(get_settings_manager)) ->
         api_key=settings.get("llm_api_key"),
         embedding_base_url=settings.get("embedding_api_url"),
         embedding_model=settings.get("embedding_model"),
+        timeout=float(settings.get("request_timeout", 60.0)),
     )
 
 def get_module_manager(request: Request) -> ModuleManager:

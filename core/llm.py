@@ -4,13 +4,14 @@ from core.settings import settings
 
 
 class LLMBridge:
-    def __init__(self, base_url: str, api_key: str = None, embedding_base_url: str = None, embedding_model: str = None, client: httpx.AsyncClient = None):
+    def __init__(self, base_url: str, api_key: str = None, embedding_base_url: str = None, embedding_model: str = None, client: httpx.AsyncClient = None, timeout: float = 60.0):
         # Normalize base_url: strip trailing slashes
         self.base_url = base_url.rstrip("/") if base_url else ""
         self.embedding_base_url = embedding_base_url.rstrip("/") if embedding_base_url else self.base_url
         self.api_key = api_key
         self.embedding_model = embedding_model
         self.client = client
+        self.timeout = timeout
 
     def _get_url(self, path: str, use_embedding_url: bool = False):
         """Constructs a full URL for the given path."""
@@ -47,11 +48,11 @@ class LLMBridge:
         
         try:
             if self.client:
-                response = await self.client.post(url, json=payload, headers=headers, timeout=60.0)
+                response = await self.client.post(url, json=payload, headers=headers, timeout=self.timeout)
                 response.raise_for_status()
                 return response.json()
             else:
-                async with httpx.AsyncClient(timeout=60.0) as client:
+                async with httpx.AsyncClient(timeout=self.timeout) as client:
                     response = await client.post(url, json=payload, headers=headers)
                     response.raise_for_status()
                     return response.json()

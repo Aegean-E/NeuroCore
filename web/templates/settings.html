@@ -42,14 +42,21 @@
                         </div>
                         
                         <div class="space-y-6">
-                            <div>
-                                <label class="block text-sm font-medium text-slate-400 mb-2">System Time</label>
-                                <div class="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-3 text-sm text-slate-300 font-mono" hx-get="/system-time" hx-trigger="every 1s" hx-swap="innerHTML">
-                                    {{ system_time }}
-                                </div>
-                                <p class="text-xs text-slate-600 mt-2">Current server time.</p>
+                            <div class="bg-slate-900 border border-slate-800 rounded-xl p-4">
+                                <div class="text-xs text-slate-500 uppercase font-bold mb-1">System Time</div>
+                                <div class="text-sm text-slate-300 font-mono" hx-get="/system-time" hx-trigger="every 1s" hx-swap="innerHTML">{{ system_time }}</div>
                             </div>
-                            
+                            <div class="grid grid-cols-2 gap-4">
+                                <div class="bg-slate-900 border border-slate-800 rounded-xl p-4">
+                                    <div class="text-xs text-slate-500 uppercase font-bold mb-1">Environment</div>
+                                    <div class="text-sm text-slate-300 font-mono truncate" title="{{ system_info.platform }}">{{ system_info.platform }}</div>
+                                </div>
+                                <div class="bg-slate-900 border border-slate-800 rounded-xl p-4">
+                                    <div class="text-xs text-slate-500 uppercase font-bold mb-1">Python Version</div>
+                                    <div class="text-sm text-slate-300 font-mono">{{ system_info.python_version }}</div>
+                                </div>
+                            </div>
+
                             <div class="border-t border-slate-800 pt-6">
                                 <h3 class="text-lg font-bold text-white mb-4">Interface Preferences</h3>
                                 <div class="space-y-4">
@@ -96,14 +103,53 @@
                     
                     <div class="mt-8 border-t border-slate-800 pt-6">
                         <h3 class="text-lg font-bold text-white mb-4">Data Management</h3>
+                        <div class="bg-slate-900 rounded-xl border border-slate-800 p-4 flex items-center justify-between mb-4">
+                            <div>
+                                <h4 class="font-semibold text-slate-300">Flows Backup</h4>
+                                <p class="text-xs text-slate-500 mt-1">Export your flows to JSON or restore from a backup.</p>
+                            </div>
+                            <div class="flex space-x-2">
+                                <form id="import-flows-form" hx-post="/settings/import/flows" hx-encoding="multipart/form-data" hx-swap="none" class="hidden">
+                                    <input type="file" name="file" accept=".json" onchange="if(confirm('This will overwrite all current flows. Continue?')) this.form.requestSubmit(); this.value=''">
+                                </form>
+                                <button onclick="document.querySelector('#import-flows-form input').click()" class="bg-slate-800 hover:bg-slate-700 text-white px-4 py-2 rounded-lg text-sm font-bold transition-all border border-slate-700">
+                                    Import
+                                </button>
+                                <a href="/settings/export/flows" target="_blank" class="bg-slate-800 hover:bg-slate-700 text-white px-4 py-2 rounded-lg text-sm font-bold transition-all border border-slate-700">
+                                    Export
+                                </a>
+                            </div>
+                        </div>
+
                         <div class="bg-slate-900 rounded-xl border border-slate-800 p-4 flex items-center justify-between">
                             <div>
-                                <h4 class="font-semibold text-slate-300">Backup AI Flows</h4>
-                                <p class="text-xs text-slate-500 mt-1">Download a JSON backup of all your saved flows.</p>
+                                <h4 class="font-semibold text-slate-300">Configuration Backup</h4>
+                                <p class="text-xs text-slate-500 mt-1">Save your API keys and preferences.</p>
                             </div>
-                            <a href="/settings/export/flows" target="_blank" class="bg-slate-800 hover:bg-slate-700 text-white px-4 py-2 rounded-lg text-sm font-bold transition-all border border-slate-700">
-                                Download Backup
-                            </a>
+                            <div class="flex space-x-2">
+                                <form id="import-config-form" hx-post="/settings/import/config" hx-encoding="multipart/form-data" hx-swap="none" class="hidden">
+                                    <input type="file" name="file" accept=".json" onchange="if(confirm('This will overwrite current settings. Continue?')) this.form.requestSubmit(); this.value=''">
+                                </form>
+                                <button onclick="document.querySelector('#import-config-form input').click()" class="bg-slate-800 hover:bg-slate-700 text-white px-4 py-2 rounded-lg text-sm font-bold transition-all border border-slate-700">
+                                    Import
+                                </button>
+                                <a href="/settings/export/config" target="_blank" class="bg-slate-800 hover:bg-slate-700 text-white px-4 py-2 rounded-lg text-sm font-bold transition-all border border-slate-700">
+                                    Export
+                                </a>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="mt-8 border-t border-slate-800 pt-6">
+                        <div class="bg-red-950/20 rounded-xl border border-red-900/30 p-4 flex items-center justify-between">
+                            <div>
+                                <h4 class="font-semibold text-red-400">Factory Reset</h4>
+                                <p class="text-xs text-red-300/70 mt-1">Reset all settings to default values. Data is preserved.</p>
+                            </div>
+                            <button onclick="openResetModal()"
+                                    class="bg-red-900/30 hover:bg-red-900/50 text-red-400 px-4 py-2 rounded-lg text-sm font-bold transition-all border border-red-900/50">
+                                Reset Settings
+                            </button>
                         </div>
                     </div>
                 </div>
@@ -161,7 +207,63 @@
             });
             document.getElementById(tabId).classList.remove('hidden');
         }
+
+        function openResetModal() {
+            const modal = document.getElementById('reset-modal');
+            const backdrop = document.getElementById('reset-modal-backdrop');
+            const panel = document.getElementById('reset-modal-panel');
+
+            modal.classList.remove('hidden');
+            requestAnimationFrame(() => {
+                backdrop.classList.remove('opacity-0');
+                panel.classList.remove('opacity-0', 'scale-95');
+                panel.classList.add('opacity-100', 'scale-100');
+            });
+        }
+
+        function closeResetModal() {
+            const modal = document.getElementById('reset-modal');
+            const backdrop = document.getElementById('reset-modal-backdrop');
+            const panel = document.getElementById('reset-modal-panel');
+
+            backdrop.classList.add('opacity-0');
+            panel.classList.remove('opacity-100', 'scale-100');
+            panel.classList.add('opacity-0', 'scale-95');
+
+            setTimeout(() => {
+                modal.classList.add('hidden');
+            }, 200);
+        }
     </script>
+
+    <!-- Factory Reset Confirmation Modal -->
+    <div id="reset-modal" class="fixed inset-0 z-50 flex items-center justify-center hidden" aria-labelledby="modal-title" role="dialog" aria-modal="true">
+        <div class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm transition-opacity opacity-0" id="reset-modal-backdrop" onclick="closeResetModal()"></div>
+        <div class="relative transform overflow-hidden rounded-2xl bg-slate-900 border border-slate-800 text-left shadow-2xl transition-all scale-95 opacity-0 sm:w-full sm:max-w-md p-6" id="reset-modal-panel">
+            <div class="flex items-start space-x-4">
+                <div class="flex-shrink-0 flex items-center justify-center h-12 w-12 rounded-full bg-red-900/30 text-red-500">
+                    <svg class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
+                    </svg>
+                </div>
+                <div class="flex-grow">
+                    <h3 class="text-lg font-semibold leading-6 text-white" id="modal-title">Factory Reset</h3>
+                    <div class="mt-2">
+                        <p class="text-sm text-slate-400">Are you sure you want to reset all settings to default values? This action cannot be undone.</p>
+                    </div>
+                </div>
+            </div>
+            <div class="mt-6 flex justify-end space-x-3">
+                <button type="button" onclick="closeResetModal()" class="rounded-xl px-4 py-2 text-sm font-semibold text-slate-300 hover:bg-slate-800 transition-colors">Cancel</button>
+                <button hx-post="/settings/reset" 
+                        hx-swap="none"
+                        onclick="closeResetModal()"
+                        class="rounded-xl bg-red-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-red-500 transition-colors">
+                    Reset Settings
+                </button>
+            </div>
+        </div>
+    </div>
 
     <div id="main-footer" hx-get="/footer" hx-trigger="settingsChanged from:body" hx-swap="innerHTML">
         {% include 'footer.html' %}
