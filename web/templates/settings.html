@@ -24,6 +24,11 @@
             <h3 class="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2 px-2">Configuration</h3>
             <a href="#" onclick="switchTab(event, 'general')" class="settings-nav-link block px-3 py-2 rounded-lg bg-slate-800 text-white text-sm font-medium transition-all">General</a>
             <a href="#" onclick="switchTab(event, 'modules')" class="settings-nav-link block px-3 py-2 rounded-lg text-slate-400 hover:bg-slate-800 hover:text-white text-sm font-medium transition-all">Modules</a>
+            {% for module in modules %}
+                {% if module.id == 'tools' and module.enabled %}
+                <a href="#" onclick="switchTab(event, 'tools')" class="settings-nav-link block px-3 py-2 rounded-lg text-slate-400 hover:bg-slate-800 hover:text-white text-sm font-medium transition-all">Tools</a>
+                {% endif %}
+            {% endfor %}
         </aside>
 
         <!-- Settings Content -->
@@ -84,6 +89,15 @@
                         </div>
                     </div>
                 </section>
+            </div>
+
+            <!-- Tools Section -->
+            <div id="tools" class="settings-tab hidden flex flex-col h-full relative">
+                <div class="flex-grow overflow-y-auto custom-scrollbar" hx-get="/tools/gui" hx-trigger="revealed">
+                    <div class="flex items-center justify-center h-full">
+                        <div class="w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+                    </div>
+                </div>
             </div>
         </div>
     </main>
