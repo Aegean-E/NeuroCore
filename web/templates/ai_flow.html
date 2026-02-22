@@ -222,6 +222,46 @@
                     <textarea id="script-code-input" rows="15" class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all custom-scrollbar whitespace-pre" placeholder="# Write your Python code here...&#10;# Available variables: data (input), result (output), json, re&#10;result['processed'] = True" spellcheck="false"></textarea>
                     <p class="text-xs text-slate-500 mt-2">Write valid Python code. Input data is in `data` dict. Assign output to `result` dict.</p>
                 </div>
+                <!-- LLM Node Editor -->
+                <div id="config-llm" class="hidden">
+                    <div class="space-y-4">
+                        <div>
+                            <label class="block text-sm font-medium text-slate-400 mb-2">Model Override</label>
+                            <input type="text" id="llm-model-input" class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" placeholder="Default (from Settings)">
+                            <p class="text-xs text-slate-500 mt-2">Override the system default model for this specific step.</p>
+                        </div>
+                        
+                        <div class="grid grid-cols-2 gap-4">
+                            <div>
+                                <label class="block text-sm font-medium text-slate-400 mb-2">Temperature</label>
+                                <input type="number" id="llm-temperature-input" step="0.1" min="0" max="2" class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" placeholder="Default">
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-slate-400 mb-2">Max Tokens</label>
+                                <input type="number" id="llm-max-tokens-input" step="1" min="1" class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" placeholder="Default">
+                            </div>
+                        </div>
+
+                        <div class="border-t border-slate-800 pt-4">
+                            <label class="block text-sm font-medium text-slate-400 mb-2">Reasoning Effort</label>
+                            <select id="llm-reasoning-effort-input" class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all">
+                                <option value="">None (Default)</option>
+                                <option value="low">Low</option>
+                                <option value="medium">Medium</option>
+                                <option value="high">High</option>
+                            </select>
+                            <p class="text-xs text-slate-500 mt-2">For reasoning models (e.g. o1). Controls the effort spent thinking.</p>
+                        </div>
+                        
+                        <div class="border-t border-slate-800 pt-4">
+                            <label class="flex items-center space-x-3 cursor-pointer">
+                                <input type="checkbox" id="llm-json-mode-input" class="form-checkbox h-5 w-5 text-blue-600 bg-slate-950 border-slate-700 rounded focus:ring-blue-500">
+                                <span class="text-sm font-medium text-slate-400">JSON Mode</span>
+                            </label>
+                            <p class="text-xs text-slate-500 mt-1 pl-8">Forces the model to output valid JSON (requires compatible model).</p>
+                        </div>
+                    </div>
+                </div>
                 <!-- Repeater Node Editor -->
                 <div id="config-repeater" class="hidden">
                     <div class="space-y-4">
@@ -250,6 +290,12 @@
                             <p class="text-xs text-slate-500 mt-2">Maximum number of times to repeat. Set to 0 to loop indefinitely.</p>
                         </div>
                     </div>
+                </div>
+                <!-- Reasoning Load Node Editor -->
+                <div id="config-reasoning-load" class="hidden">
+                    <label class="block text-sm font-medium text-slate-400 mb-2">Last N Reasonings</label>
+                    <input type="number" id="reasoning-load-n-input" min="1" value="5" class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all">
+                    <p class="text-xs text-slate-500 mt-2">Number of recent reasoning steps to retain.</p>
                 </div>
         <!-- Tool Dispatcher Editor -->
         <div id="config-tools" class="hidden">
@@ -331,7 +377,7 @@
         {% for module in modules %}
             {% if module.provides_nodes %}
                 {% for node in module.provides_nodes %}
-                    {% if node.singleton and node.id != 'llm_module' and node.id != 'system_prompt' %}
+                    {% if node.singleton and node.id != 'llm_module' and node.id != 'system_prompt' and node.id != 'telegram_output' %}
                         singletonNodeTypeIds.add('{{ node.id }}');
                     {% endif %}
                 {% endfor %}
@@ -367,9 +413,11 @@
         let activeConfigNodeId = null;
         let selectedConnection = null;
         let selectedNodeId = null;
+        let copiedNodeData = null;
         
         let panX = 0, panY = 0, zoom = 1;
         let isPanning = false;
+        let lastMouseX = 0, lastMouseY = 0;
 
         let isDrawingConnection = false;
         let connectionStart = { node: null, element: null };
@@ -473,6 +521,10 @@
         });
 
         canvas.addEventListener('mousemove', (event) => {
+            const rect = canvas.getBoundingClientRect();
+            lastMouseX = event.clientX - rect.left;
+            lastMouseY = event.clientY - rect.top;
+
             if (isPanning) {
                 panX += event.movementX;
                 panY += event.movementY;
@@ -492,13 +544,50 @@
             const activeEl = document.activeElement;
             const isInputFocused = activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA');
 
-            if ((event.key === 'Delete' || event.key === 'Backspace') && !isInputFocused) {
+            if (isInputFocused) return;
+
+            if (event.key === 'Delete' || event.key === 'Backspace') {
                 if (selectedConnection) {
                     deleteSelectedConnection();
                 }
                 if (selectedNodeId) {
                     deleteNode(selectedNodeId);
                     selectedNodeId = null;
+                }
+            }
+
+            // Copy (Ctrl+C)
+            if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'c') {
+                if (selectedNodeId) {
+                    const node = nodes.find(n => n.id === selectedNodeId);
+                    if (node) {
+                        copiedNodeData = {
+                            moduleId: node.moduleId,
+                            name: node.name,
+                            nodeTypeId: node.nodeTypeId,
+                            config: JSON.parse(JSON.stringify(node.config || {})),
+                            isReverted: node.isReverted
+                        };
+                        showToast('Node copied', 'info');
+                    }
+                }
+            }
+
+            // Paste (Ctrl+V)
+            if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'v') {
+                if (copiedNodeData) {
+                    const x = (lastMouseX - panX) / zoom;
+                    const y = (lastMouseY - panY) / zoom;
+                    createNode(
+                        copiedNodeData.moduleId,
+                        copiedNodeData.name,
+                        copiedNodeData.nodeTypeId,
+                        x,
+                        y,
+                        null,
+                        copiedNodeData.config,
+                        copiedNodeData.isReverted
+                    );
                 }
             }
         });
@@ -826,11 +915,6 @@
             
             // Restore visual state if node was reverted
             if (isReverted && !nodeTypeId.includes('comment')) {
-                const areasContainer = nodeElement.querySelector('.flex.justify-between');
-                if (areasContainer) {
-                    areasContainer.classList.add('flex-row-reverse');
-                }
-                
                 const inputDot = nodeElement.querySelector('.input-dot');
                 const outputDot = nodeElement.querySelector('.output-dot');
                 
@@ -1057,12 +1141,6 @@
                 
                 const nodeElement = document.getElementById(selectedNodeId);
                 if (nodeElement) {
-                    // Toggle the flex-row-reverse to visually flip the layout
-                    const areasContainer = nodeElement.querySelector('.flex.justify-between');
-                    if (areasContainer) {
-                        areasContainer.classList.toggle('flex-row-reverse');
-                    }
-                    
                     const inputArea = nodeElement.querySelector('.input-area');
                     const outputArea = nodeElement.querySelector('.output-area');
                     const inputDot = nodeElement.querySelector('.input-dot');
@@ -1210,8 +1288,10 @@
             document.getElementById('config-delay').classList.add('hidden');
             document.getElementById('config-system-prompt').classList.add('hidden');
             document.getElementById('config-script').classList.add('hidden');
+            document.getElementById('config-llm').classList.add('hidden');
             document.getElementById('config-repeater').classList.add('hidden');
             document.getElementById('config-tools').classList.add('hidden');
+            document.getElementById('config-reasoning-load').classList.add('hidden');
             document.getElementById('config-conditional-router').classList.add('hidden');
 
             if (node.nodeTypeId === 'delay_node') {
@@ -1239,6 +1319,13 @@
             } else if (node.nodeTypeId === 'script_node') {
                 document.getElementById('config-script').classList.remove('hidden');
                 document.getElementById('script-code-input').value = node.config.code || '';
+            } else if (node.nodeTypeId === 'llm_module') {
+                document.getElementById('config-llm').classList.remove('hidden');
+                document.getElementById('llm-model-input').value = node.config.model || '';
+                document.getElementById('llm-temperature-input').value = node.config.temperature || '';
+                document.getElementById('llm-max-tokens-input').value = node.config.max_tokens || '';
+                document.getElementById('llm-reasoning-effort-input').value = node.config.reasoning_effort || '';
+                document.getElementById('llm-json-mode-input').checked = !!node.config.json_mode;
             } else if (node.nodeTypeId === 'repeater_node') {
                 document.getElementById('config-repeater').classList.remove('hidden');
                 
@@ -1252,6 +1339,9 @@
                 document.getElementById('repeater-minutes-input').value = minutes;
                 document.getElementById('repeater-seconds-input').value = seconds.toFixed(1);
                 document.getElementById('repeater-count-input').value = (node.config.max_repeats !== undefined && node.config.max_repeats !== null) ? node.config.max_repeats : 1;
+            } else if (node.nodeTypeId === 'reasoning_load') {
+                document.getElementById('config-reasoning-load').classList.remove('hidden');
+                document.getElementById('reasoning-load-n-input').value = node.config.last_n || 5;
             } else if (node.nodeTypeId === 'tool_dispatcher') {
                 document.getElementById('config-tools').classList.remove('hidden');
                 const checklist = document.getElementById('tools-checklist');
@@ -1329,6 +1419,19 @@
                     console.log('System Prompt Config Saved:', newConfig);
                 } else if (node.nodeTypeId === 'script_node') {
                     newConfig = { code: document.getElementById('script-code-input').value };
+                } else if (node.nodeTypeId === 'llm_module') {
+                    newConfig = {
+                        model: document.getElementById('llm-model-input').value,
+                        temperature: document.getElementById('llm-temperature-input').value ? parseFloat(document.getElementById('llm-temperature-input').value) : null,
+                        max_tokens: document.getElementById('llm-max-tokens-input').value ? parseInt(document.getElementById('llm-max-tokens-input').value) : null,
+                        reasoning_effort: document.getElementById('llm-reasoning-effort-input').value,
+                        json_mode: document.getElementById('llm-json-mode-input').checked
+                    };
+                    if (!newConfig.model) delete newConfig.model;
+                    if (newConfig.temperature === null || isNaN(newConfig.temperature)) delete newConfig.temperature;
+                    if (newConfig.max_tokens === null || isNaN(newConfig.max_tokens)) delete newConfig.max_tokens;
+                    if (!newConfig.reasoning_effort) delete newConfig.reasoning_effort;
+                    if (!newConfig.json_mode) delete newConfig.json_mode;
                 } else if (node.nodeTypeId === 'repeater_node') {
                     const hours = parseInt(document.getElementById('repeater-hours-input').value) || 0;
                     const minutes = parseInt(document.getElementById('repeater-minutes-input').value) || 0;
@@ -1341,6 +1444,9 @@
                         delay: totalDelay, 
                         max_repeats: (isNaN(c) || c < 0) ? 1 : c
                     };
+                } else if (node.nodeTypeId === 'reasoning_load') {
+                    const n = parseInt(document.getElementById('reasoning-load-n-input').value);
+                    newConfig = { last_n: (isNaN(n) || n < 1) ? 5 : n };
                 } else if (node.nodeTypeId === 'tool_dispatcher') {
                     const checkboxes = document.querySelectorAll('#tools-checklist input:checked');
                     const allowed = Array.from(checkboxes).map(cb => cb.value);

@@ -8,6 +8,20 @@
     "order": 2,
     "provides_nodes": [
         {
+            "id": "trigger_node",
+            "name": "Trigger",
+            "description": "Pass-through node to manually trigger or continue a flow.",
+            "singleton": false,
+            "configurable": false
+        },
+        {
+            "id": "reasoning_load",
+            "name": "Reasoning Load",
+            "description": "Loads and filters the last N reasoning steps from the flow context.",
+            "singleton": false,
+            "configurable": true
+        },
+        {
             "id": "delay_node",
             "name": "Delay",
             "description": "Pauses the workflow execution for a configurable duration (in seconds) before passing data to the next node.",

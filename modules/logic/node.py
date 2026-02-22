@@ -139,6 +139,31 @@ class ConditionalRouterExecutor:
     async def send(self, processed_data: dict) -> dict:
         return processed_data
 
+class ReasoningLoadExecutor:
+    async def receive(self, input_data: dict, config: dict = None) -> dict:
+        if input_data is None: return None
+        config = config or {}
+        last_n = int(config.get("last_n", 5))
+        
+        if isinstance(input_data, dict):
+            history = input_data.get("reasoning_history", [])
+            if isinstance(history, list) and len(history) > last_n:
+                result = input_data.copy()
+                result["reasoning_history"] = history[-last_n:]
+                return result
+        return input_data
+
+    async def send(self, processed_data: dict) -> dict:
+        return processed_data
+
+class TriggerExecutor:
+    async def receive(self, input_data: dict, config: dict = None) -> dict:
+        # Pass-through: returns input data exactly as is
+        return input_data
+
+    async def send(self, processed_data: dict) -> dict:
+        return processed_data
+
 async def get_executor_class(node_type_id: str):
     if node_type_id == "delay_node":
         return DelayExecutor
@@ -148,4 +173,8 @@ async def get_executor_class(node_type_id: str):
         return RepeaterExecutor
     if node_type_id == "conditional_router":
         return ConditionalRouterExecutor
+    if node_type_id == "trigger_node":
+        return TriggerExecutor
+    if node_type_id == "reasoning_load":
+        return ReasoningLoadExecutor
     return None
