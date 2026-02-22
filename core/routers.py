@@ -232,11 +232,19 @@ async def make_active_flow_default(request: Request):
     return Response(status_code=400, headers={"HX-Trigger": json.dumps({"showMessage": {"level": "error", "message": "No active flow found"}})})
 
 @router.post("/ai-flow/{flow_id}/run-node/{node_id}")
-async def run_flow_node(flow_id: str, node_id: str, background_tasks: BackgroundTasks):
+async def run_flow_node(flow_id: str, node_id: str, request: Request, background_tasks: BackgroundTasks):
     """Manually triggers a specific node in a flow."""
+    
+    flow_override = None
+    try:
+        if request.headers.get("content-type") == "application/json":
+            flow_override = await request.json()
+    except Exception:
+        pass
+
     async def _run():
         try:
-            runner = FlowRunner(flow_id)
+            runner = FlowRunner(flow_id, flow_override=flow_override)
             # Inject some default data so nodes that expect input don't fail immediately
             payload = {
                 "trigger": True,

@@ -13,9 +13,13 @@ class FlowRunner:
     def clear_cache(cls):
         cls._executor_cache.clear()
 
-    def __init__(self, flow_id: str):
+    def __init__(self, flow_id: str, flow_override: dict = None):
         self.flow_id = flow_id
-        self.flow = flow_manager.get_flow(flow_id)
+        if flow_override:
+            self.flow = flow_override
+        else:
+            self.flow = flow_manager.get_flow(flow_id)
+            
         if not self.flow:
             raise ValueError(f"Flow with id {flow_id} not found.")
         
@@ -241,6 +245,15 @@ class FlowRunner:
                     continue
 
                 output = await executor.send(processed_data)
+                
+                # Automatic Context Propagation:
+                # If input had 'messages' (chat history) and output is a dict that missed it,
+                # preserve it. This ensures chains like System -> LLM -> Router -> Tools -> LLM
+                # maintain the conversation context.
+                if isinstance(node_input, dict) and "messages" in node_input:
+                    if isinstance(output, dict) and "messages" not in output:
+                        output["messages"] = node_input["messages"]
+
                 node_outputs[node_id] = output
 
                 if settings.get("debug_mode"):

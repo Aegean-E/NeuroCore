@@ -800,7 +800,18 @@
                     fireBtn.classList.add('text-emerald-300', 'scale-110');
                     setTimeout(() => fireBtn.classList.remove('text-emerald-300', 'scale-110'), 200);
 
-                    fetch(`/ai-flow/${flowId}/run-node/${nodeId}`, { method: 'POST' })
+                    // Prepare current flow state to ensure unsaved connections work
+                    const payload = {
+                        nodes: nodes,
+                        connections: connections,
+                        bridges: bridges
+                    };
+
+                    fetch(`/ai-flow/${flowId}/run-node/${nodeId}`, { 
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    })
                         .then(r => {
                             if (r.ok) {
                                 const triggerHeader = r.headers.get("HX-Trigger");
