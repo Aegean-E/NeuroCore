@@ -22,14 +22,18 @@ async def lifespan(app: FastAPI):
     if active_flow_id:
         flow = flow_manager.get_flow(active_flow_id)
         if flow:
-            # Find the repeater node to start specifically from it
-            repeater_node = next((n for n in flow.get("nodes", []) if n.get("nodeTypeId") == "repeater_node"), None)
+            # Define node types that should auto-start in the background
+            # This allows multiple independent chains (e.g. Repeater, Cron, Event Watcher) to run simultaneously
+            background_node_types = ["repeater_node"]
             
-            if repeater_node:
-                print(f"[System] Auto-starting flow '{flow.get('name')}' from Repeater node '{repeater_node['id']}'.")
+            # Find all nodes of these types
+            start_nodes = [n for n in flow.get("nodes", []) if n.get("nodeTypeId") in background_node_types]
+            
+            for node in start_nodes:
+                print(f"[System] Auto-starting flow '{flow.get('name')}' from {node['nodeTypeId']} '{node['id']}'.")
                 # Start with _repeat_count=1 to skip Chat Input nodes and prevent ghost replies
                 runner = FlowRunner(active_flow_id)
-                asyncio.create_task(runner.run({"_repeat_count": 1}, start_node_id=repeater_node['id']))
+                asyncio.create_task(runner.run({"_repeat_count": 1}, start_node_id=node['id']))
 
     yield
     # Add shutdown logic here if needed in the future
