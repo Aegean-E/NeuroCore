@@ -205,6 +205,19 @@ async def delete_flow(request: Request, flow_id: str, settings_man: SettingsMana
         "active_flow_id": settings_man.get("active_ai_flow")
     })
 
+@router.post("/ai-flow/{flow_id}/run-node/{node_id}")
+async def run_flow_node(flow_id: str, node_id: str, background_tasks: BackgroundTasks):
+    """Manually triggers a specific node in a flow."""
+    async def _run():
+        try:
+            runner = FlowRunner(flow_id)
+            await runner.run({}, start_node_id=node_id)
+        except Exception as e:
+            print(f"Manual trigger failed: {e}")
+
+    background_tasks.add_task(_run)
+    return Response(status_code=200, headers={"HX-Trigger": json.dumps({"showMessage": {"level": "success", "message": "Node triggered"}})})
+
 # --- Settings ---
 
 @router.get("/settings", response_class=HTMLResponse)

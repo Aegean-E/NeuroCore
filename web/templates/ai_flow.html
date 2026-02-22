@@ -637,6 +637,7 @@
             }
 
             const isConfigurable = configurableNodeTypeIds.has(nodeTypeId);
+            const isTriggerable = nodeTypeId === 'trigger_node' || nodeTypeId === 'repeater_node';
             const iconPath = moduleIcons[moduleId];
 
             const nodeElement = document.createElement('div');
@@ -686,10 +687,16 @@
                                 ` : ''}
                             </div>
                         </div>
-                        ${isConfigurable ? `
-                        <button class="text-slate-400 hover:text-blue-400 transition-colors config-btn" title="Configure Node">
-                            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
-                        </button>` : ''}
+                        <div class="flex space-x-1">
+                            ${isTriggerable ? `
+                            <button class="text-slate-400 hover:text-emerald-400 transition-colors fire-btn" title="Trigger Node">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                            </button>` : ''}
+                            ${isConfigurable ? `
+                            <button class="text-slate-400 hover:text-blue-400 transition-colors config-btn" title="Configure Node">
+                                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
+                            </button>` : ''}
+                        </div>
                     </div>
                     <div class="flex justify-between items-center text-xs text-slate-300">
                         <div class="input-area flex items-center space-x-2 p-1 -m-1 rounded-md hover:bg-slate-700 transition-colors cursor-pointer">
@@ -760,6 +767,35 @@
                 configBtn.onclick = (e) => {
                     e.stopPropagation();
                     openConfigModal(nodeId);
+                };
+            }
+
+            // Fire Button Logic
+            const fireBtn = nodeElement.querySelector('.fire-btn');
+            if (fireBtn) {
+                fireBtn.onclick = (e) => {
+                    e.stopPropagation();
+                    const flowId = document.getElementById('current-flow-id').value;
+                    if (!flowId) {
+                        showToast("Please save the flow before triggering nodes.", "error");
+                        return;
+                    }
+                    
+                    // Visual feedback
+                    fireBtn.classList.add('text-emerald-300', 'scale-110');
+                    setTimeout(() => fireBtn.classList.remove('text-emerald-300', 'scale-110'), 200);
+
+                    fetch(`/ai-flow/${flowId}/run-node/${nodeId}`, { method: 'POST' })
+                        .then(r => {
+                            if (r.ok) {
+                                const triggerHeader = r.headers.get("HX-Trigger");
+                                if (triggerHeader) {
+                                    const data = JSON.parse(triggerHeader);
+                                    if (data.showMessage) showToast(data.showMessage.message, data.showMessage.level);
+                                } else showToast("Node triggered", "success");
+                            } else showToast("Failed to trigger node", "error");
+                        })
+                        .catch(err => showToast("Network error: " + err, "error"));
                 };
             }
 
