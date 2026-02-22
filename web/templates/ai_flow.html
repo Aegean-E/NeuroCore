@@ -124,6 +124,7 @@
                     <input type="text" name="name" placeholder="Enter flow name..." required class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm mb-2 focus:outline-none focus:ring-2 focus:ring-blue-500">
                     <input type="hidden" name="nodes">
                     <input type="hidden" name="connections">
+                    <input type="hidden" name="bridges">
                     <input type="hidden" name="flow_id" id="current-flow-id">
                     <div class="flex space-x-2">
                         <button type="submit" onclick="document.getElementById('current-flow-id').value = ''; populateHiddenFields()" class="flex-grow bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-lg text-sm font-semibold transition-all">
@@ -409,6 +410,7 @@
         // --- State Variables ---
         let nodes = [];
         let connections = [];
+        let bridges = [];
         let nextNodeId = 0;
         let activeConfigNodeId = null;
         let selectedConnection = null;
@@ -421,6 +423,7 @@
 
         let isDrawingConnection = false;
         let connectionStart = { node: null, element: null };
+        let isDrawingBridge = false;
         let activeDrawingLine = null;
 
         const svg = document.getElementById('canvas-svg');
@@ -451,12 +454,15 @@
             if (connectionStart.element) {
                 connectionStart.element.classList.remove('connecting');
             }
+            // Also clear bridge connecting state
+            document.querySelectorAll('.sync-point').forEach(el => el.classList.remove('connecting'));
             if (activeDrawingLine) {
                 activeDrawingLine.remove();
                 activeDrawingLine = null;
             }
             document.onmousemove = null;
             isDrawingConnection = false;
+            isDrawingBridge = false;
             connectionStart = { node: null, element: null };
         }
 
@@ -490,7 +496,7 @@
             const isEmptySpace = event.target === canvas || event.target === svg || event.target.id === 'node-container';
             
             // Clear drawing connection on empty space
-            if (isDrawingConnection && isEmptySpace) {
+            if ((isDrawingConnection || isDrawingBridge) && isEmptySpace) {
                 clearConnectionState();
                 event.preventDefault();
                 return;
@@ -595,6 +601,7 @@
         window.populateHiddenFields = function(event) {
             document.querySelector('#save-flow-form input[name="nodes"]').value = JSON.stringify(nodes);
             document.querySelector('#save-flow-form input[name="connections"]').value = JSON.stringify(connections);
+            document.querySelector('#save-flow-form input[name="bridges"]').value = JSON.stringify(bridges);
         }
 
         window.onDragStart = function(event, moduleId, nodeName, nodeTypeId) {
@@ -638,7 +645,7 @@
 
             const isConfigurable = configurableNodeTypeIds.has(nodeTypeId);
             const isTriggerable = nodeTypeId === 'trigger_node' || nodeTypeId === 'repeater_node';
-            const isSyncNode = ['reasoning_load', 'memory_recall', 'knowledge_query', 'system_prompt'].includes(nodeTypeId);
+            const isSyncNode = ['reasoning_load', 'memory_recall', 'knowledge_query', 'query_knowledge', 'system_prompt'].includes(nodeTypeId);
             const iconPath = moduleIcons[moduleId];
 
             const nodeElement = document.createElement('div');
@@ -705,8 +712,8 @@
                             <span>Input</span>
                         </div>
                         ${isSyncNode ? `
-                        <div class="absolute left-1/2 top-1/2 transform -translate-x-1/2 -translate-y-1/2" title="Sync: Combines data from all connected inputs">
-                             <div class="w-5 h-5 rounded-full bg-slate-900 border border-blue-500/50 flex items-center justify-center text-blue-400 shadow-[0_0_10px_rgba(59,130,246,0.3)] cursor-help">
+                        <div class="absolute left-1/2 top-1/2 transform -translate-x-1/2 -translate-y-1/2 sync-point cursor-pointer" title="Sync: Click to bridge with other sync nodes">
+                             <div class="w-5 h-5 rounded-full bg-slate-900 border border-blue-500/50 flex items-center justify-center text-blue-400 shadow-[0_0_10px_rgba(59,130,246,0.3)] hover:bg-blue-900/50 transition-colors">
                                 <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"></path></svg>
                             </div>
                         </div>
@@ -816,7 +823,7 @@
                  e.stopPropagation();
 
                 // Check for specific interactive elements before starting drag
-                if (e.target.closest('.input-area') || e.target.closest('.output-area') || e.target.closest('.config-btn') || e.target.tagName.toLowerCase() === 'textarea' || e.target.classList.contains('comment-resize-handle')) {
+                if (e.target.closest('.input-area') || e.target.closest('.output-area') || e.target.closest('.sync-point') || e.target.closest('.config-btn') || e.target.tagName.toLowerCase() === 'textarea' || e.target.classList.contains('comment-resize-handle')) {
                     return;
                 }
                 isDragging = true;
@@ -892,6 +899,50 @@
                 onDrop(e);
             });
 
+            // --- Bridge Logic ---
+            const syncPoint = nodeElement.querySelector('.sync-point');
+            if (syncPoint) {
+                syncPoint.onclick = (e) => {
+                    e.stopPropagation();
+                    
+                    if (isDrawingConnection) { clearConnectionState(); return; }
+
+                    if (isDrawingBridge) {
+                        // Complete bridge
+                        if (connectionStart.node.id !== nodeData.id) {
+                            createBridge(connectionStart.node, nodeData);
+                        }
+                        clearConnectionState();
+                    } else {
+                        // Start bridge
+                        isDrawingBridge = true;
+                        connectionStart.node = nodeData;
+                        connectionStart.element = syncPoint;
+                        syncPoint.classList.add('connecting');
+
+                        const canvasRect = canvas.getBoundingClientRect();
+                        const dotRect = syncPoint.getBoundingClientRect();
+                        const startX = (dotRect.left + dotRect.width / 2 - canvasRect.left - panX) / zoom;
+                        const startY = (dotRect.top + dotRect.height / 2 - canvasRect.top - panY) / zoom;
+
+                        activeDrawingLine = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+                        activeDrawingLine.setAttribute('stroke', '#60a5fa'); // blue-400
+                        activeDrawingLine.setAttribute('stroke-width', '2');
+                        activeDrawingLine.setAttribute('fill', 'none');
+                        activeDrawingLine.setAttribute('stroke-dasharray', '2,4');
+                        activeDrawingLine.style.pointerEvents = 'none';
+                        svg.appendChild(activeDrawingLine);
+
+                        document.onmousemove = (move_e) => {
+                            if (!isDrawingBridge) return;
+                            const endX = (move_e.clientX - canvasRect.left - panX) / zoom;
+                            const endY = (move_e.clientY - canvasRect.top - panY) / zoom;
+                            activeDrawingLine.setAttribute('d', `M ${startX} ${startY} L ${endX} ${endY}`);
+                        };
+                    }
+                };
+            }
+
             // --- Connection Logic ---
             const inputArea = nodeElement.querySelector('.input-area');
             const outputArea = nodeElement.querySelector('.output-area');
@@ -906,7 +957,7 @@
                 
                 const startConnectionHandler = (e) => {
                     e.stopPropagation();
-                    if (isDrawingConnection) {
+                    if (isDrawingConnection || isDrawingBridge) {
                         clearConnectionState();
                         return;
                     }
@@ -942,7 +993,7 @@
                 
                 const endConnectionHandler = (e) => {
                     e.stopPropagation();
-                    if (isDrawingConnection) {
+                    if (isDrawingConnection && !isDrawingBridge) {
                         // If reverted, end at output-dot; otherwise at input-dot
                         const endDot = nodeData.isReverted ? outputDot : inputDot;
                         const connectionEnd = { node: nodeData, element: endDot };
@@ -1011,6 +1062,7 @@
                 }
 
                 connections = flowData.connections || [];
+                bridges = flowData.bridges || [];
                 drawConnections();
 
                 centerCanvas();
@@ -1032,6 +1084,7 @@
             }
             nodes = [];
             connections = [];
+            bridges = [];
             selectedConnection = null;
             nodeAndSvgContainer.querySelectorAll('div[id^="node-"]').forEach(el => el.remove());
             drawConnections();
@@ -1057,6 +1110,7 @@
             }
 
             connections = connections.filter(c => c.from !== nodeId && c.to !== nodeId);
+            bridges = bridges.filter(b => b.from !== nodeId && b.to !== nodeId);
             if (selectedConnection && (selectedConnection.from === nodeId || selectedConnection.to === nodeId)) selectedConnection = null;
             drawConnections();
         }
@@ -1617,6 +1671,13 @@
             drawConnections();
         }
 
+        function createBridge(nodeA, nodeB) {
+            // Check duplicates (undirected)
+            if (bridges.some(b => (b.from === nodeA.id && b.to === nodeB.id) || (b.from === nodeB.id && b.to === nodeA.id))) return;
+            bridges.push({ from: nodeA.id, to: nodeB.id });
+            drawConnections();
+        }
+
         window.toggleModuleFunctions = function(moduleId) {
             const functionsDiv = document.getElementById(`functions-${moduleId}`);
             const arrowIcon = document.getElementById(`arrow-${moduleId}`);
@@ -1649,6 +1710,49 @@
         function drawConnections() {
             svg.innerHTML = '';
             const canvasRect = canvas.getBoundingClientRect();
+            
+            // Draw Bridges
+            bridges.forEach(bridge => {
+                const nodeA = document.getElementById(bridge.from);
+                const nodeB = document.getElementById(bridge.to);
+                if (!nodeA || !nodeB) return;
+                
+                const syncA = nodeA.querySelector('.sync-point');
+                const syncB = nodeB.querySelector('.sync-point');
+                if (!syncA || !syncB) return;
+                
+                const rectA = syncA.getBoundingClientRect();
+                const rectB = syncB.getBoundingClientRect();
+                
+                const x1 = (rectA.left + rectA.width/2 - canvasRect.left - panX) / zoom;
+                const y1 = (rectA.top + rectA.height/2 - canvasRect.top - panY) / zoom;
+                const x2 = (rectB.left + rectB.width/2 - canvasRect.left - panX) / zoom;
+                const y2 = (rectB.top + rectB.height/2 - canvasRect.top - panY) / zoom;
+                
+                const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+                path.setAttribute('d', `M ${x1} ${y1} L ${x2} ${y2}`);
+                path.setAttribute('stroke', '#60a5fa'); // blue-400
+                path.setAttribute('stroke-width', '2');
+                path.setAttribute('stroke-dasharray', '4,4');
+                path.setAttribute('fill', 'none');
+                
+                // Hit area for deleting bridges
+                const hitPath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+                hitPath.setAttribute('d', `M ${x1} ${y1} L ${x2} ${y2}`);
+                hitPath.setAttribute('stroke', 'transparent');
+                hitPath.setAttribute('stroke-width', '15');
+                hitPath.setAttribute('fill', 'none');
+                hitPath.style.cursor = 'pointer';
+                hitPath.onclick = (e) => {
+                    e.stopPropagation();
+                    bridges = bridges.filter(b => b !== bridge);
+                    drawConnections();
+                };
+                
+                svg.appendChild(path);
+                svg.appendChild(hitPath);
+            });
+
             connections.forEach(conn => {
                 const fromNodeEl = document.getElementById(conn.from);
                 const toNodeEl = document.getElementById(conn.to);

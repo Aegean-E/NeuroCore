@@ -165,12 +165,12 @@ async def get_flow_data(flow_id: str):
     return flow
 
 @router.post("/ai-flow/save")
-async def save_ai_flow(request: Request, name: str = Form(...), nodes: str = Form(...), connections: str = Form(...), flow_id: str = Form(None)):
+async def save_ai_flow(request: Request, name: str = Form(...), nodes: str = Form(...), connections: str = Form(...), bridges: str = Form("[]"), flow_id: str = Form(None)):
     if not flow_id:
         flow_id = None
     
     try:
-        flow_manager.save_flow(name=name, nodes=json.loads(nodes), connections=json.loads(connections), flow_id=flow_id)
+        flow_manager.save_flow(name=name, nodes=json.loads(nodes), connections=json.loads(connections), bridges=json.loads(bridges), flow_id=flow_id)
     except json.JSONDecodeError:
         return Response(status_code=400, headers={"HX-Trigger": json.dumps({"showMessage": {"level": "error", "message": "Invalid JSON in flow data"}})})
     

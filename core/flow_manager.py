@@ -70,6 +70,7 @@ class FlowManager:
                     {"from": "node-11", "to": "node-7"},
                     {"from": "node-12", "to": "node-11"}
                 ],
+                "bridges": [],
                 "created_at": datetime.now().isoformat()
             }
         }
@@ -86,7 +87,7 @@ class FlowManager:
     def _save_flows(self):
         self._save_flows_to_disk(self.flows)
 
-    def save_flow(self, name, nodes, connections, flow_id=None):
+    def save_flow(self, name, nodes, connections, bridges=None, flow_id=None):
         with self.lock:
             if flow_id is None:
                 flow_id = str(uuid.uuid4())
@@ -96,6 +97,7 @@ class FlowManager:
                 "name": name,
                 "nodes": nodes,
                 "connections": connections,
+                "bridges": bridges or [],
                 "created_at": datetime.now().isoformat()
             }
             self._save_flows()

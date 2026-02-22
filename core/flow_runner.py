@@ -21,7 +21,39 @@ class FlowRunner:
         
         self.nodes = {node['id']: node for node in self.flow['nodes']}
         self.connections = self.flow['connections']
+        self.bridges = self.flow.get('bridges', [])
+        self.bridge_groups = self._build_bridge_groups()
         self.execution_order = self._compute_execution_order()
+
+    def _build_bridge_groups(self):
+        """Identifies groups of bridged nodes."""
+        adj = {node_id: [] for node_id in self.nodes}
+        for b in self.bridges:
+            if b['from'] in adj and b['to'] in adj:
+                adj[b['from']].append(b['to'])
+                adj[b['to']].append(b['from'])
+        
+        groups = {}
+        visited = set()
+        for node_id in self.nodes:
+            if node_id in visited: continue
+            if not adj[node_id]: continue
+            
+            # BFS to find connected component
+            component = []
+            queue = deque([node_id])
+            visited.add(node_id)
+            while queue:
+                curr = queue.popleft()
+                component.append(curr)
+                for neighbor in adj[curr]:
+                    if neighbor not in visited:
+                        visited.add(neighbor)
+                        queue.append(neighbor)
+            
+            for member in component:
+                groups[member] = component
+        return groups
 
     def _compute_execution_order(self):
         """Performs a topological sort (Kahn's algorithm) to find the execution order."""
@@ -29,8 +61,21 @@ class FlowRunner:
         in_degree = {node_id: 0 for node_id in self.nodes}
 
         for conn in self.connections:
-            adj[conn['from']].append(conn['to'])
-            in_degree[conn['to']] += 1
+            source = conn['from']
+            target = conn['to']
+            
+            targets = [target]
+            # If target is bridged, the source effectively feeds the whole bridge group
+            if target in self.bridge_groups:
+                targets = self.bridge_groups[target]
+            
+            for t in targets:
+                # Avoid self-loops if user connected bridged nodes explicitly
+                if t != source:
+                    # Check if edge already exists to avoid double counting
+                    if t not in adj[source]:
+                        adj[source].append(t)
+                        in_degree[t] += 1
 
         queue = deque([node_id for node_id in self.nodes if in_degree[node_id] == 0])
         sorted_order = []
@@ -129,13 +174,24 @@ class FlowRunner:
                 else:
                     node_input = initial_input
             else:
-                # Gather outputs from parents
+                # Gather outputs from parents (including parents of bridged peers)
                 parent_outputs = []
-                for edge in incoming_edges:
-                    p_out = node_outputs.get(edge['from'])
-                    if p_out is not None:
-                        parent_outputs.append(p_out)
                 
+                # Identify all relevant incoming edges
+                relevant_edges = list(incoming_edges)
+                if node_id in self.bridge_groups:
+                    peers = self.bridge_groups[node_id]
+                    for peer_id in peers:
+                        if peer_id != node_id:
+                            peer_edges = [c for c in self.connections if c['to'] == peer_id]
+                            relevant_edges.extend(peer_edges)
+                
+                for edge in relevant_edges:
+                    if edge['from'] in node_outputs:
+                        p_out = node_outputs.get(edge['from'])
+                        if p_out is not None:
+                            parent_outputs.append(p_out)
+
                 if not parent_outputs:
                     # Branch stopped (condition failed upstream) or no data
                     node_outputs[node_id] = None
