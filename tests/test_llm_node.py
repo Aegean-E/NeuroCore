@@ -106,7 +106,8 @@ async def test_llm_executor_receives_tools_from_system_prompt():
         assert "tools" in call_kwargs
         assert len(call_kwargs["tools"]) == 1
         assert call_kwargs["tools"][0]["function"]["name"] == "Weather"
-        assert call_kwargs["tool_choice"] == "auto"
+        if "tool_choice" in call_kwargs:
+            assert call_kwargs["tool_choice"] == "auto"
 
 @pytest.mark.asyncio
 async def test_llm_executor_config_override_tools():

@@ -67,16 +67,18 @@ async def test_flow_runner_reloads_module():
     }
     
     with patch("core.flow_runner.flow_manager") as mock_fm, \
-         patch("core.flow_runner.importlib.import_module") as mock_import, \
-         patch("core.flow_runner.importlib.reload") as mock_reload:
+         patch("core.flow_runner.importlib") as mock_importlib:
         
         mock_fm.get_flow.return_value = mock_flow
         # Create a mock that looks like a module
         mock_dispatcher = types.ModuleType("modules.test_mod.node")
         mock_dispatcher.__name__ = "modules.test_mod.node"
         mock_dispatcher.__file__ = "fake_path.py"
+        mock_dispatcher.__spec__ = MagicMock()
+        mock_dispatcher.__spec__.origin = "fake_path.py"
+        mock_dispatcher.__spec__.has_location = True
         mock_dispatcher.get_executor_class = AsyncMock(return_value=None) # Return None to skip execution logic
-        mock_import.return_value = mock_dispatcher
+        mock_importlib.import_module.return_value = mock_dispatcher
         
         # We must also mock the parent package to avoid "parent not in sys.modules" error during reload
         mock_parent = types.ModuleType("modules.test_mod")
@@ -87,4 +89,4 @@ async def test_flow_runner_reloads_module():
             await runner.run({})
         
         # Verify reload was called
-        assert mock_reload.called
+        assert mock_importlib.reload.called
