@@ -49,19 +49,63 @@
                                 </div>
                                 <p class="text-xs text-slate-600 mt-2">Current server time.</p>
                             </div>
-                            <div>
-                                <label class="flex items-center space-x-3 cursor-pointer">
-                                    <div class="relative inline-flex items-center cursor-pointer">
-                                        <input type="checkbox" name="debug_mode" class="sr-only peer" {% if settings.debug_mode %}checked{% endif %}>
-                                        <div class="w-11 h-6 bg-slate-700 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-500 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+                            
+                            <div class="border-t border-slate-800 pt-6">
+                                <h3 class="text-lg font-bold text-white mb-4">Interface Preferences</h3>
+                                <div class="space-y-4">
+                                    <div>
+                                        <label class="flex items-center space-x-3 cursor-pointer">
+                                            <div class="relative inline-flex items-center cursor-pointer">
+                                                <input type="checkbox" name="ui_wide_mode" class="sr-only peer" {% if settings.ui_wide_mode %}checked{% endif %}>
+                                                <div class="w-11 h-6 bg-slate-700 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-500 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+                                            </div>
+                                            <span class="text-sm font-medium text-slate-400">Wide Layout</span>
+                                        </label>
+                                        <input type="hidden" name="save_ui_wide_mode" value="1">
+                                        <p class="text-xs text-slate-600 mt-2 pl-14">Expands the main content area to fill the screen width.</p>
                                     </div>
-                                    <span class="text-sm font-medium text-slate-400">Enable Debug Mode</span>
-                                </label>
-                                <input type="hidden" name="save_debug_mode" value="1">
-                                <p class="text-xs text-slate-600 mt-2 pl-14">Enables detailed logging of AI Flow execution and shows the Debug tab.</p>
+                                    <div>
+                                        <label class="flex items-center space-x-3 cursor-pointer">
+                                            <div class="relative inline-flex items-center cursor-pointer">
+                                                <input type="checkbox" name="ui_show_footer" class="sr-only peer" {% if settings.ui_show_footer %}checked{% endif %}>
+                                                <div class="w-11 h-6 bg-slate-700 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-500 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+                                            </div>
+                                            <span class="text-sm font-medium text-slate-400">Show Footer</span>
+                                        </label>
+                                        <input type="hidden" name="save_ui_show_footer" value="1">
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="border-t border-slate-800 pt-6">
+                                <h3 class="text-lg font-bold text-white mb-4">System Debugging</h3>
+                                <div>
+                                    <label class="flex items-center space-x-3 cursor-pointer">
+                                        <div class="relative inline-flex items-center cursor-pointer">
+                                            <input type="checkbox" name="debug_mode" class="sr-only peer" {% if settings.debug_mode %}checked{% endif %}>
+                                            <div class="w-11 h-6 bg-slate-700 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-500 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+                                        </div>
+                                        <span class="text-sm font-medium text-slate-400">Enable Debug Mode</span>
+                                    </label>
+                                    <input type="hidden" name="save_debug_mode" value="1">
+                                    <p class="text-xs text-slate-600 mt-2 pl-14">Enables detailed logging of AI Flow execution and shows the Debug tab.</p>
+                                </div>
                             </div>
                         </div>
                     </form>
+                    
+                    <div class="mt-8 border-t border-slate-800 pt-6">
+                        <h3 class="text-lg font-bold text-white mb-4">Data Management</h3>
+                        <div class="bg-slate-900 rounded-xl border border-slate-800 p-4 flex items-center justify-between">
+                            <div>
+                                <h4 class="font-semibold text-slate-300">Backup AI Flows</h4>
+                                <p class="text-xs text-slate-500 mt-1">Download a JSON backup of all your saved flows.</p>
+                            </div>
+                            <a href="/settings/export/flows" target="_blank" class="bg-slate-800 hover:bg-slate-700 text-white px-4 py-2 rounded-lg text-sm font-bold transition-all border border-slate-700">
+                                Download Backup
+                            </a>
+                        </div>
+                    </div>
                 </div>
                 <!-- Sticky Footer for General -->
                 <div class="p-6 border-t border-slate-800 bg-slate-950/80 backdrop-blur absolute bottom-0 left-0 right-0 flex justify-end">
@@ -119,9 +163,9 @@
         }
     </script>
 
-    <footer class="p-2 text-center text-[10px] text-slate-700 font-mono tracking-tighter uppercase">
-        NeuroCore // Core V1.0.0-MODULAR // LLM Ready
-    </footer>
+    <div id="main-footer" hx-get="/footer" hx-trigger="settingsChanged from:body" hx-swap="innerHTML">
+        {% include 'footer.html' %}
+    </div>
 
 </body>
 </html>

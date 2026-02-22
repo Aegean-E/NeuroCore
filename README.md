@@ -24,7 +24,7 @@ Whether you are building a simple chatbot or a complex autonomous agent with lon
 ### 🔌 Modular Architecture
 NeuroCore is built around a powerful, plugin-based architecture.
 *   **Self-Contained Modules**: Each feature (Chat, Memory, Tools, Calendar, Knowledge Base) is an isolated package containing its own backend logic, API routes, and frontend templates.
-*   **Hot-Swapping**: Modules can be enabled, disabled, or updated at runtime without restarting the server.
+*   **Hot-Swapping**: Modules can be enabled, disabled, reordered, or updated at runtime without restarting the server via the **Settings -> Modules** interface.
 *   **Easy Extensibility**: Create new capabilities by simply dropping a folder into the `modules/` directory with a `module.json` definition.
 
 ### 🧠 AI Flow Editor
@@ -39,6 +39,7 @@ A visual, node-based canvas to design and orchestrate complex LLM workflows.
 *   **Flow Management**: Create, save, rename, and switch between multiple AI flows to handle different tasks.
 *   **Annotations**: Add comment nodes to document your logic directly on the canvas.
 *   **Canvas Controls**: Center the view, clear the canvas, or manage connections (Revert direction, Break link) with dedicated controls.
+*   **Available Nodes**: Includes Chat Input/Output, System Prompt, LLM Core, Memory Save/Recall, Telegram Input/Output, Tool Dispatcher, Conditional Router, Calendar Watcher, Repeater, Delay, and Python Scripting.
 
 ### ⚡ Logic & Control Flow
 Advanced nodes for complex orchestration.
@@ -90,7 +91,7 @@ Define and manage custom Python functions (tools) that the LLM can execute.
 </p>
 
 *   **Function Calling**: Full support for OpenAI-compatible function calling.
-*   **Visual Editor**: Create and edit tools directly in the UI with JSON schema validation.
+*   **Visual Editor**: Create and edit tools directly in the **Settings -> Tools** UI with JSON schema validation.
 *   **Hot-Reloading**: Tools are saved as Python files and loaded dynamically.
 *   **Tool Dispatcher**: A dedicated flow node to execute tools requested by the LLM.
 *   **Import/Export**: Share tools easily by importing or exporting them as JSON or Python files.
@@ -103,7 +104,13 @@ Connect your AI flow to Telegram for remote access.
 *   **Command Control**: Manage sessions (`/new_session`, `/delete_session`) directly from the chat.
 
 ### ⚙️ Core Capabilities
-*   **⚙️ Dynamic Configuration**: Manage LLM API endpoints, models, and other parameters through a simple, tabbed settings UI.
+*   **⚙️ Centralized Settings**: A unified **Settings** dashboard to manage all aspects of the application:
+    *   **General**: Configure LLM API endpoints, system time, debug mode, and interface preferences (Wide Mode, Footer).
+    *   **Modules**: Enable, disable, and reorder modules. Access specific module configurations (e.g., Memory thresholds, Telegram tokens) directly from the list.
+    *   **Tools**: A dedicated interface to create, edit, import, and export tools for your AI agents.
+*   **🎨 Interface Customization**: Toggle **Wide Mode** for full-width layouts or show/hide the **Footer** via Settings.
+*   **💾 Data Management**: Backup your AI Flows directly from the browser via Settings.
+*   **🐞 System Debugging**: Enable **Debug Mode** in Settings to reveal a dedicated Debug tab in the navbar, providing real-time logs of AI Flow execution and node events.
 *   **✅ Robust Testing**: A comprehensive test suite using `pytest` to ensure code quality and stability.
 *   **🌐 Universal LLM Support**: Connect to any OpenAI-compatible API, including local servers (LM Studio, Ollama, LocalAI) and remote providers (OpenAI, Anthropic, Groq).
 *   **⚡ High-Performance Backend**: Powered by FastAPI and Uvicorn for asynchronous, non-blocking execution.
@@ -171,7 +178,7 @@ Follow these steps to get NeuroCore up and running on your local machine.
 
 1.  The application uses `settings.json` for configuration. If it doesn't exist, it will be created with default values on the first run.
 2.  Run the application once to generate the file, or create it manually.
-3.  Open `settings.json` and update the `llm_api_url` to point to your running LLM service.
+3.  Open `settings.json` and update the `llm_api_url` to point to your running LLM service. Alternatively, you can configure these settings via the **Settings -> General** tab in the web UI after starting the application.
 
     ```json
     {
@@ -290,7 +297,7 @@ Create a `module.json` file inside your new folder. This file tells NeuroCore ab
 
 NeuroCore includes a powerful **Tool Library** that implements OpenAI-compatible function calling. This allows your AI agents to interact with external APIs, databases, or perform calculations.
 
-1.  **Define**: Create tools in the **Tools** tab using a visual editor. You define the JSON schema for parameters and the Python code to execute.
+1.  **Define**: Create tools in the **Settings -> Tools** tab using a visual editor. You define the JSON schema for parameters and the Python code to execute.
 2.  **Enable**: In your AI Flow, select the **System Prompt** node and enable the specific tools you want the agent to use.
 3.  **Execute**: Add a **Tool Dispatcher** node to your flow. When the LLM decides to call a function, the dispatcher executes your Python code and returns the result to the LLM.
 

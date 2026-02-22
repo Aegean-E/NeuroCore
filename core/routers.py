@@ -1,6 +1,6 @@
 import json
 from datetime import datetime
-from fastapi import APIRouter, Request, Form, Depends, HTTPException, Response
+from fastapi import APIRouter, Request, Form, Depends, HTTPException, Response, BackgroundTasks
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
@@ -220,6 +220,23 @@ async def get_system_time(request: Request):
 async def get_settings_modules_nav(request: Request, module_manager: ModuleManager = Depends(get_module_manager)):
     return templates.TemplateResponse(request, "settings_modules_nav.html", {"modules": module_manager.get_all_modules()})
 
+@router.get("/footer", response_class=HTMLResponse)
+async def get_footer(request: Request, settings_man: SettingsManager = Depends(get_settings_manager)):
+    return templates.TemplateResponse(request, "footer.html", {"settings": settings_man.settings})
+
+@router.get("/settings/export/flows")
+async def export_flows():
+    """Downloads the current ai_flows.json file."""
+    flows = flow_manager.list_flows()
+    # Convert list back to dict format for the file, or just dump the list? 
+    # The FlowManager loads a dict, so let's dump the internal dict structure if possible, 
+    # but flow_manager.flows is available.
+    data = flow_manager.flows
+    return JSONResponse(
+        content=data,
+        headers={"Content-Disposition": 'attachment; filename="ai_flows_backup.json"'}
+    )
+
 @router.post("/settings/save")
 async def save_settings_route(request: Request, settings_man: SettingsManager = Depends(get_settings_manager)):
     form_data = await request.form()
@@ -234,6 +251,12 @@ async def save_settings_route(request: Request, settings_man: SettingsManager = 
     # Handle debug_mode checkbox (only if the form intended to submit it)
     if "save_debug_mode" in form_data:
         updates["debug_mode"] = form_data.get("debug_mode") == "on"
+    
+    if "save_ui_wide_mode" in form_data:
+        updates["ui_wide_mode"] = form_data.get("ui_wide_mode") == "on"
+        
+    if "save_ui_show_footer" in form_data:
+        updates["ui_show_footer"] = form_data.get("ui_show_footer") == "on"
 
     settings_man.save_settings(updates)
     return Response(status_code=200, headers={"HX-Trigger": json.dumps({"settingsChanged": None, "showMessage": {"level": "success", "message": "Settings saved successfully"}})})

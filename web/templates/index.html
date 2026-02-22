@@ -21,7 +21,7 @@
     {% include 'navbar.html' %}
 
     <!-- Main Layout -->
-    <main class="flex-grow container mx-auto flex p-6 {{ 'space-x-6' if not full_width_content else '' }} h-[calc(100vh-80px)] overflow-hidden">
+    <main class="flex-grow {{ 'w-full px-6' if settings.ui_wide_mode else 'container mx-auto' }} flex p-6 {{ 'space-x-6' if not full_width_content else '' }} h-[calc(100vh-80px)] overflow-hidden">
         
         <!-- Sidebar -->
         {% if not full_width_content %}
@@ -128,9 +128,9 @@
     </script>
 
     <!-- Footer -->
-    <footer class="p-2 text-center text-[10px] text-slate-700 font-mono tracking-tighter uppercase">
-        NeuroCore // Core V1.0.0-MODULAR // LLM Ready
-    </footer>
+    <div id="main-footer" hx-get="/footer" hx-trigger="settingsChanged from:body" hx-swap="innerHTML">
+        {% include 'footer.html' %}
+    </div>
 
 </body>
 </html>

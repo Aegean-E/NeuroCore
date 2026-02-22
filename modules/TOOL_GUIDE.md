@@ -10,7 +10,7 @@ A tool consists of two parts:
 
 ## 2. Creating a Tool
 
-Navigate to the **Tools** tab in the NeuroCore dashboard. Click **+ New Tool**.
+Navigate to **Settings** -> **Tools** in the NeuroCore dashboard. Click **+ New Tool**.
 
 ### Fields
 
@@ -106,7 +106,7 @@ The LLM will *request* a tool call, but it cannot execute code itself. The **Too
 You can share tools between NeuroCore instances or back them up using the Import/Export feature.
 
 ### Exporting
-*   Click **Export Tool** in the Tools tab.
+*   Click **Export Tool** in the **Settings -> Tools** tab.
 *   Search for a specific tool to export it individually, or click **Export Entire Library** to download all tools as a single JSON file.
 
 ### Importing

@@ -115,5 +115,5 @@ async def get_executor_class(node_type_id: str):
 
 NeuroCore supports hot-loading.
 1. Create your folder and files.
-2. Go to the **Modules** page in the UI.
-3. Your module should appear. Enable it to load the router.
+2. Go to **Settings** -> **Modules** in the UI.
+3. Your module should appear in the list. Select it and enable it to load the router.
