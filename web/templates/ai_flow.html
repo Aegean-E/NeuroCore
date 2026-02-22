@@ -886,6 +886,12 @@
                 drawConnections();
 
                 centerCanvas();
+
+                // Re-draw connections after layout updates to ensure correct positions
+                requestAnimationFrame(() => {
+                    drawConnections();
+                    setTimeout(drawConnections, 100);
+                });
             } catch (error) {
                 console.error(error);
                 showToast(error.message, 'error');
@@ -1628,6 +1634,13 @@
 
         pollDebugEvents();
     })();
+    </script>
+
+    <script>
+        const activeFlowId = "{{ active_flow_id }}";
+        if (activeFlowId && activeFlowId !== 'None') {
+            window.addEventListener('load', () => loadFlowById(activeFlowId));
+        }
     </script>
 </body>
 </html>
