@@ -212,6 +212,10 @@ async def get_settings(request: Request, settings_man: SettingsManager = Depends
         "system_time": datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S %Z")
     })
 
+@router.get("/settings/modules-nav", response_class=HTMLResponse)
+async def get_settings_modules_nav(request: Request, module_manager: ModuleManager = Depends(get_module_manager)):
+    return templates.TemplateResponse(request, "settings_modules_nav.html", {"modules": module_manager.get_all_modules()})
+
 @router.post("/settings/save")
 async def save_settings_route(request: Request, settings_man: SettingsManager = Depends(get_settings_manager)):
     form_data = await request.form()
