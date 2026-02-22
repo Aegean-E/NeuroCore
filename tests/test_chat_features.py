@@ -11,6 +11,8 @@ from core.llm import LLMBridge
 def client():
     with TestClient(app) as c:
         c.app.state.module_manager.enable_module('chat')
+        c.app.state.module_manager.enable_module('llm_module')
+        c.app.state.module_manager.enable_module('memory')
         yield c
 
 @pytest.fixture(autouse=True)
@@ -31,17 +33,12 @@ def patch_settings_url(monkeypatch):
     monkeypatch.setitem(global_settings.settings, "llm_api_url", "http://localhost:1234/v1")
     monkeypatch.setitem(global_settings.settings, "embedding_api_url", "http://localhost:1234/v1")
     monkeypatch.setitem(global_settings.settings, "default_model", "test-model")
+    monkeypatch.setitem(global_settings.settings, "active_ai_flow", "test-flow")
 
 @pytest.mark.asyncio
 async def test_multimodal_image_upload(client, mock_chat_sessions, httpx_mock, monkeypatch):
     """Test sending an image file results in multimodal content structure."""
     
-    # Mock LLM response (Flow only)
-    httpx_mock.add_response(url="http://localhost:1234/v1/chat/completions", json={"choices": [{"message": {"content": "I see an image."}}]}, method="POST")
-    
-    # Mock the embedding call (Recall only)
-    httpx_mock.add_response(url="http://localhost:1234/v1/embeddings", json={"data": [{"embedding": [0.1] * 1536}]}, method="POST")
-
     # Create session
     session = mock_chat_sessions.create_session("Image Test")
     
@@ -54,8 +51,13 @@ async def test_multimodal_image_upload(client, mock_chat_sessions, httpx_mock, m
     
     # Patch create_task to avoid background tasks hanging or failing silently
     # Also patch _save_background to avoid extra LLM calls that consume mocks
-    with patch("asyncio.create_task", side_effect=lambda coro: asyncio.ensure_future(coro)), \
+    # Patch FlowRunner to return success immediately
+    with patch("modules.chat.router.FlowRunner") as MockRunner, \
+         patch("asyncio.create_task", side_effect=lambda coro: asyncio.ensure_future(coro)), \
          patch("modules.memory.node.MemorySaveExecutor._save_background", new_callable=AsyncMock):
+        
+        MockRunner.return_value.run = AsyncMock(return_value={"content": "I see an image."})
+        
         response = client.post(f"/chat/send?session_id={session['id']}", data={'message': 'Describe this'}, files=files)
         # Give background tasks a moment to run
         await asyncio.sleep(0.1)
@@ -77,18 +79,15 @@ async def test_multimodal_image_upload(client, mock_chat_sessions, httpx_mock, m
 async def test_auto_rename_trigger(client, mock_chat_sessions, httpx_mock):
     """Test that session is renamed after N turns."""
     
-    # Mock LLM responses (Flow then Rename)
-    httpx_mock.add_response(url="http://localhost:1234/v1/chat/completions", json={"choices": [{"message": {"content": "Chat Response"}}]}, method="POST")
+    # Mock LLM responses (Rename only)
     httpx_mock.add_response(url="http://localhost:1234/v1/chat/completions", json={"choices": [{"message": {"content": "New Title"}}]}, method="POST")
-    
-    # Mock the embedding call (Recall only)
-    httpx_mock.add_response(url="http://localhost:1234/v1/embeddings", json={"data": [{"embedding": [0.1] * 1536}]}, method="POST") # Recall
     
     # Setup session
     session = mock_chat_sessions.create_session("Session 2023-01-01")
     
     # Mock config to trigger rename after 1 turn (User+AI = 2 messages)
-    with patch("modules.chat.router.session_manager.get_session") as mock_get_sess:
+    with patch("modules.chat.router.session_manager.get_session") as mock_get_sess, \
+         patch("core.flow_manager.flow_manager.get_flow", return_value={"id": "test-flow", "nodes": [], "connections": []}):
         # Instead, let's just rely on the default config or mock the module manager lookup
         # The default is 3 turns. Let's manually fill history to 5 messages so the next one makes it 6 (3 turns).
         session['history'] = [
@@ -106,19 +105,15 @@ async def test_auto_rename_trigger(client, mock_chat_sessions, httpx_mock):
         # We'll use a spy on the LLMBridge.chat_completion method if possible, 
         # or just check if the session name changed if we can mock the second LLM call.
         
-        # Let's add a second response for the renaming
-        httpx_mock.add_response(
-            url="http://localhost:1234/v1/chat/completions",
-            json={"choices": [{"message": {"content": "New Title"}}]},
-            method="POST"
-        )
-
         app.dependency_overrides[get_llm_bridge] = lambda: LLMBridge(base_url="http://localhost:1234/v1")
         
         # Patch create_task to avoid background tasks hanging
         # Also patch _save_background to avoid extra LLM calls that consume mocks
-        with patch("asyncio.create_task", side_effect=lambda coro: asyncio.ensure_future(coro)), \
+        # Patch FlowRunner to return success immediately so we reach renaming logic
+        with patch("modules.chat.router.FlowRunner") as MockRunner, \
+             patch("asyncio.create_task", side_effect=lambda coro: asyncio.ensure_future(coro)), \
              patch("modules.memory.node.MemorySaveExecutor._save_background", new_callable=AsyncMock):
+            MockRunner.return_value.run = AsyncMock(return_value={"content": "Chat Response"})
             client.post(f"/chat/send?session_id={session['id']}", data={"message": "Trigger"})
             # Give background tasks a moment to run
             await asyncio.sleep(0.1)

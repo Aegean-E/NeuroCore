@@ -1,4 +1,5 @@
 import pytest
+import sys
 import json
 from unittest.mock import MagicMock, patch, AsyncMock
 from fastapi.testclient import TestClient
@@ -71,13 +72,17 @@ async def test_flow_runner_reloads_module():
         
         mock_fm.get_flow.return_value = mock_flow
         # Create a mock that looks like a module
-        mock_dispatcher = MagicMock(spec=types.ModuleType)
+        mock_dispatcher = types.ModuleType("modules.test_mod.node")
         mock_dispatcher.__name__ = "modules.test_mod.node"
         mock_dispatcher.__file__ = "fake_path.py"
         mock_dispatcher.get_executor_class = AsyncMock(return_value=None) # Return None to skip execution logic
         mock_import.return_value = mock_dispatcher
         
-        with patch.dict("sys.modules", {"modules.test_mod.node": mock_dispatcher}):
+        # We must also mock the parent package to avoid "parent not in sys.modules" error during reload
+        mock_parent = types.ModuleType("modules.test_mod")
+        mock_parent.__path__ = [] # Required for importlib to treat it as a package
+        
+        with patch.dict(sys.modules, {"modules.test_mod.node": mock_dispatcher, "modules.test_mod": mock_parent}):
             runner = FlowRunner("test")
             await runner.run({})
         

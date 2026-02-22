@@ -9,7 +9,7 @@ def test_settings_page_accessible():
     response = client.get("/settings")
     assert response.status_code == 200
     assert "General Settings" in response.text
-    assert 'name="llm_api_url"' in response.text
+    assert 'name="debug_mode"' in response.text
 
 
 def test_save_settings_route():

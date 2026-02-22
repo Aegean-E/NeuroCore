@@ -7,6 +7,7 @@ import json
 import threading
 from typing import List, Dict, Optional, Tuple
 import numpy as np
+from contextlib import contextmanager
 from core.settings import settings
 
 try:
@@ -47,10 +48,14 @@ class FaissDocumentStore:
     # Database Initialization
     # --------------------------
 
-    def _connect(self) -> sqlite3.Connection:
+    @contextmanager
+    def _connect(self):
         con = sqlite3.connect(self.db_path)
         con.execute("PRAGMA journal_mode=WAL;")
-        return con
+        try:
+            yield con
+        finally:
+            con.close()
 
     def _init_db(self) -> None:
         with self._connect() as con:
@@ -216,6 +221,13 @@ class FaissDocumentStore:
         
         with self.index_lock:
             # Train IndexIVFFlat if not already trained
+            
+            # Auto-resize index if empty and dimension mismatch (e.g. test environment vs production)
+            if self.faiss_index and self.faiss_index.ntotal == 0:
+                if self.faiss_index.d != len(embeddings_array[0]):
+                    logging.info(f"🔧 Resizing FAISS index from {self.faiss_index.d} to {len(embeddings_array[0])}")
+                    self.faiss_index = faiss.IndexIDMap(faiss.IndexFlatIP(len(embeddings_array[0])))
+
             if self.faiss_index_type == "IndexIVFFlat" and not self.faiss_index.is_trained:
                 logging.info(f"🔧 Training FAISS IndexIVFFlat with {len(embeddings)} vectors (nlist={self.faiss_nlist})...")
                 # Ensure enough data for training

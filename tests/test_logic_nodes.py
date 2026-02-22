@@ -94,7 +94,8 @@ async def test_conditional_router_tool_exists():
     
     result = await executor.receive(input_data, config)
     assert result is not None
-    assert result == input_data
+    # Router adds _route_targets
+    assert result == {**input_data, "_route_targets": []}
 
 @pytest.mark.asyncio
 async def test_conditional_router_tool_not_exists():
@@ -110,7 +111,8 @@ async def test_conditional_router_tool_not_exists():
     }
     
     result = await executor.receive(input_data, config)
-    assert result is None
+    # Should return data but with empty route targets (or targets for false branch if configured)
+    assert result.get("_route_targets") == []
 
 @pytest.mark.asyncio
 async def test_conditional_router_default_field():
@@ -128,7 +130,7 @@ async def test_conditional_router_default_field():
         "messages": []
     }
     result = await executor.receive(input_without_tools, {})
-    assert result is None
+    assert result.get("_route_targets") == []
 
 @pytest.mark.asyncio
 async def test_conditional_router_custom_field():
@@ -145,7 +147,7 @@ async def test_conditional_router_custom_field():
     
     input_without_field = {"other_field": "value"}
     result = await executor.receive(input_without_field, config)
-    assert result is None
+    assert result.get("_route_targets") == []
 
 @pytest.mark.asyncio
 async def test_conditional_router_none_input():

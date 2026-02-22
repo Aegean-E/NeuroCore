@@ -23,8 +23,8 @@ def test_kb_backend_add_search(kb_store):
     """Test adding documents and searching them."""
     # Add document
     chunks = [
-        {"text": "Python is a language", "embedding": np.array([1.0, 0.0], dtype='float32'), "page_number": 1},
-        {"text": "Java is verbose", "embedding": np.array([0.0, 1.0], dtype='float32'), "page_number": 2}
+        {"text": "Python is a language", "embedding": np.array([1.0] + [0.0]*767, dtype='float32'), "page_number": 1},
+        {"text": "Java is verbose", "embedding": np.array([0.0] + [1.0]*767, dtype='float32'), "page_number": 2}
     ]
     
     kb_store.add_document(
@@ -40,7 +40,7 @@ def test_kb_backend_add_search(kb_store):
     assert kb_store.get_total_chunks() == 2
     
     # Search (Exact match for Python)
-    results = kb_store.search([1.0, 0.0], limit=1)
+    results = kb_store.search([1.0] + [0.0]*767, limit=1)
     assert len(results) == 1
     assert results[0]["content"] == "Python is a language"
     assert results[0]["source"] == "test.pdf"
@@ -48,13 +48,13 @@ def test_kb_backend_add_search(kb_store):
 @pytest.mark.asyncio
 async def test_kb_node_execution():
     """Test the KnowledgeQueryExecutor."""
-    executor = KnowledgeQueryExecutor()
-    
-    # Mock LLM embedding
-    executor.llm.get_embedding = AsyncMock(return_value=[0.1, 0.2])
     
     # Mock Backend Search
     with patch("modules.knowledge_base.node.document_store") as mock_store:
+        executor = KnowledgeQueryExecutor()
+        # Mock LLM embedding
+        executor.llm.get_embedding = AsyncMock(return_value=[0.1, 0.2])
+
         mock_store.search.return_value = [
             {"content": "Relevant info", "source": "doc.pdf", "page": 1}
         ]
@@ -122,7 +122,12 @@ def test_kb_router_upload_flow(client):
          patch("builtins.open", new_callable=MagicMock), \
          patch("shutil.copyfileobj"), \
          patch("os.path.getsize", return_value=1024), \
-         patch("json.dump"):
+         patch("json.dump"), \
+         patch("modules.knowledge_base.router.templates.env.get_template") as mock_get_template:
+        
+        mock_tmpl = MagicMock()
+        mock_tmpl.render.return_value = "<div>Progress</div>"
+        mock_get_template.return_value = mock_tmpl
         
         # Mock Processor
         proc_instance = MockProcessor.return_value
@@ -136,7 +141,7 @@ def test_kb_router_upload_flow(client):
         mock_store.compute_file_hash.return_value = "hash123"
         mock_store.document_exists.return_value = False
         
-        files = {"file": ("test.pdf", b"content", "application/pdf")}
+        files = {"files": ("test.pdf", b"content", "application/pdf")}
         response = client.post("/knowledge_base/upload", files=files)
         
         assert response.status_code == 200

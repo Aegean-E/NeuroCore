@@ -69,17 +69,22 @@ def test_backend_optimized_search():
             np.array([[0.9, 0.8]], dtype='float32'), # Scores
             np.array([[3, 2]], dtype='int64')        # Indices (C, B)
         ))
+        store.faiss_index.ntotal = 3
         
         results = store.search([0.5, 0.5], limit=2)
         
         assert len(results) == 2
         # Should be sorted by score
         assert results[0]["content"] == "C"
-        assert results[0]["score"] == 0.9
+        assert results[0]["score"] == pytest.approx(0.9)
         assert results[1]["content"] == "B"
-        assert results[1]["score"] == 0.8
+        assert results[1]["score"] == pytest.approx(0.8)
         
     finally:
+        # Ensure store releases resources
+        if 'store' in locals():
+            store.faiss_index = None
+            del store
         if os.path.exists(db_path): os.remove(db_path)
         if os.path.exists(db_path.replace(".sqlite3", ".faiss")): 
             os.remove(db_path.replace(".sqlite3", ".faiss"))

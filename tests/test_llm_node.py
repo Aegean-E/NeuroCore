@@ -5,9 +5,9 @@ from modules.llm_module.node import LLMExecutor, ConfigLoader
 @pytest.mark.asyncio
 async def test_llm_executor_receive():
     """Test that the executor calls the bridge with correct messages."""
-    executor = LLMExecutor()
     
     with patch("modules.llm_module.node.LLMBridge") as MockBridge:
+        executor = LLMExecutor()
         mock_bridge_instance = MockBridge.return_value
         mock_bridge_instance.chat_completion = AsyncMock(return_value={"choices": [{"message": {"content": "Hello"}}]})
         
@@ -20,9 +20,9 @@ async def test_llm_executor_receive():
 @pytest.mark.asyncio
 async def test_llm_executor_config_override():
     """Test that node configuration overrides input data."""
-    executor = LLMExecutor()
     
     with patch("modules.llm_module.node.LLMBridge") as MockBridge:
+        executor = LLMExecutor()
         mock_bridge_instance = MockBridge.return_value
         mock_bridge_instance.chat_completion = AsyncMock(return_value={})
         
@@ -41,9 +41,9 @@ async def test_llm_executor_module_defaults():
     
     # Mock the ConfigLoader to return specific defaults
     with patch("modules.llm_module.node.ConfigLoader.get_config", return_value={"temperature": 0.9, "max_tokens": 100}):
-        executor = LLMExecutor()
         
         with patch("modules.llm_module.node.LLMBridge") as MockBridge:
+            executor = LLMExecutor()
             mock_bridge_instance = MockBridge.return_value
             mock_bridge_instance.chat_completion = AsyncMock(return_value={})
             
@@ -60,9 +60,9 @@ async def test_llm_executor_input_override():
     """Test that input data overrides module defaults but not node config."""
     
     with patch("modules.llm_module.node.ConfigLoader.get_config", return_value={"temperature": 0.1}):
-        executor = LLMExecutor()
         
         with patch("modules.llm_module.node.LLMBridge") as MockBridge:
+            executor = LLMExecutor()
             mock_bridge_instance = MockBridge.return_value
             mock_bridge_instance.chat_completion = AsyncMock(return_value={})
             
@@ -79,9 +79,9 @@ async def test_llm_executor_input_override():
 @pytest.mark.asyncio
 async def test_llm_executor_receives_tools_from_system_prompt():
     """Test that LLM executor receives and passes tools from system prompt."""
-    executor = LLMExecutor()
     
     with patch("modules.llm_module.node.LLMBridge") as MockBridge:
+        executor = LLMExecutor()
         mock_bridge_instance = MockBridge.return_value
         mock_bridge_instance.chat_completion = AsyncMock(return_value={"choices": [{"message": {"content": "Hello"}}]})
         
@@ -111,9 +111,9 @@ async def test_llm_executor_receives_tools_from_system_prompt():
 @pytest.mark.asyncio
 async def test_llm_executor_config_override_tools():
     """Test that node config can override tools from system prompt."""
-    executor = LLMExecutor()
     
     with patch("modules.llm_module.node.LLMBridge") as MockBridge:
+        executor = LLMExecutor()
         mock_bridge_instance = MockBridge.return_value
         mock_bridge_instance.chat_completion = AsyncMock(return_value={})
         

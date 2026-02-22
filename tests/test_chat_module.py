@@ -2,7 +2,7 @@ import asyncio
 from concurrent.futures import Future
 import pytest
 from fastapi.testclient import TestClient
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock, AsyncMock
 from main import app
 import os
 from core.dependencies import get_llm_bridge
@@ -83,23 +83,20 @@ async def test_chat_send_route(client, httpx_mock, mock_chat_sessions, monkeypat
 
     app.dependency_overrides[get_llm_bridge] = get_test_llm_bridge
 
-    # Mock the LLM call that the chat module makes
-    httpx_mock.add_response(url=f"{test_api_url}/chat/completions", json={"choices": [{"message": {"content": "[]"}}]}, method="POST") # Extraction
-    httpx_mock.add_response(url=f"{test_api_url}/chat/completions", json={"choices": [{"message": {"content": "Mocked AI Response"}}]}, method="POST") # Flow
-    
-    # Mock the embedding call that MemorySaveExecutor might trigger
-    httpx_mock.add_response(url=f"{test_api_url}/embeddings", json={"data": [{"embedding": [0.1] * 1536}]}, method="POST") # Save
-    httpx_mock.add_response(url=f"{test_api_url}/embeddings", json={"data": [{"embedding": [0.1] * 1536}]}, method="POST") # Recall
-
     # Create a session to send a message to
     session = mock_chat_sessions.create_session("Send Test")
     session_id = session['id']
 
-    # Patch create_task to avoid background tasks hanging
-    with patch("asyncio.create_task", side_effect=lambda coro: asyncio.ensure_future(coro)):
-        response = client.post(f"/chat/send?session_id={session_id}", data={"message": "hello"})
-        # Give background tasks a moment to run
-        await asyncio.sleep(0.1)
+    # Patch FlowRunner to return a fixed response, avoiding actual flow execution logic
+    with patch("modules.chat.router.FlowRunner") as MockRunner:
+        runner_instance = MockRunner.return_value
+        runner_instance.run = AsyncMock(return_value={"content": "Mocked AI Response"})
+        
+        # Patch create_task to avoid background tasks hanging
+        with patch("asyncio.create_task", side_effect=lambda coro: asyncio.ensure_future(coro)):
+            response = client.post(f"/chat/send?session_id={session_id}", data={"message": "hello"})
+            # Give background tasks a moment to run
+            await asyncio.sleep(0.1)
 
     # Clean up the dependency override to not affect other tests
     app.dependency_overrides.clear()

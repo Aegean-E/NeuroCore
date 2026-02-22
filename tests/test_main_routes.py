@@ -35,6 +35,7 @@ def client():
     mock_settings_manager = MagicMock(spec=SettingsManager)
     mock_flow_manager = MagicMock(spec=FlowManager)
     mock_module_manager = MagicMock(spec=ModuleManager)
+    mock_settings_manager.settings = {}
 
     # Configure default return values for mocks
     mock_module_manager.get_all_modules.return_value = [TEST_MODULE]

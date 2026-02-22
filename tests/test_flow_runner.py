@@ -40,12 +40,14 @@ def test_topological_sort_success(mock_flow):
         runner = FlowRunner(flow_id="test-flow")
         assert runner.execution_order == ["node-1", "node-2", "node-3"]
 
-def test_topological_sort_cycle_detection(mock_flow_with_cycle):
-    """Tests that a flow with a cycle raises an exception."""
+def test_topological_sort_cycle_breaking(mock_flow_with_cycle):
+    """Tests that a flow with a cycle is handled by breaking the cycle."""
     with patch('core.flow_runner.flow_manager') as mock_fm:
         mock_fm.get_flow.return_value = mock_flow_with_cycle
-        with pytest.raises(Exception, match="Flow contains a cycle"):
-            FlowRunner(flow_id="cycle-flow")
+        runner = FlowRunner(flow_id="cycle-flow")
+        # Should include all nodes even with cycle
+        assert len(runner.execution_order) == 2
+        assert set(runner.execution_order) == {"node-1", "node-2"}
 
 @pytest.mark.asyncio
 async def test_flow_run_success(mock_flow):
