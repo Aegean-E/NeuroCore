@@ -331,11 +331,11 @@
         {% for module in modules %}
             {% if module.provides_nodes %}
                 {% for node in module.provides_nodes %}
-                    {% if node.singleton %}
+                    {% if node.singleton and node.id != 'llm_module' %}
                         singletonNodeTypeIds.add('{{ node.id }}');
                     {% endif %}
                 {% endfor %}
-            {% elif module.get('is_flow_node') and module.singleton %}
+            {% elif module.get('is_flow_node') and module.singleton and module.id != 'llm_module' %}
                 singletonNodeTypeIds.add('{{ module.id }}');
             {% endif %}
         {% endfor %}
