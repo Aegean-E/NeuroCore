@@ -1,4 +1,5 @@
 import json
+import ast
 import sys
 import platform
 from datetime import datetime
@@ -15,6 +16,24 @@ from core.debug import debug_logger
 
 router = APIRouter()
 templates = Jinja2Templates(directory="web/templates")
+
+def format_reasoning_content(content):
+    """Extracts the actual content from a raw LLM response dictionary string."""
+    if isinstance(content, str) and content.strip().startswith("{") and "'choices':" in content:
+        try:
+            # Attempt to parse stringified dict
+            data = ast.literal_eval(content)
+            if isinstance(data, dict):
+                # Check for OpenAI format
+                if "choices" in data and len(data["choices"]) > 0:
+                    message = data["choices"][0].get("message", {})
+                    if "content" in message:
+                        return message["content"]
+        except Exception:
+            pass
+    return content
+
+templates.env.filters["format_reasoning"] = format_reasoning_content
 
 # Centralized definition of config keys that should be hidden from the generic JSON editor
 HIDDEN_CONFIG_KEYS = {
@@ -205,13 +224,26 @@ async def delete_flow(request: Request, flow_id: str, settings_man: SettingsMana
         "active_flow_id": settings_man.get("active_ai_flow")
     })
 
+@router.post("/ai-flow/make-default")
+async def make_active_flow_default(request: Request):
+    """Overwrites the default flow with the currently active flow."""
+    if flow_manager.make_active_flow_default():
+        return Response(status_code=200, headers={"HX-Trigger": json.dumps({"showMessage": {"level": "success", "message": "Active flow saved as Default"}})})
+    return Response(status_code=400, headers={"HX-Trigger": json.dumps({"showMessage": {"level": "error", "message": "No active flow found"}})})
+
 @router.post("/ai-flow/{flow_id}/run-node/{node_id}")
 async def run_flow_node(flow_id: str, node_id: str, background_tasks: BackgroundTasks):
     """Manually triggers a specific node in a flow."""
     async def _run():
         try:
             runner = FlowRunner(flow_id)
-            await runner.run({}, start_node_id=node_id)
+            # Inject some default data so nodes that expect input don't fail immediately
+            payload = {
+                "trigger": True,
+                "timestamp": datetime.now().isoformat(),
+                "manual": True
+            }
+            await runner.run(payload, start_node_id=node_id)
         except Exception as e:
             print(f"Manual trigger failed: {e}")
 

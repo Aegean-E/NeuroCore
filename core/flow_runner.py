@@ -254,6 +254,17 @@ class FlowRunner:
                 # If successful, add downstream nodes to queue if they aren't already pending
                 # This enables loops: A -> B -> A
                 downstream_nodes = [c['to'] for c in self.connections if c['from'] == node_id]
+                
+                # Handle Bridges: Propagate execution to bridged peers
+                if node_id in self.bridge_groups:
+                    for peer_id in self.bridge_groups[node_id]:
+                        if peer_id != node_id:
+                            # Share output with peer so its children can access it
+                            node_outputs[peer_id] = output
+                            # Add peer's children to downstream nodes
+                            peer_downstream = [c['to'] for c in self.connections if c['from'] == peer_id]
+                            downstream_nodes.extend(peer_downstream)
+
                 for child_id in downstream_nodes:
                     # If routing is active, only queue allowed targets
                     if allowed_targets is not None and child_id not in allowed_targets:

@@ -1,3 +1,4 @@
+import ast
 from fastapi import APIRouter, Request, Depends
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
@@ -6,6 +7,24 @@ from .service import service
 
 router = APIRouter()
 templates = Jinja2Templates(directory="web/templates")
+
+def format_reasoning_content(content):
+    """Extracts the actual content from a raw LLM response dictionary string."""
+    if isinstance(content, str) and content.strip().startswith("{") and "'choices':" in content:
+        try:
+            # Attempt to parse stringified dict
+            data = ast.literal_eval(content)
+            if isinstance(data, dict):
+                # Check for OpenAI format
+                if "choices" in data and len(data["choices"]) > 0:
+                    message = data["choices"][0].get("message", {})
+                    if "content" in message:
+                        return message["content"]
+        except Exception:
+            pass
+    return content
+
+templates.env.filters["format_reasoning"] = format_reasoning_content
 
 @router.get("/", response_class=HTMLResponse)
 async def reasoning_page(request: Request, module_manager=Depends(get_module_manager), settings_man=Depends(get_settings_manager)):

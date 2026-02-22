@@ -1,6 +1,7 @@
 import json
 import os
 import uuid
+import copy
 from datetime import datetime
 import threading
 from core.settings import settings
@@ -133,5 +134,24 @@ class FlowManager:
                 self._save_flows()
                 return True
             return False
+
+    def make_active_flow_default(self):
+        """Overwrites the default flow with the currently active flow."""
+        with self.lock:
+            active_id = settings.get("active_ai_flow")
+            if not active_id or active_id not in self.flows:
+                return False
+            
+            # Create a deep copy of the active flow
+            active_flow = copy.deepcopy(self.flows[active_id])
+            
+            default_id = "default-flow-001"
+            active_flow["id"] = default_id
+            active_flow["name"] = "Default Chat Flow"
+            active_flow["created_at"] = datetime.now().isoformat()
+            
+            self.flows[default_id] = active_flow
+            self._save_flows()
+            return True
 
 flow_manager = FlowManager()

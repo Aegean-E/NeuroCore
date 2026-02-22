@@ -121,7 +121,7 @@
                             </div>
                         </div>
 
-                        <div class="bg-slate-900 rounded-xl border border-slate-800 p-4 flex items-center justify-between">
+                        <div class="bg-slate-900 rounded-xl border border-slate-800 p-4 flex items-center justify-between mb-4">
                             <div>
                                 <h4 class="font-semibold text-slate-300">Configuration Backup</h4>
                                 <p class="text-xs text-slate-500 mt-1">Save your API keys and preferences.</p>
@@ -137,6 +137,16 @@
                                     Export
                                 </a>
                             </div>
+                        </div>
+
+                        <div class="bg-slate-900 rounded-xl border border-slate-800 p-4 flex items-center justify-between">
+                            <div>
+                                <h4 class="font-semibold text-slate-300">Default Flow</h4>
+                                <p class="text-xs text-slate-500 mt-1">Overwrite the default flow with the currently active flow.</p>
+                            </div>
+                            <button type="button" hx-post="/ai-flow/make-default" hx-swap="none" class="bg-slate-800 hover:bg-slate-700 text-white px-4 py-2 rounded-lg text-sm font-bold transition-all border border-slate-700">
+                                Set as Default
+                            </button>
                         </div>
                     </div>
 

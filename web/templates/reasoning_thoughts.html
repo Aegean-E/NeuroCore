@@ -12,7 +12,7 @@
             <span class="text-xs font-bold text-blue-400 uppercase tracking-wider bg-blue-900/20 px-2 py-0.5 rounded">{{ thought.source }}</span>
         </div>
     </div>
-    <div class="prose prose-invert prose-sm max-w-none text-slate-300 font-mono whitespace-pre-wrap">{{ thought.content }}</div>
+    <div class="prose prose-invert prose-sm max-w-none text-slate-300 font-mono whitespace-pre-wrap">{{ thought.content | format_reasoning }}</div>
 </div>
 {% endfor %}
 {% endif %}
