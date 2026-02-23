@@ -307,5 +307,31 @@
         },
         "enabled": true,
         "code": "import httpx\n\nquery = args.get('query')\nmode = args.get('mode', 'summary')\n\nif not query:\n    result = \"Error: No query provided.\"\nelse:\n    try:\n        base_url = \"https://en.wikipedia.org/w/api.php\"\n        search_params = {\n            \"action\": \"query\",\n            \"list\": \"search\",\n            \"srsearch\": query,\n            \"format\": \"json\"\n        }\n        \n        resp = httpx.get(base_url, params=search_params, timeout=10.0)\n        search_data = resp.json()\n        \n        search_results = search_data.get(\"query\", {}).get(\"search\", [])\n        \n        if not search_results:\n            result = f\"No Wikipedia articles found for '{query}'.\"\n        else:\n            title = search_results[0][\"title\"]\n            \n            content_params = {\n                \"action\": \"query\",\n                \"prop\": \"extracts\",\n                \"titles\": title,\n                \"explaintext\": 1,\n                \"format\": \"json\",\n                \"redirects\": 1\n            }\n            \n            if mode == 'summary':\n                content_params[\"exintro\"] = 1\n            \n            resp = httpx.get(base_url, params=content_params, timeout=10.0)\n            data = resp.json()\n            \n            pages = data[\"query\"][\"pages\"]\n            page_id = next(iter(pages))\n            \n            if page_id == \"-1\":\n                 result = f\"Error: Page '{title}' not found details.\"\n            else:\n                extract = pages[page_id].get(\"extract\", \"\")\n                if not extract:\n                    result = f\"No content found for '{title}'.\"\n                else:\n                    result = f\"Title: {title}\\n\\n{extract}\"\n\n    except Exception as e:\n        result = f\"Error fetching Wikipedia data: {str(e)}\""
+    },
+    "ArXivSearch": {
+        "definition": {
+            "type": "function",
+            "function": {
+                "name": "ArXivSearch",
+                "description": "Search ArXiv for academic papers and research papers.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "query": {
+                            "type": "string",
+                            "description": "The search query (keywords, topics, paper titles)."
+                        },
+                        "max_results": {
+                            "type": "number",
+                            "description": "Maximum number of results to return (default 5, max 20)."
+                        }
+                    },
+                    "required": [
+                        "query"
+                    ]
+                }
+            }
+        },
+        "enabled": true
     }
 }

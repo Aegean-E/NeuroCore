@@ -473,5 +473,79 @@ class TestWikipediaLookup:
         assert "Error" in result
 
 
+class TestArXivSearch:
+    """Tests for ArXivSearch tool."""
+    
+    @patch('httpx.get')
+    def test_successful_search(self, mock_get):
+        xml_response = '''<?xml version="1.0" encoding="UTF-8"?>
+        <feed xmlns="http://www.w3.org/2005/Atom">
+            <entry>
+                <title>Deep Learning for Natural Language Processing</title>
+                <summary>This is a paper about deep learning.</summary>
+                <published>2024-01-15T00:00:00Z</published>
+                <author><name>John Doe</name></author>
+                <link title="pdf" href="https://arxiv.org/pdf/2401.00001.pdf"/>
+            </entry>
+        </feed>'''
+        
+        mock_response = MagicMock()
+        mock_response.text = xml_response
+        mock_response.raise_for_status = MagicMock()
+        mock_get.return_value = mock_response
+        
+        result = execute_tool("ArXivSearch", {"query": "deep learning"})
+        assert "Deep Learning" in result
+        assert "John Doe" in result
+        assert "arxiv.org/pdf" in result
+    
+    def test_missing_query(self):
+        result = execute_tool("ArXivSearch", {})
+        assert "Error" in result
+        assert "query" in result.lower()
+    
+    @patch('httpx.get')
+    def test_no_results_found(self, mock_get):
+        xml_response = '''<?xml version="1.0" encoding="UTF-8"?>
+        <feed xmlns="http://www.w3.org/2005/Atom">
+        </feed>'''
+        
+        mock_response = MagicMock()
+        mock_response.text = xml_response
+        mock_response.raise_for_status = MagicMock()
+        mock_get.return_value = mock_response
+        
+        result = execute_tool("ArXivSearch", {"query": "xyznonexistent123"})
+        assert "No papers found" in result
+    
+    @patch('httpx.get')
+    def test_custom_max_results(self, mock_get):
+        xml_response = '''<?xml version="1.0" encoding="UTF-8"?>
+        <feed xmlns="http://www.w3.org/2005/Atom">
+            <entry>
+                <title>Test Paper</title>
+                <summary>Summary</summary>
+                <published>2024-01-15T00:00:00Z</published>
+                <author><name>Author</name></author>
+            </entry>
+        </feed>'''
+        
+        mock_response = MagicMock()
+        mock_response.text = xml_response
+        mock_response.raise_for_status = MagicMock()
+        mock_get.return_value = mock_response
+        
+        result = execute_tool("ArXivSearch", {"query": "test", "max_results": 10})
+        assert "Test Paper" in result
+        mock_get.assert_called_once()
+    
+    @patch('httpx.get')
+    def test_api_error(self, mock_get):
+        mock_get.side_effect = Exception("Connection timeout")
+        
+        result = execute_tool("ArXivSearch", {"query": "test"})
+        assert "Error" in result
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
