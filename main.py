@@ -8,6 +8,20 @@ from core.routers import router as core_router
 from core.settings import settings
 from core.flow_manager import flow_manager
 from core.flow_runner import FlowRunner
+from core.debug import debug_logger
+
+def background_task_callback(task, flow_id, node_id):
+    try:
+        app.state.background_tasks.discard(task)
+        task.result() # This will raise exception if task failed
+        if settings.get("debug_mode"):
+             debug_logger.log(flow_id, node_id, "System", "task_finished", {})
+    except asyncio.CancelledError:
+        print(f"[System] Task for flow {flow_id} cancelled")
+    except Exception as e:
+        print(f"[System] Task for flow {flow_id} failed: {e}")
+        if settings.get("debug_mode"):
+             debug_logger.log(flow_id, node_id, "System", "task_failed", {"error": str(e)})
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -34,11 +48,13 @@ async def lifespan(app: FastAPI):
             
             for node in start_nodes:
                 print(f"[System] Auto-starting flow '{flow.get('name')}' from {node['nodeTypeId']} '{node['id']}'.")
+                if settings.get("debug_mode"):
+                    debug_logger.log(active_flow_id, node['id'], node.get('name'), "auto_start", {})
                 # Start with _repeat_count=1 to skip Chat Input nodes and prevent ghost replies
                 runner = FlowRunner(active_flow_id)
                 task = asyncio.create_task(runner.run({"_repeat_count": 1}, start_node_id=node['id']))
                 app.state.background_tasks.add(task)
-                task.add_done_callback(app.state.background_tasks.discard)
+                task.add_done_callback(lambda t, fid=active_flow_id, nid=node['id']: background_task_callback(t, fid, nid))
 
     yield
     # Add shutdown logic here if needed in the future
@@ -63,12 +79,14 @@ async def debug_fire_flow():
             if start_nodes:
                 node = start_nodes[0]
                 print(f"[Debug] Manually firing flow '{flow.get('name')}' from {node['nodeTypeId']} '{node['id']}'.")
+                if settings.get("debug_mode"):
+                    debug_logger.log(active_flow_id, node['id'], node.get('name'), "manual_trigger", {})
                 runner = FlowRunner(active_flow_id)
                 task = asyncio.create_task(runner.run({"_repeat_count": 1}, start_node_id=node['id']))
                 
                 if hasattr(app.state, "background_tasks"):
                     app.state.background_tasks.add(task)
-                    task.add_done_callback(app.state.background_tasks.discard)
+                    task.add_done_callback(lambda t, fid=active_flow_id, nid=node['id']: background_task_callback(t, fid, nid))
                 
                 return {"status": "fired", "node": node['id']}
     return {"status": "failed"}

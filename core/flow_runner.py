@@ -28,6 +28,9 @@ class FlowRunner:
         self.bridges = self.flow.get('bridges', [])
         self.bridge_groups = self._build_bridge_groups()
         self.execution_order = self._compute_execution_order()
+        
+        if settings.get("debug_mode"):
+            print(f"[FlowRunner] Initialized for flow {flow_id}")
 
     def _build_bridge_groups(self):
         """Identifies groups of bridged nodes."""
@@ -130,177 +133,204 @@ class FlowRunner:
 
     async def run(self, initial_input: dict, start_node_id: str = None):
         """Executes the flow in order, passing data between nodes."""
-        node_outputs = {}
+        if settings.get("debug_mode"):
+            debug_logger.log(self.flow_id, "SYSTEM", "FlowRunner", "flow_start", {"start_node": start_node_id})
         
-        # Use a queue for execution to support cycles (re-execution of nodes)
-        if start_node_id:
-            if start_node_id not in self.nodes:
-                raise ValueError(f"Start node {start_node_id} not found in flow.")
+        try:
+            node_outputs = {}
             
-            # Start execution FROM this node (so it runs and triggers its logic)
-            execution_queue = deque([start_node_id])
-        else:
-            execution_queue = deque(self.execution_order)
-        
-        # Track how many times a node has run to prevent infinite loops
-        node_run_counts = {node_id: 0 for node_id in self.nodes}
-        max_loops = settings.get("max_node_loops", 1000)
-        
-        while execution_queue:
-            node_id = execution_queue.popleft()
-            
-            if max_loops > 0 and node_run_counts[node_id] >= max_loops:
-                print(f"Warning: Node {node_id} hit max execution limit ({max_loops}). Stopping branch.")
-                continue
-            
-            node_run_counts[node_id] += 1
-            
-            node_meta = self.nodes[node_id]
-            module_id = node_meta['moduleId']
-            node_type_id = node_meta['nodeTypeId']
-            
-            if settings.get("debug_mode"):
-                debug_logger.log(self.flow_id, node_id, node_meta['name'], "start", {"input": node_input if 'node_input' in locals() else "Pending Input Resolution"})
-
-            # 1. Determine Input Data (DAG Logic)
-            incoming_edges = [c for c in self.connections if c['to'] == node_id]
-            
-            if node_id == start_node_id:
-                # Forced start node receives the initial input directly
-                if isinstance(initial_input, dict):
-                    node_input = initial_input.copy()
-                else:
-                    node_input = initial_input
-            elif not incoming_edges:
-                # Source node: receives global initial input
-                if isinstance(initial_input, dict):
-                    node_input = initial_input.copy()
-                else:
-                    node_input = initial_input
+            # Use a queue for execution to support cycles (re-execution of nodes)
+            if start_node_id:
+                if start_node_id not in self.nodes:
+                    raise ValueError(f"Start node {start_node_id} not found in flow.")
+                
+                # Start execution FROM this node (so it runs and triggers its logic)
+                execution_queue = deque([start_node_id])
             else:
-                # Gather outputs from parents (including parents of bridged peers)
-                parent_outputs = []
+                execution_queue = deque(self.execution_order)
+            
+            # Track how many times a node has run to prevent infinite loops
+            node_run_counts = {node_id: 0 for node_id in self.nodes}
+            max_loops = settings.get("max_node_loops", 1000)
+            
+            while execution_queue:
+                node_id = execution_queue.popleft()
                 
-                # Identify all relevant incoming edges
-                relevant_edges = list(incoming_edges)
-                if node_id in self.bridge_groups:
-                    peers = self.bridge_groups[node_id]
-                    for peer_id in peers:
-                        if peer_id != node_id:
-                            peer_edges = [c for c in self.connections if c['to'] == peer_id]
-                            relevant_edges.extend(peer_edges)
-                
-                for edge in relevant_edges:
-                    if edge['from'] in node_outputs:
-                        p_out = node_outputs.get(edge['from'])
-                        if p_out is not None:
-                            parent_outputs.append(p_out)
-
-                if not parent_outputs:
-                    # Branch stopped (condition failed upstream) or no data
-                    node_outputs[node_id] = None
+                if max_loops > 0 and node_run_counts[node_id] >= max_loops:
+                    print(f"Warning: Node {node_id} hit max execution limit ({max_loops}). Stopping branch.")
                     continue
                 
-                # Merge inputs from multiple parents
-                node_input = {}
-                for po in parent_outputs:
-                    if isinstance(po, dict):
-                        node_input.update(po)
+                node_run_counts[node_id] += 1
+                
+                node_meta = self.nodes[node_id]
+                module_id = node_meta['moduleId']
+                node_type_id = node_meta['nodeTypeId']
+                
+                if settings.get("debug_mode"):
+                    debug_logger.log(self.flow_id, node_id, node_meta['name'], "start", {"input": node_input if 'node_input' in locals() else "Pending Input Resolution"})
+
+                # 1. Determine Input Data (DAG Logic)
+                incoming_edges = [c for c in self.connections if c['to'] == node_id]
+                
+                if node_id == start_node_id:
+                    # Forced start node receives the initial input directly
+                    if isinstance(initial_input, dict):
+                        node_input = initial_input.copy()
                     else:
-                        # Fallback for non-dict outputs
-                        node_input = po
+                        node_input = initial_input
+                elif not incoming_edges:
+                    # Source node: receives global initial input
+                    if isinstance(initial_input, dict):
+                        node_input = initial_input.copy()
+                    else:
+                        node_input = initial_input
+                else:
+                    # Gather outputs from parents (including parents of bridged peers)
+                    parent_outputs = []
+                    
+                    # Identify all relevant incoming edges
+                    relevant_edges = list(incoming_edges)
+                    if node_id in self.bridge_groups:
+                        peers = self.bridge_groups[node_id]
+                        for peer_id in peers:
+                            if peer_id != node_id:
+                                peer_edges = [c for c in self.connections if c['to'] == peer_id]
+                                relevant_edges.extend(peer_edges)
+                    
+                    for edge in relevant_edges:
+                        if edge['from'] in node_outputs:
+                            p_out = node_outputs.get(edge['from'])
+                            if p_out is not None:
+                                parent_outputs.append(p_out)
 
-            if settings.get("debug_mode"):
-                debug_logger.log(self.flow_id, node_id, node_meta['name'], "input_resolved", {"input": node_input})
-
-            try:
-                cache_key = f"{module_id}.{node_type_id}"
-                
-                if cache_key not in self._executor_cache:
-                    # Dynamically import the module's node logic dispatcher
-                    node_dispatcher = importlib.import_module(f"modules.{module_id}.node")
-                    # Only reload if it's a real module (not a mock during testing)
-                    if isinstance(node_dispatcher, types.ModuleType) and node_dispatcher.__name__ in sys.modules:
-                        importlib.reload(node_dispatcher) # Ensure we have the latest code
-                    # Get the specific executor class for this node type
-                    executor_class = await node_dispatcher.get_executor_class(node_type_id)
-                    self._executor_cache[cache_key] = executor_class
-
-                executor_class = self._executor_cache[cache_key]
-                if not executor_class:
-                    # Fallback: Pass through if no executor found (e.g. missing module)
-                    node_outputs[node_id] = node_input
-                    continue
-
-                executor = executor_class()
-                node_config = (node_meta.get('config') or {}).copy()
-                node_config['_flow_id'] = self.flow_id
-                node_config['_node_id'] = node_id
-                
-                processed_data = await executor.receive(node_input, config=node_config)
-                
-                # If receive returns None (e.g. Condition failed), we stop this branch
-                if processed_data is None:
-                    node_outputs[node_id] = None
-                    continue
-
-                output = await executor.send(processed_data)
-                
-                # Automatic Context Propagation:
-                # If input had 'messages' (chat history) and output is a dict that missed it,
-                # preserve it. This ensures chains like System -> LLM -> Router -> Tools -> LLM
-                # maintain the conversation context.
-                if isinstance(node_input, dict) and "messages" in node_input:
-                    if isinstance(output, dict) and "messages" not in output:
-                        output["messages"] = node_input["messages"]
-
-                node_outputs[node_id] = output
+                    if not parent_outputs:
+                        # Branch stopped (condition failed upstream) or no data
+                        node_outputs[node_id] = None
+                        continue
+                    
+                    # Merge inputs from multiple parents
+                    node_input = {}
+                    for po in parent_outputs:
+                        if isinstance(po, dict):
+                            node_input.update(po)
+                        else:
+                            # Fallback for non-dict outputs
+                            node_input = po
 
                 if settings.get("debug_mode"):
-                    debug_logger.log(self.flow_id, node_id, node_meta['name'], "end", {"output": output})
-                
-                # Routing Logic: Check if the node specified specific downstream targets
-                allowed_targets = None
-                if isinstance(output, dict) and "_route_targets" in output:
-                    allowed_targets = output["_route_targets"]
-                
-                # If successful, add downstream nodes to queue if they aren't already pending
-                # This enables loops: A -> B -> A
-                downstream_nodes = [c['to'] for c in self.connections if c['from'] == node_id]
-                
-                # Handle Bridges: Propagate execution to bridged peers
-                if node_id in self.bridge_groups:
-                    for peer_id in self.bridge_groups[node_id]:
-                        if peer_id != node_id:
-                            # Share output with peer so its children can access it
-                            node_outputs[peer_id] = output
-                            # Add peer's children to downstream nodes
-                            peer_downstream = [c['to'] for c in self.connections if c['from'] == peer_id]
-                            downstream_nodes.extend(peer_downstream)
+                    debug_logger.log(self.flow_id, node_id, node_meta['name'], "input_resolved", {"input": node_input})
 
-                for child_id in downstream_nodes:
-                    # If routing is active, only queue allowed targets
-                    if allowed_targets is not None and child_id not in allowed_targets:
+                try:
+                    cache_key = f"{module_id}.{node_type_id}"
+                    
+                    if cache_key not in self._executor_cache:
+                        # Dynamically import the module's node logic dispatcher
+                        node_dispatcher = importlib.import_module(f"modules.{module_id}.node")
+                        # Only reload if it's a real module (not a mock during testing)
+                        if isinstance(node_dispatcher, types.ModuleType) and node_dispatcher.__name__ in sys.modules:
+                            importlib.reload(node_dispatcher) # Ensure we have the latest code
+                        # Get the specific executor class for this node type
+                        executor_class = await node_dispatcher.get_executor_class(node_type_id)
+                        self._executor_cache[cache_key] = executor_class
+
+                    executor_class = self._executor_cache[cache_key]
+                    if not executor_class:
+                        # Fallback: Pass through if no executor found (e.g. missing module)
+                        node_outputs[node_id] = node_input
                         continue
 
-                    if child_id not in execution_queue:
-                        execution_queue.append(child_id)
+                    executor = executor_class()
+                    node_config = (node_meta.get('config') or {}).copy()
+                    node_config['_flow_id'] = self.flow_id
+                    node_config['_node_id'] = node_id
+                    
+                    processed_data = await executor.receive(node_input, config=node_config)
+                    
+                    # If receive returns None (e.g. Condition failed), we stop this branch
+                    if processed_data is None:
+                        if settings.get("debug_mode"):
+                            debug_logger.log(self.flow_id, node_id, node_meta['name'], "branch_stop", {"reason": "Node returned None"})
+                        node_outputs[node_id] = None
+                        continue
 
-            except (ImportError, AttributeError) as e:
-                print(f"Warning: Could not find or use node logic for {module_id}/{node_type_id}. Error: {e}. Passing data through.")
-                node_outputs[node_id] = node_input
-            except Exception as e:
-                error_msg = f"Execution failed at node '{node_meta['name']}': {e}"
-                if settings.get("debug_mode"):
-                    debug_logger.log(self.flow_id, node_id, node_meta['name'], "error", {"error": str(e)})
-                print(f"Error in FlowRunner: {error_msg}")
-                # Return a structured error that the chat UI can display
-                return {"error": error_msg}
+                    output = await executor.send(processed_data)
+                    
+                    # Automatic Context Propagation:
+                    # If input had 'messages' (chat history) and output is a dict that missed it,
+                    # preserve it. This ensures chains like System -> LLM -> Router -> Tools -> LLM
+                    # maintain the conversation context.
+                    if isinstance(node_input, dict) and "messages" in node_input:
+                        if isinstance(output, dict) and "messages" not in output:
+                            output["messages"] = node_input["messages"]
+
+                    node_outputs[node_id] = output
+
+                    if settings.get("debug_mode"):
+                        debug_logger.log(self.flow_id, node_id, node_meta['name'], "end", {"output": output})
+                    
+                    # Routing Logic: Check if the node specified specific downstream targets
+                    allowed_targets = None
+                    if isinstance(output, dict) and "_route_targets" in output:
+                        allowed_targets = output["_route_targets"]
+                        if settings.get("debug_mode"):
+                            debug_logger.log(self.flow_id, node_id, node_meta['name'], "routing", {"targets": allowed_targets})
+                    
+                    # If successful, add downstream nodes to queue if they aren't already pending
+                    # This enables loops: A -> B -> A
+                    downstream_nodes = [c['to'] for c in self.connections if c['from'] == node_id]
+                    
+                    # Handle Bridges: Propagate execution to bridged peers
+                    if node_id in self.bridge_groups:
+                        for peer_id in self.bridge_groups[node_id]:
+                            if peer_id != node_id:
+                                # Share output with peer so its children can access it
+                                node_outputs[peer_id] = output
+                                # Add peer's children to downstream nodes
+                                peer_downstream = [c['to'] for c in self.connections if c['from'] == peer_id]
+                                downstream_nodes.extend(peer_downstream)
+
+                    for child_id in downstream_nodes:
+                        # If routing is active, only queue allowed targets
+                        if allowed_targets is not None and child_id not in allowed_targets:
+                            if settings.get("debug_mode"):
+                                child_name = self.nodes.get(child_id, {}).get('name', child_id)
+                                debug_logger.log(self.flow_id, node_id, node_meta['name'], "routing_skip", {"skipped": child_name})
+                            continue
+
+                        if child_id not in execution_queue:
+                            execution_queue.append(child_id)
+                            if settings.get("debug_mode"):
+                                child_name = self.nodes.get(child_id, {}).get('name', child_id)
+                                debug_logger.log(self.flow_id, node_id, node_meta['name'], "queue_next", {"next": child_name})
+
+                except (ImportError, AttributeError) as e:
+                    print(f"Warning: Could not find or use node logic for {module_id}/{node_type_id}. Error: {e}. Passing data through.")
+                    node_outputs[node_id] = node_input
+                except Exception as e:
+                    error_msg = f"Execution failed at node '{node_meta['name']}': {e}"
+                    if settings.get("debug_mode"):
+                        debug_logger.log(self.flow_id, node_id, node_meta['name'], "error", {"error": str(e)})
+                    print(f"Error in FlowRunner: {error_msg}")
+                    # Return a structured error that the chat UI can display
+                    return {"error": error_msg}
             
-        # Return the output of the last executed node in the list that isn't None
-        for node_id in reversed(self.execution_order):
-            out = node_outputs.get(node_id)
-            if out is not None:
-                return out
+            if settings.get("debug_mode"):
+                debug_logger.log(self.flow_id, "SYSTEM", "FlowRunner", "flow_complete", {})
                 
-        return {}
+            # Return the output of the last executed node in the list that isn't None
+            for node_id in reversed(self.execution_order):
+                out = node_outputs.get(node_id)
+                if out is not None:
+                    return out
+                    
+            return {}
+        except asyncio.CancelledError:
+            if settings.get("debug_mode"):
+                debug_logger.log(self.flow_id, "SYSTEM", "FlowRunner", "flow_cancelled", {})
+            print(f"[FlowRunner] Flow {self.flow_id} cancelled")
+            raise
+        except Exception as e:
+            if settings.get("debug_mode"):
+                debug_logger.log(self.flow_id, "SYSTEM", "FlowRunner", "flow_error", {"error": str(e)})
+            print(f"[FlowRunner] Flow {self.flow_id} failed: {e}")
+            raise

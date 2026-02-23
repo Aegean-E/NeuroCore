@@ -18,6 +18,8 @@ class DebugLogger:
             "details": details
         }
         self.logs.append(entry)
+        # Print to console for immediate feedback
+        print(f"[DEBUG] [{flow_id}] {node_name} ({event_type}): {json.dumps(details, default=str)}")
     
     def get_logs(self):
         return list(self.logs)[::-1]
