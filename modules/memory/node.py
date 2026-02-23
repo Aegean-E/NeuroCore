@@ -80,10 +80,12 @@ class MemoryRecallExecutor:
         except (ValueError, TypeError):
             min_score = 0.0
 
+        source_filter = config.get("source_filter") or None
+
         loop = asyncio.get_running_loop()
         results = await loop.run_in_executor(
             memory_store.executor, 
-            partial(memory_store.search, embedding, limit=limit)
+            partial(memory_store.search, embedding, limit=limit, source_filter=source_filter)
         )
         
         # Filter results by minimum score if configured
@@ -113,7 +115,7 @@ class MemorySaveExecutor:
         self.config = ConfigLoader.get_config()
         self.arbiter = MemoryArbiter(memory_store, config=self.config)
 
-    async def _save_background(self, text: str, subject: str = "User", confidence: float = 1.0, mem_type: str = "FACT"):
+    async def _save_background(self, text: str, subject: str = "User", source: str = "chat", confidence: float = 1.0, mem_type: str = "FACT"):
         """Handles embedding generation and saving in the background."""
         await asyncio.sleep(3)
         try:
@@ -182,6 +184,7 @@ class MemorySaveExecutor:
                         text=fact,
                         confidence=confidence,
                         subject=subject,
+                        source=source,
                         embedding=embedding,
                         mem_type=mem_type
                     )
@@ -195,17 +198,28 @@ class MemorySaveExecutor:
         
         text_to_save = None
         subject = "User"
+        source = "chat"
+
+        # Check config for explicit source override
+        config_source = config.get("source")
+        if config_source:
+            source = config_source
+            subject = "Assistant" if source == "reasoning" else "User"
 
         # 1. Check for direct content (e.g., from Chat Output) -> Assistant Memory
-        if "content" in input_data and "messages" not in input_data:
+        elif "content" in input_data and "messages" not in input_data:
             text_to_save = input_data["content"]
             subject = "Assistant"
+            if not config_source:
+                source = "chat"
         
-        # 2. Check for OpenAI-style response (from LLM Core) -> Assistant Memory
+        # 2. Check for OpenAI-style response (from LLM Core) -> Assistant Reasoning Memory
         elif "choices" in input_data and isinstance(input_data["choices"], list):
             try:
                 text_to_save = input_data["choices"][0]["message"]["content"]
                 subject = "Assistant"
+                if not config_source:
+                    source = "reasoning"
             except (IndexError, KeyError, TypeError):
                 pass
 
@@ -216,6 +230,8 @@ class MemorySaveExecutor:
             if last_user_msg:
                 text_to_save = last_user_msg["content"]
                 subject = "User"
+                if not config_source:
+                    source = "chat"
 
         if isinstance(text_to_save, list):
             # Extract text from multimodal content
@@ -235,7 +251,8 @@ class MemorySaveExecutor:
             # Fire and forget: Don't block the flow for embedding generation
             asyncio.create_task(self._save_background(
                 text_to_save,
-                subject=subject, 
+                subject=subject,
+                source=source,
                 confidence=confidence,
                 mem_type=mem_type
             ))

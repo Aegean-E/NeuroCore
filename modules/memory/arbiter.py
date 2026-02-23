@@ -26,7 +26,7 @@ class MemoryArbiter:
         text: str,
         confidence: float = 1.0,
         subject: str = "User",
-        source: str = "reasoning",
+        source: str = "chat",
         embedding: Optional[List[float]] = None,
         mem_type: str = "FACT"
     ) -> Optional[int]:
@@ -51,9 +51,27 @@ class MemoryArbiter:
         # Check for exact duplicates in DB (backend handles this via identity check usually, 
         # but we can do a quick check here if needed, or rely on backend's return -1)
         
-        # 3. Conflict Detection (Simplified)
-        # In a full implementation, we would check for conflicting memories here.
-        # For now, we rely on the backend's identity hash to prevent exact semantic duplicates.
+        # 3. Semantic Similarity Check - Reject if >90% similar to existing memory
+        if embedding:
+            similarity_threshold = float(self.config.get("similarity_threshold", 0.9))
+            loop = asyncio.get_running_loop()
+            similar_memories = await loop.run_in_executor(
+                self.memory_store.executor,
+                partial(
+                    self.memory_store.find_similar,
+                    embedding=embedding,
+                    threshold=similarity_threshold,
+                    limit=5,
+                    exclude_source=source  # Don't reject based on same source memories
+                )
+            )
+            
+            if similar_memories:
+                top_match = similar_memories[0]
+                print(f"⚠️ [Arbiter] Similar memory found (ID: {top_match['id']}, score: {top_match['score']:.2f}): \"{top_match['text'][:60]}...\"")
+                print(f"   New text: \"{text[:60]}...\"")
+                print(f"   Rejecting due to semantic similarity >{similarity_threshold*100:.0f}%")
+                return None
 
         # 4. Save
         loop = asyncio.get_running_loop()
@@ -65,7 +83,8 @@ class MemoryArbiter:
                 embedding=embedding,
                 confidence=confidence,
                 subject=subject,
-                mem_type=mem_type
+                mem_type=mem_type,
+                source=source
             )
         )
 
@@ -73,7 +92,7 @@ class MemoryArbiter:
             print(f"❌ [Arbiter] Duplicate or rejected by backend.")
             return None
 
-        print(f"✅ [Arbiter] Memory saved (ID: {memory_id})")
+        print(f"✅ [Arbiter] Memory saved (ID: {memory_id}, source: {source})")
         return memory_id
 
     async def consider_batch(self, candidates: List[Dict]) -> List[int]:

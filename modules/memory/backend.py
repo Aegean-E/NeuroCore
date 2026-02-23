@@ -76,16 +76,20 @@ class MemoryStore:
                 created_at INTEGER NOT NULL,
                 embedding TEXT,
                 deleted INTEGER DEFAULT 0,
-                parent_id INTEGER DEFAULT NULL
+                parent_id INTEGER DEFAULT NULL,
+                source TEXT DEFAULT 'chat'
             )
         """)
         con.execute("CREATE INDEX IF NOT EXISTS idx_identity ON memories(identity);")
         con.execute("CREATE INDEX IF NOT EXISTS idx_created_at ON memories(created_at);")
+        con.execute("CREATE INDEX IF NOT EXISTS idx_source ON memories(source);")
         
         # Migration logic
         try: con.execute("ALTER TABLE memories ADD COLUMN subject TEXT DEFAULT 'User'")
         except sqlite3.OperationalError: pass
         try: con.execute("ALTER TABLE memories ADD COLUMN parent_id INTEGER DEFAULT NULL")
+        except sqlite3.OperationalError: pass
+        try: con.execute("ALTER TABLE memories ADD COLUMN source TEXT DEFAULT 'chat'")
         except sqlite3.OperationalError: pass
 
     def _parse_embedding(self, blob) -> Optional[np.ndarray]:
@@ -166,11 +170,12 @@ class MemoryStore:
         text_lower = " ".join(text.lower().strip().split())
         return hashlib.sha256(text_lower.encode("utf-8")).hexdigest()
 
-    def add_entry(self, text: str, embedding: Optional[List[float]] = None, confidence: float = 1.0, subject: str = "User", created_at: int = None, mem_type: str = "MEMORY") -> int:
+    def add_entry(self, text: str, embedding: Optional[List[float]] = None, confidence: float = 1.0, subject: str = "User", created_at: int = None, mem_type: str = "MEMORY", source: str = "chat") -> int:
         identity = self.compute_identity(text)
         timestamp = created_at if created_at is not None else int(time.time())
         
         final_type = mem_type if mem_type else "MEMORY"
+        final_source = source if source else "chat"
         emb_np = np.array(embedding, dtype='float32') if embedding else None
         embedding_blob = emb_np.tobytes() if emb_np is not None else None
 
@@ -182,9 +187,9 @@ class MemoryStore:
                     return -1
 
                 cur = con.execute("""
-                    INSERT INTO memories (identity, type, subject, text, confidence, created_at, embedding)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
-                """, (identity, final_type, subject, text, confidence, timestamp, embedding_blob))
+                    INSERT INTO memories (identity, type, subject, text, confidence, created_at, embedding, source)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """, (identity, final_type, subject, text, confidence, timestamp, embedding_blob, final_source))
                 row_id = cur.lastrowid
 
             if FAISS_AVAILABLE and emb_np is not None and self.faiss_index:
@@ -210,7 +215,7 @@ class MemoryStore:
                     self.faiss_index.remove_ids(np.array([child_id]).astype('int64'))
                     self._save_faiss_index()
 
-    def search(self, query_embedding: List[float], limit: int = 5) -> List[Dict]:
+    def search(self, query_embedding: List[float], limit: int = 5, source_filter: str = None) -> List[Dict]:
         if not query_embedding: return []
         
         q_emb_np = np.array(query_embedding, dtype='float32')
@@ -265,8 +270,15 @@ class MemoryStore:
             top_ids = candidate_ids[:limit]
             
             placeholders = ','.join(['?'] * len(top_ids))
+            query = f"SELECT id, text, created_at FROM memories WHERE id IN ({placeholders}) AND deleted = 0 AND parent_id IS NULL"
+            params = list(top_ids)
+            
+            if source_filter:
+                query += " AND source = ?"
+                params.append(source_filter)
+            
             with self._connect() as con:
-                rows = con.execute(f"SELECT id, text, created_at FROM memories WHERE id IN ({placeholders}) AND deleted = 0 AND parent_id IS NULL", top_ids).fetchall()
+                rows = con.execute(query, params).fetchall()
             
             for r in rows:
                 mid = r[0]
@@ -288,12 +300,16 @@ class MemoryStore:
             rows = con.execute("SELECT id, text, created_at FROM memories WHERE deleted = 0 AND parent_id IS NULL ORDER BY created_at DESC LIMIT ?", (limit,)).fetchall()
         return [{"id": r[0], "text": r[1], "created_at": r[2]} for r in rows]
 
-    def browse(self, limit: int = 50, offset: int = 0, search_text: str = None, filter_date: str = "ALL", mem_type: str = None) -> List[Dict]:
+    def browse(self, limit: int = 50, offset: int = 0, search_text: str = None, filter_date: str = "ALL", mem_type: str = None, source: str = None) -> List[Dict]:
         """
         Retrieves memories with optional filtering for the Memory Browser UI.
         """
-        query = "SELECT id, subject, text, confidence, created_at, parent_id, type FROM memories WHERE deleted = 0 AND parent_id IS NULL"
+        query = "SELECT id, subject, text, confidence, created_at, parent_id, type, source FROM memories WHERE deleted = 0 AND parent_id IS NULL"
         params = []
+        
+        if source:
+            query += " AND source = ?"
+            params.append(source)
         
         if filter_date == "TODAY":
             start_ts = int(datetime.now().replace(hour=0, minute=0, second=0, microsecond=0).timestamp())
@@ -330,10 +346,67 @@ class MemoryStore:
                 "confidence": r[3],
                 "created_at": r[4],
                 "is_consolidated": r[5] is not None,
-                "type": r[6]
+                "type": r[6],
+                "source": r[7] if len(r) > 7 else "chat"
             }
             for r in rows
         ]
+
+    def find_similar(self, embedding: List[float], threshold: float = 0.9, limit: int = 5, exclude_source: str = None) -> List[Dict]:
+        """
+        Find memories with cosine similarity above threshold.
+        Returns list of dicts with id, text, score.
+        """
+        if not embedding:
+            return []
+        
+        q_emb_np = np.array(embedding, dtype='float32')
+        candidate_ids = []
+        candidate_scores = {}
+        
+        use_faiss = FAISS_AVAILABLE and self.faiss_index and self.faiss_index.ntotal > 0
+        
+        if use_faiss:
+            with self.faiss_lock:
+                q_emb_2d = q_emb_np.reshape(1, -1)
+                faiss.normalize_L2(q_emb_2d)
+                # Get more candidates to filter by threshold
+                search_limit = max(limit * 4, 20)
+                scores, indices = self.faiss_index.search(q_emb_2d, search_limit)
+                
+                for i, idx in enumerate(indices[0]):
+                    if idx != -1:
+                        score = float(scores[0][i])
+                        if score >= threshold:
+                            candidate_ids.append(int(idx))
+                            candidate_scores[int(idx)] = score
+        
+        if candidate_ids:
+            placeholders = ','.join(['?'] * len(candidate_ids))
+            query = f"SELECT id, text FROM memories WHERE id IN ({placeholders}) AND deleted = 0 AND parent_id IS NULL"
+            params = list(candidate_ids)
+            
+            if exclude_source:
+                query += " AND source != ?"
+                params.append(exclude_source)
+            
+            with self._connect() as con:
+                rows = con.execute(query, params).fetchall()
+            
+            results = []
+            for r in rows:
+                mid = r[0]
+                if mid in candidate_scores:
+                    results.append({
+                        "id": mid,
+                        "text": r[1],
+                        "score": candidate_scores[mid]
+                    })
+            
+            results.sort(key=lambda x: x['score'], reverse=True)
+            return results[:limit]
+        
+        return []
 
     def delete_entry(self, memory_id: int):
         with self.write_lock:

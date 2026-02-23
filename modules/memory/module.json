@@ -11,6 +11,7 @@
         "recall_min_score": 0.8,
         "save_confidence_threshold": 0.75,
         "save_default_confidence": 1.0,
+        "similarity_threshold": 0.9,
         "consolidation_threshold": 0.92,
         "auto_consolidation_hours": 24,
         "arbiter_model": "",
