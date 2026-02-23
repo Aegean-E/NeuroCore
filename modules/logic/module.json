@@ -38,7 +38,14 @@
         {
             "id": "conditional_router",
             "name": "Conditional Router",
-            "description": "Routes data based on conditional logic (tool existence, field comparison, custom expressions). Returns data if condition is true, blocks flow if false.",
+            "description": "Routes data based on conditional logic. Checks if a specific field (e.g., tool_calls) exists in the data stream. If the condition is met, the flow continues normally. If not, the flow can branch to alternate paths. Configure which nodes to connect for true/false branches.",
+            "singleton": false,
+            "configurable": true
+        },
+        {
+            "id": "schedule_start_node",
+            "name": "Scheduled Start",
+            "description": "Waits until a specific time before allowing the flow to proceed. Use to schedule flow execution at a specific time.",
             "singleton": false,
             "configurable": true
         }

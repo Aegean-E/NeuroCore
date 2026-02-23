@@ -160,8 +160,44 @@ class ConditionalRouterExecutor:
 
 class TriggerExecutor:
     async def receive(self, input_data: dict, config: dict = None) -> dict:
-        # Pass-through: returns input data exactly as is
         return input_data
+
+    async def send(self, processed_data: dict) -> dict:
+        return processed_data
+
+class ScheduleStartExecutor:
+    async def receive(self, input_data: dict, config: dict = None) -> dict:
+        if input_data is None: return None
+        config = config or {}
+        
+        from datetime import datetime
+        
+        schedule_time = config.get("schedule_time", "")
+        schedule_date = config.get("schedule_date", "")
+        
+        if not schedule_time:
+            return input_data
+        
+        try:
+            now = datetime.now()
+            
+            if schedule_date:
+                target_dt = datetime.strptime(f"{schedule_date} {schedule_time}", "%Y-%m-%d %H:%M")
+            else:
+                target_dt = datetime.strptime(f"{now.strftime('%Y-%m-%d')} {schedule_time}", "%Y-%m-%d %H:%M")
+                if target_dt < now:
+                    target_dt = target_dt.replace(day=now.day + 1)
+            
+            wait_seconds = (target_dt - now).total_seconds()
+            
+            if wait_seconds > 0:
+                debug_logger.log(config.get("_flow_id"), "schedule_node", "ScheduleStart", "waiting", f"Waiting until {target_dt}")
+                await asyncio.sleep(wait_seconds)
+            
+            return input_data
+        except Exception as e:
+            print(f"ScheduleStart Error: {e}")
+            return input_data
 
     async def send(self, processed_data: dict) -> dict:
         return processed_data
@@ -177,4 +213,6 @@ async def get_executor_class(node_type_id: str):
         return ConditionalRouterExecutor
     if node_type_id == "trigger_node":
         return TriggerExecutor
+    if node_type_id == "schedule_start_node":
+        return ScheduleStartExecutor
     return None

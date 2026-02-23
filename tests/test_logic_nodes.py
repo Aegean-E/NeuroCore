@@ -1,8 +1,9 @@
 import pytest
 import asyncio
 import time
+from datetime import datetime, timedelta
 from unittest.mock import patch, AsyncMock
-from modules.logic.node import DelayExecutor, ScriptExecutor, RepeaterExecutor, ConditionalRouterExecutor
+from modules.logic.node import DelayExecutor, ScriptExecutor, RepeaterExecutor, ConditionalRouterExecutor, ScheduleStartExecutor
 
 @pytest.mark.asyncio
 async def test_delay_executor_valid():
@@ -154,4 +155,33 @@ async def test_conditional_router_none_input():
     """Test router returns None for None input."""
     executor = ConditionalRouterExecutor()
     result = await executor.receive(None, {})
+    assert result is None
+
+@pytest.mark.asyncio
+async def test_schedule_start_executor_past_date_time():
+    """Test ScheduleStartExecutor proceeds immediately for past date/time."""
+    executor = ScheduleStartExecutor()
+    
+    past_date = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+    
+    result = await executor.receive({"data": "test"}, config={"schedule_date": past_date, "schedule_time": "12:00"})
+    
+    assert result == {"data": "test"}
+
+@pytest.mark.asyncio
+async def test_schedule_start_executor_no_config():
+    """Test ScheduleStartExecutor returns input when no time configured."""
+    executor = ScheduleStartExecutor()
+    
+    result = await executor.receive({"data": "test"}, config={})
+    
+    assert result == {"data": "test"}
+
+@pytest.mark.asyncio
+async def test_schedule_start_executor_none_input():
+    """Test ScheduleStartExecutor returns None for None input."""
+    executor = ScheduleStartExecutor()
+    
+    result = await executor.receive(None, config={"schedule_time": "12:00"})
+    
     assert result is None

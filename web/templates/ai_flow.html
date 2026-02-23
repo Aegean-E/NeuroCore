@@ -292,6 +292,21 @@
                         </div>
                     </div>
                 </div>
+                <!-- Scheduled Start Node Editor -->
+                <div id="config-schedule-start" class="hidden">
+                    <div class="space-y-4">
+                        <div>
+                            <label class="block text-sm font-medium text-slate-400 mb-2">Schedule Date (Optional)</label>
+                            <input type="date" id="schedule-date-input" class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all">
+                            <p class="text-xs text-slate-500 mt-2">Leave empty to schedule for today/tomorrow.</p>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-slate-400 mb-2">Schedule Time</label>
+                            <input type="time" id="schedule-time-input" class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all">
+                            <p class="text-xs text-slate-500 mt-2">The flow will wait until this time before proceeding.</p>
+                        </div>
+                    </div>
+                </div>
                 <!-- Reasoning Load Node Editor -->
                 <div id="config-reasoning-load" class="hidden">
                     <label class="block text-sm font-medium text-slate-400 mb-2">Last N Reasonings</label>
@@ -1402,6 +1417,7 @@
             document.getElementById('config-tools').classList.add('hidden');
             document.getElementById('config-reasoning-load').classList.add('hidden');
             document.getElementById('config-conditional-router').classList.add('hidden');
+            document.getElementById('config-schedule-start').classList.add('hidden');
 
             if (node.nodeTypeId === 'delay_node') {
                 document.getElementById('config-delay').classList.remove('hidden');
@@ -1477,6 +1493,10 @@
                 
                 // Load connected nodes and restore saved selections
                 loadConnectedNodes(node.id);
+            } else if (node.nodeTypeId === 'schedule_start_node') {
+                document.getElementById('config-schedule-start').classList.remove('hidden');
+                document.getElementById('schedule-date-input').value = node.config.schedule_date || '';
+                document.getElementById('schedule-time-input').value = node.config.schedule_time || '';
             } else {
                 document.getElementById('config-default').classList.remove('hidden');
                 document.getElementById('node-config-input').value = JSON.stringify(node.config || {}, null, 4);
@@ -1581,6 +1601,11 @@
                     if (falseBranches.length > 0) {
                         newConfig.false_branches = falseBranches;
                     }
+                } else if (node.nodeTypeId === 'schedule_start_node') {
+                    newConfig = {
+                        schedule_date: document.getElementById('schedule-date-input').value,
+                        schedule_time: document.getElementById('schedule-time-input').value
+                    };
                 } else {
                     newConfig = JSON.parse(document.getElementById('node-config-input').value);
                 }
