@@ -290,12 +290,22 @@ class FlowRunner:
                                 downstream_nodes.extend(peer_downstream)
 
                     for child_id in downstream_nodes:
-                        # If routing is active, only queue allowed targets
-                        if allowed_targets is not None and child_id not in allowed_targets:
-                            if settings.get("debug_mode"):
-                                child_name = self.nodes.get(child_id, {}).get('name', child_id)
-                                debug_logger.log(self.flow_id, node_id, node_meta['name'], "routing_skip", {"skipped": child_name})
-                            continue
+                        # If routing is active, check if child is allowed
+                        if allowed_targets is not None:
+                            # If the current node (parent) was the routing target, clear routing for its children
+                            # This ensures routing only applies one level deep
+                            parent_was_routed_to = node_id in allowed_targets
+                            
+                            if parent_was_routed_to:
+                                # Clear routing so children can be processed normally
+                                if isinstance(output, dict) and "_route_targets" in output:
+                                    del output["_route_targets"]
+                                allowed_targets = None
+                            elif child_id not in allowed_targets:
+                                if settings.get("debug_mode"):
+                                    child_name = self.nodes.get(child_id, {}).get('name', child_id)
+                                    debug_logger.log(self.flow_id, node_id, node_meta['name'], "routing_skip", {"skipped": child_name})
+                                continue
 
                         if child_id not in execution_queue:
                             execution_queue.append(child_id)
