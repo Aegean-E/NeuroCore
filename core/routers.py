@@ -237,7 +237,7 @@ async def run_flow_node(flow_id: str, node_id: str, request: Request, background
     
     flow_override = None
     try:
-        if request.headers.get("content-type") == "application/json":
+        if "application/json" in request.headers.get("content-type", ""):
             flow_override = await request.json()
     except Exception:
         pass

@@ -17,6 +17,9 @@ async def lifespan(app: FastAPI):
     app.state.module_manager = module_manager
     module_manager.load_enabled_modules()
 
+    # Initialize background tasks set to prevent GC of fire-and-forget tasks
+    app.state.background_tasks = set()
+
     # Auto-start active flow if it contains a Repeater node
     active_flow_id = settings.get("active_ai_flow")
     if active_flow_id:
@@ -33,7 +36,9 @@ async def lifespan(app: FastAPI):
                 print(f"[System] Auto-starting flow '{flow.get('name')}' from {node['nodeTypeId']} '{node['id']}'.")
                 # Start with _repeat_count=1 to skip Chat Input nodes and prevent ghost replies
                 runner = FlowRunner(active_flow_id)
-                asyncio.create_task(runner.run({"_repeat_count": 1}, start_node_id=node['id']))
+                task = asyncio.create_task(runner.run({"_repeat_count": 1}, start_node_id=node['id']))
+                app.state.background_tasks.add(task)
+                task.add_done_callback(app.state.background_tasks.discard)
 
     yield
     # Add shutdown logic here if needed in the future
@@ -59,7 +64,12 @@ async def debug_fire_flow():
                 node = start_nodes[0]
                 print(f"[Debug] Manually firing flow '{flow.get('name')}' from {node['nodeTypeId']} '{node['id']}'.")
                 runner = FlowRunner(active_flow_id)
-                asyncio.create_task(runner.run({"_repeat_count": 1}, start_node_id=node['id']))
+                task = asyncio.create_task(runner.run({"_repeat_count": 1}, start_node_id=node['id']))
+                
+                if hasattr(app.state, "background_tasks"):
+                    app.state.background_tasks.add(task)
+                    task.add_done_callback(app.state.background_tasks.discard)
+                
                 return {"status": "fired", "node": node['id']}
     return {"status": "failed"}
 
