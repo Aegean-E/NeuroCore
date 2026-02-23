@@ -77,7 +77,10 @@ class MemoryStore:
                 embedding TEXT,
                 deleted INTEGER DEFAULT 0,
                 parent_id INTEGER DEFAULT NULL,
-                source TEXT DEFAULT 'chat'
+                source TEXT DEFAULT 'chat',
+                verified INTEGER DEFAULT 0,
+                expires_at INTEGER DEFAULT NULL,
+                access_count INTEGER DEFAULT 0
             )
         """)
         con.execute("CREATE INDEX IF NOT EXISTS idx_identity ON memories(identity);")
@@ -90,6 +93,12 @@ class MemoryStore:
         try: con.execute("ALTER TABLE memories ADD COLUMN parent_id INTEGER DEFAULT NULL")
         except sqlite3.OperationalError: pass
         try: con.execute("ALTER TABLE memories ADD COLUMN source TEXT DEFAULT 'chat'")
+        except sqlite3.OperationalError: pass
+        try: con.execute("ALTER TABLE memories ADD COLUMN verified INTEGER DEFAULT 0")
+        except sqlite3.OperationalError: pass
+        try: con.execute("ALTER TABLE memories ADD COLUMN expires_at INTEGER DEFAULT NULL")
+        except sqlite3.OperationalError: pass
+        try: con.execute("ALTER TABLE memories ADD COLUMN access_count INTEGER DEFAULT 0")
         except sqlite3.OperationalError: pass
 
     def _parse_embedding(self, blob) -> Optional[np.ndarray]:
@@ -170,14 +179,25 @@ class MemoryStore:
         text_lower = " ".join(text.lower().strip().split())
         return hashlib.sha256(text_lower.encode("utf-8")).hexdigest()
 
-    def add_entry(self, text: str, embedding: Optional[List[float]] = None, confidence: float = 1.0, subject: str = "User", created_at: int = None, mem_type: str = "MEMORY", source: str = "chat") -> int:
+    def add_entry(self, text: str, embedding: Optional[List[float]] = None, confidence: float = 1.0, subject: str = "User", created_at: int = None, mem_type: str = "BELIEF", source: str = "chat", verified: bool = False, expires_at: int = None) -> int:
         identity = self.compute_identity(text)
         timestamp = created_at if created_at is not None else int(time.time())
         
-        final_type = mem_type if mem_type else "MEMORY"
+        valid_types = ["BELIEF", "FACT", "RULE", "EXPERIENCE", "PREFERENCE"]
+        final_type = mem_type if mem_type in valid_types else "BELIEF"
+        
+        # Convert belief to fact if verified
+        if verified and final_type == "BELIEF":
+            final_type = "FACT"
+        
+        # Apply TTL for beliefs (default 30 days if not specified)
+        if final_type == "BELIEF" and expires_at is None:
+            expires_at = timestamp + (30 * 24 * 60 * 60)  # 30 days
+        
         final_source = source if source else "chat"
         emb_np = np.array(embedding, dtype='float32') if embedding else None
         embedding_blob = emb_np.tobytes() if emb_np is not None else None
+        verified_int = 1 if verified else 0
 
         with self.write_lock:
             with self._connect() as con:
@@ -187,9 +207,9 @@ class MemoryStore:
                     return -1
 
                 cur = con.execute("""
-                    INSERT INTO memories (identity, type, subject, text, confidence, created_at, embedding, source)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                """, (identity, final_type, subject, text, confidence, timestamp, embedding_blob, final_source))
+                    INSERT INTO memories (identity, type, subject, text, confidence, created_at, embedding, source, verified, expires_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (identity, final_type, subject, text, confidence, timestamp, embedding_blob, final_source, verified_int, expires_at))
                 row_id = cur.lastrowid
 
             if FAISS_AVAILABLE and emb_np is not None and self.faiss_index:
@@ -221,6 +241,7 @@ class MemoryStore:
         q_emb_np = np.array(query_embedding, dtype='float32')
         candidate_ids = []
         candidate_scores = {}
+        current_time = int(time.time())
 
         # Determine if we can use FAISS
         use_faiss = FAISS_AVAILABLE and self.faiss_index and self.faiss_index.ntotal > 0
@@ -241,7 +262,11 @@ class MemoryStore:
         else:
             try:
                 with self._connect() as con:
-                    rows = con.execute("SELECT id, embedding FROM memories WHERE deleted = 0 AND parent_id IS NULL AND embedding IS NOT NULL").fetchall()
+                    rows = con.execute("""
+                        SELECT id, embedding FROM memories 
+                        WHERE deleted = 0 AND parent_id IS NULL AND embedding IS NOT NULL
+                        AND (expires_at IS NULL OR expires_at > ?)
+                    """, (current_time,)).fetchall()
                 
                 # Normalize query
                 q_norm = np.linalg.norm(q_emb_np)
@@ -270,7 +295,7 @@ class MemoryStore:
             top_ids = candidate_ids[:limit]
             
             placeholders = ','.join(['?'] * len(top_ids))
-            query = f"SELECT id, text, created_at FROM memories WHERE id IN ({placeholders}) AND deleted = 0 AND parent_id IS NULL"
+            query = f"SELECT id, text, created_at, type FROM memories WHERE id IN ({placeholders}) AND deleted = 0 AND parent_id IS NULL"
             params = list(top_ids)
             
             if source_filter:
@@ -280,15 +305,31 @@ class MemoryStore:
             with self._connect() as con:
                 rows = con.execute(query, params).fetchall()
             
+            valid_ids = []
             for r in rows:
                 mid = r[0]
+                mem_expires_at = r[2]  # This is created_at, need to get expires_at
+                
+                # Get expires_at for this memory
+                expires_at = con.execute("SELECT expires_at FROM memories WHERE id = ?", (mid,)).fetchone()
+                if expires_at and expires_at[0] and expires_at[0] < current_time:
+                    continue  # Skip expired memories
+                
                 if mid in candidate_scores:
                     results.append({
                         "id": mid,
                         "text": r[1],
                         "created_at": r[2],
+                        "type": r[3],
                         "score": candidate_scores[mid]
                     })
+                    valid_ids.append(mid)
+            
+            # Increment access_count for returned memories
+            if valid_ids:
+                placeholders = ','.join(['?'] * len(valid_ids))
+                with self._connect() as con:
+                    con.execute(f"UPDATE memories SET access_count = access_count + 1 WHERE id IN ({placeholders})", valid_ids)
             
             results.sort(key=lambda x: x['score'], reverse=True)
             return results

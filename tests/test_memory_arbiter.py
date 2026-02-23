@@ -42,8 +42,8 @@ async def test_arbiter_confidence_gate(mock_store):
     mock_store.add_entry.assert_not_called()
 
 @pytest.mark.asyncio
-async def test_arbiter_unknown_type_defaults_to_fact(mock_store):
-    """Test that unknown memory types default to FACT."""
+async def test_arbiter_unknown_type_defaults_to_belief(mock_store):
+    """Test that unknown memory types default to BELIEF."""
     f = Future()
     f.set_result(123)
     mock_store.executor.submit.return_value = f
@@ -53,7 +53,7 @@ async def test_arbiter_unknown_type_defaults_to_fact(mock_store):
     
     assert mid == 123
     args, _ = mock_store.executor.submit.call_args
-    assert args[0].keywords["mem_type"] == "FACT"
+    assert args[0].keywords["mem_type"] == "BELIEF"
 
 @pytest.mark.asyncio
 async def test_arbiter_backend_rejection(mock_store):

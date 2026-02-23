@@ -115,7 +115,7 @@ class MemorySaveExecutor:
         self.config = ConfigLoader.get_config()
         self.arbiter = MemoryArbiter(memory_store, config=self.config)
 
-    async def _save_background(self, text: str, subject: str = "User", source: str = "chat", confidence: float = 1.0, mem_type: str = "FACT"):
+    async def _save_background(self, text: str, subject: str = "User", source: str = "chat", confidence: float = 1.0, mem_type: str = "BELIEF", verified: bool = False, expires_at: int = None):
         """Handles embedding generation and saving in the background."""
         await asyncio.sleep(3)
         try:
@@ -186,7 +186,9 @@ class MemorySaveExecutor:
                         subject=subject,
                         source=source,
                         embedding=embedding,
-                        mem_type=mem_type
+                        mem_type=mem_type,
+                        verified=verified,
+                        expires_at=expires_at
                     )
         except Exception as e:
             print(f"Background memory save failed: {e}")
@@ -245,7 +247,9 @@ class MemorySaveExecutor:
         except (ValueError, TypeError):
             confidence = default_conf
 
-        mem_type = config.get("mem_type", "FACT")
+        mem_type = config.get("mem_type", "BELIEF")
+        verified = bool(config.get("verified", False))
+        expires_at = config.get("expires_at")
 
         if text_to_save and len(text_to_save.strip()) > 2:
             # Fire and forget: Don't block the flow for embedding generation
@@ -254,7 +258,9 @@ class MemorySaveExecutor:
                 subject=subject,
                 source=source,
                 confidence=confidence,
-                mem_type=mem_type
+                mem_type=mem_type,
+                verified=verified,
+                expires_at=expires_at
             ))
             
             # Auto-Consolidation Check

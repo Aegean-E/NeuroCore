@@ -28,7 +28,9 @@ class MemoryArbiter:
         subject: str = "User",
         source: str = "chat",
         embedding: Optional[List[float]] = None,
-        mem_type: str = "FACT"
+        mem_type: str = "BELIEF",
+        verified: bool = False,
+        expires_at: int = None
     ) -> Optional[int]:
         """
         Decide whether to promote reasoning into memory.
@@ -41,9 +43,14 @@ class MemoryArbiter:
             print(f"❌ [Arbiter] Confidence gate failed: {confidence} < {min_conf}")
             return None
 
-        # Type Validation: Default to FACT if unknown
-        if mem_type not in ["FACT", "RULE", "PREFERENCE", "MEMORY"]:
-            mem_type = "FACT"
+        valid_types = ["BELIEF", "FACT", "RULE", "EXPERIENCE", "PREFERENCE"]
+        if mem_type not in valid_types:
+            mem_type = "BELIEF"
+        
+        # Calculate expires_at for beliefs if not provided
+        if mem_type == "BELIEF" and expires_at is None:
+            ttl_days = int(self.config.get("belief_ttl_days", 30))
+            expires_at = int(time.time()) + (ttl_days * 24 * 60 * 60)
 
         # 2. Identity & Duplicates
         identity = self.memory_store.compute_identity(text)
@@ -84,7 +91,9 @@ class MemoryArbiter:
                 confidence=confidence,
                 subject=subject,
                 mem_type=mem_type,
-                source=source
+                source=source,
+                verified=verified,
+                expires_at=expires_at
             )
         )
 
