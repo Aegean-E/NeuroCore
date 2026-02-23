@@ -55,7 +55,7 @@ async def get_thoughts(request: Request):
 
 @router.post("/clear")
 async def clear_thoughts(request: Request):
-    service.thoughts.clear()
+    service.clear()
     return templates.TemplateResponse("reasoning_thoughts.html", {
         "request": request, 
         "thoughts": []
