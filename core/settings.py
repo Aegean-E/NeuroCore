@@ -16,7 +16,8 @@ DEFAULT_SETTINGS = {
     "debug_mode": True,
     "ui_wide_mode": False,
     "ui_show_footer": True,
-    "request_timeout": 60.0
+    "request_timeout": 60.0,
+    "max_node_loops": 1000
 }
 
 class SettingsManager:
@@ -38,7 +39,10 @@ class SettingsManager:
             
             try:
                 with open(self.file_path, "r") as f:
-                    return json.load(f)
+                    loaded_settings = json.load(f)
+                    merged_settings = DEFAULT_SETTINGS.copy()
+                    merged_settings.update(loaded_settings)
+                    return merged_settings
             except (json.JSONDecodeError, IOError):
                 return DEFAULT_SETTINGS.copy()
 

@@ -363,6 +363,12 @@ async def save_settings_route(request: Request, settings_man: SettingsManager = 
         except (ValueError, TypeError):
             pass
             
+    if "max_node_loops" in form_data:
+        try:
+            updates["max_node_loops"] = int(form_data["max_node_loops"])
+        except (ValueError, TypeError):
+            pass
+            
     # Handle debug_mode checkbox (only if the form intended to submit it)
     if "save_debug_mode" in form_data:
         updates["debug_mode"] = form_data.get("debug_mode") == "on"

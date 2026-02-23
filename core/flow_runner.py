@@ -144,13 +144,13 @@ class FlowRunner:
         
         # Track how many times a node has run to prevent infinite loops
         node_run_counts = {node_id: 0 for node_id in self.nodes}
-        MAX_NODE_RUNS = 1000 
+        max_loops = settings.get("max_node_loops", 1000)
         
         while execution_queue:
             node_id = execution_queue.popleft()
             
-            if node_run_counts[node_id] >= MAX_NODE_RUNS:
-                print(f"Warning: Node {node_id} hit max execution limit ({MAX_NODE_RUNS}). Stopping branch.")
+            if max_loops > 0 and node_run_counts[node_id] >= max_loops:
+                print(f"Warning: Node {node_id} hit max execution limit ({max_loops}). Stopping branch.")
                 continue
             
             node_run_counts[node_id] += 1
