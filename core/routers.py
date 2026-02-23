@@ -214,6 +214,15 @@ async def set_active_flow(request: Request, flow_id: str, settings_man: Settings
         "active_flow_id": flow_id
     })
 
+@router.post("/ai-flow/stop-active", response_class=HTMLResponse)
+async def stop_active_flow(request: Request, settings_man: SettingsManager = Depends(get_settings_manager)):
+    """Stops the currently active flow by clearing the active flow setting."""
+    settings_man.save_settings({"active_ai_flow": None})
+    return templates.TemplateResponse(request, "ai_flow_list.html", {
+        "flows": flow_manager.list_flows(),
+        "active_flow_id": None
+    }, headers={"HX-Trigger": json.dumps({"showMessage": {"level": "info", "message": "Active flow stopped"}})})
+
 @router.post("/ai-flow/{flow_id}/delete", response_class=HTMLResponse)
 async def delete_flow(request: Request, flow_id: str, settings_man: SettingsManager = Depends(get_settings_manager)):
     if settings_man.get("active_ai_flow") == flow_id:

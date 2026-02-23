@@ -3,6 +3,11 @@ from .service import service
 class ReasoningSaveExecutor:
     async def receive(self, data: dict, config: dict = None) -> dict:
         config = config or {}
+        
+        # Skip logging if there's an error in the data
+        if isinstance(data, dict) and data.get("error"):
+            return data
+        
         content = "No content"
         
         if isinstance(data, dict):

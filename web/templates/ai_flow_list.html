@@ -24,6 +24,13 @@
                     <span class="text-xs font-bold px-2 py-0.5 bg-emerald-500/20 text-emerald-400 rounded-full flex-shrink-0">
                         Active
                     </span>
+                    <button hx-post="/ai-flow/stop-active"
+                            hx-target="#saved-flows-list"
+                            hx-swap="innerHTML"
+                            class="text-xs font-semibold px-2 py-0.5 bg-red-500/20 hover:bg-red-500/30 text-red-400 rounded-full flex-shrink-0 transition-colors"
+                            title="Stop Active Flow">
+                        Stop
+                    </button>
                 {% else %}
                     <button hx-post="/ai-flow/{{ flow.id }}/set-active"
                             hx-target="#saved-flows-list"
