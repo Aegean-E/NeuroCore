@@ -144,7 +144,7 @@ class FlowRunner:
         
         # Track how many times a node has run to prevent infinite loops
         node_run_counts = {node_id: 0 for node_id in self.nodes}
-        MAX_NODE_RUNS = 20 
+        MAX_NODE_RUNS = 1000 
         
         while execution_queue:
             node_id = execution_queue.popleft()
