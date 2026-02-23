@@ -2,6 +2,7 @@ import json
 import ast
 import sys
 import platform
+import asyncio
 from datetime import datetime
 from fastapi import APIRouter, Request, Form, Depends, HTTPException, Response, BackgroundTasks, UploadFile, File
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
@@ -209,6 +210,29 @@ async def rename_flow(request: Request, flow_id: str, name: str = Form(...), set
 @router.post("/ai-flow/{flow_id}/set-active", response_class=HTMLResponse)
 async def set_active_flow(request: Request, flow_id: str, settings_man: SettingsManager = Depends(get_settings_manager)):
     settings_man.save_settings({"active_ai_flow": flow_id})
+    
+    # Auto-start the flow if it has a Repeater node
+    flow = flow_manager.get_flow(flow_id)
+    if flow:
+        background_node_types = ["repeater_node"]
+        start_nodes = [n for n in flow.get("nodes", []) if n.get("nodeTypeId") in background_node_types]
+        
+        if start_nodes:
+            from core.flow_runner import FlowRunner
+            from fastapi import BackgroundTasks
+            
+            node = start_nodes[0]
+            print(f"[System] Auto-starting flow '{flow.get('name')}' from {node['nodeTypeId']} '{node['id']}'.")
+            
+            async def run_flow():
+                runner = FlowRunner(flow_id)
+                await runner.run({"_repeat_count": 1}, start_node_id=node['id'])
+            
+            # Get background tasks from app state
+            if hasattr(request.app.state, 'background_tasks'):
+                task = asyncio.create_task(run_flow())
+                request.app.state.background_tasks.add(task)
+    
     return templates.TemplateResponse(request, "ai_flow_list.html", {
         "flows": flow_manager.list_flows(),
         "active_flow_id": flow_id
@@ -216,7 +240,16 @@ async def set_active_flow(request: Request, flow_id: str, settings_man: Settings
 
 @router.post("/ai-flow/stop-active", response_class=HTMLResponse)
 async def stop_active_flow(request: Request, settings_man: SettingsManager = Depends(get_settings_manager)):
-    """Stops the currently active flow by clearing the active flow setting."""
+    """Stops the currently active flow by clearing the active flow setting and canceling tasks."""
+    # Cancel all running background tasks
+    if hasattr(request.app.state, 'background_tasks'):
+        stopped_count = 0
+        for task in list(request.app.state.background_tasks):
+            if not task.done():
+                task.cancel()
+                stopped_count += 1
+        print(f"[System] Cancelled {stopped_count} background tasks")
+    
     settings_man.save_settings({"active_ai_flow": None})
     return templates.TemplateResponse(request, "ai_flow_list.html", {
         "flows": flow_manager.list_flows(),

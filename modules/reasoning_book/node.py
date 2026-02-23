@@ -1,5 +1,47 @@
 from .service import service
 
+VAGUE_PATTERNS = [
+    "the assistant",
+    "i will",
+    "i am proceeding",
+    "to further enhance",
+    "let me proceed",
+    "to continue improving",
+    "this successful",
+    "the search for",
+    "was unsuccessful",
+    "did not yield",
+    "cognitive system",
+    "improving internal reasoning",
+    "complex pattern recognition",
+    "advanced machine learning",
+    "anomaly detection",
+    "deep learning",
+    "neural networks",
+    "artificial intelligence",
+    "machine learning",
+    "improve internal",
+    "foundational cognitive",
+    "unify two abstract",
+    "increase abstraction",
+    "switch abstraction level",
+    "adversarial self-critique",
+    "rebuild from first principles",
+    "there is no completion",
+    "no explicit task",
+    "self-generate",
+    "the system aims",
+    "need to refine",
+    "focus on the",
+    "consider",
+    "deterministic principles",
+    "probability distributions",
+    "particles can exist",
+]
+
+MIN_CONTENT_LENGTH = 30
+
+
 class ReasoningSaveExecutor:
     async def receive(self, data: dict, config: dict = None) -> dict:
         config = config or {}
@@ -8,21 +50,35 @@ class ReasoningSaveExecutor:
         if isinstance(data, dict) and data.get("error"):
             return data
         
-        content = "No content"
+        content = None
         
         if isinstance(data, dict):
-            # Try to find meaningful content fields
+            # Only save from specific meaningful fields
             if "reasoning" in data:
                 content = data["reasoning"]
             elif "thought" in data:
                 content = data["thought"]
-            elif "content" in data:
-                content = data["content"]
-            else:
-                content = str(data)
-        elif data is not None:
-            content = str(data)
-            
+            elif "summary" in data:
+                content = data["summary"]
+            elif "conclusion" in data:
+                content = data["conclusion"]
+            elif "result" in data:
+                content = data["result"]
+        
+        # If no meaningful content found, skip
+        if not content:
+            return data
+        
+        # Skip if too short
+        if len(content) < MIN_CONTENT_LENGTH:
+            return data
+        
+        # Skip vague/generic content
+        content_lower = content.lower()
+        for pattern in VAGUE_PATTERNS:
+            if pattern in content_lower:
+                return data
+        
         service.log_thought(content, source=config.get("source", "Flow Node"))
         return data
 

@@ -2,6 +2,7 @@ import re
 import asyncio
 import json
 from core.debug import debug_logger
+from core.settings import settings
 
 class DelayExecutor:
     async def receive(self, input_data: dict, config: dict = None) -> dict:
@@ -61,6 +62,16 @@ class RepeaterExecutor:
         if input_data is None: return None
         config = config or {}
         
+        # Check if this flow is still the active flow before continuing
+        flow_id = config.get("_flow_id")
+        active_flow_id = settings.get("active_ai_flow")
+        print(f"[Repeater] flow_id={flow_id}, active_flow_id={active_flow_id}")
+        # Only continue if flow_id matches active_flow_id (or active_flow_id is None, stop)
+        if flow_id is not None and flow_id != active_flow_id:
+            debug_logger.log(flow_id, "repeater_node", "Repeater", "stopped", "Flow no longer active")
+            print(f"[Repeater] Stopping - flow {flow_id} is no longer active")
+            return input_data
+        
         try:
             delay = float(config.get("delay", 5.0))
             max_repeats = int(config.get("max_repeats", 1))
@@ -73,9 +84,17 @@ class RepeaterExecutor:
         current_repeat = input_data.get("_repeat_count", 0)
         
         # If max_repeats is 0, it loops forever. Otherwise, it checks the count.
+        # But always check if flow is still active for infinite loops
         if flow_id and (max_repeats == 0 or current_repeat < max_repeats):
             async def trigger_next(fid, data, count, start_node):
                 await asyncio.sleep(delay)
+                # Check if flow is still active before running
+                active_flow_id = settings.get("active_ai_flow")
+                print(f"[Repeater trigger_next] fid={fid}, active_flow_id={active_flow_id}")
+                if fid != active_flow_id:
+                    debug_logger.log(fid, "repeater_node", "Repeater", "stopped", "Flow no longer active")
+                    print(f"[Repeater] Stopping - flow {fid} is no longer active")
+                    return
                 try:
                     from core.flow_runner import FlowRunner
                     runner = FlowRunner(fid)
