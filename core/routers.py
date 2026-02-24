@@ -184,6 +184,23 @@ async def get_flow_data(flow_id: str):
         raise HTTPException(status_code=404, detail="Flow not found")
     return flow
 
+@router.get("/ai-flow/{flow_id}/validate", response_class=JSONResponse)
+async def validate_flow(flow_id: str, request: Request):
+    """Validates a flow for potential issues before execution."""
+    flow = flow_manager.get_flow(flow_id)
+    if not flow:
+        raise HTTPException(status_code=404, detail="Flow not found")
+    
+    from core.flow_runner import FlowRunner
+    module_manager = request.app.state.module_manager
+    
+    try:
+        runner = FlowRunner(flow_id, flow_override=flow)
+        validation_result = runner.validate(module_manager)
+        return validation_result
+    except Exception as e:
+        return {"valid": False, "issues": [], "warnings": [], "error": str(e)}
+
 @router.post("/ai-flow/save")
 async def save_ai_flow(request: Request, name: str = Form(...), nodes: str = Form(...), connections: str = Form(...), bridges: str = Form("[]"), flow_id: str = Form(None)):
     if not flow_id:

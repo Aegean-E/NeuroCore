@@ -131,6 +131,120 @@ class FlowRunner:
 
         return sorted_order
 
+    def validate(self, module_manager) -> dict:
+        """Validates the flow for potential issues before execution."""
+        issues = []
+        warnings = []
+        
+        # Get enabled modules
+        enabled_modules = {m['id']: m for m in module_manager.get_all_modules() if m.get('enabled', False)}
+        
+        # Check 1: Nodes referencing disabled or non-existent modules
+        for node_id, node in self.nodes.items():
+            module_id = node.get('moduleId')
+            if module_id not in enabled_modules:
+                issues.append({
+                    'type': 'disabled_module',
+                    'node_id': node_id,
+                    'node_name': node.get('name'),
+                    'module_id': module_id,
+                    'message': f"Node '{node.get('name')}' references disabled module '{module_id}'"
+                })
+        
+        # Check 2: Orphaned connections (referencing non-existent nodes)
+        node_ids = set(self.nodes.keys())
+        for conn in self.connections:
+            if conn['from'] not in node_ids:
+                issues.append({
+                    'type': 'orphaned_connection',
+                    'from_id': conn['from'],
+                    'to_id': conn['to'],
+                    'message': f"Connection from non-existent node '{conn['from']}'"
+                })
+            if conn['to'] not in node_ids:
+                issues.append({
+                    'type': 'orphaned_connection',
+                    'from_id': conn['from'],
+                    'to_id': conn['to'],
+                    'message': f"Connection to non-existent node '{conn['to']}'"
+                })
+        
+        # Check 3: Tools enabled in System Prompt that don't exist or are disabled
+        for node_id, node in self.nodes.items():
+            if node.get('nodeTypeId') == 'system_prompt':
+                enabled_tools = node.get('config', {}).get('enabled_tools', [])
+                for tool_name in enabled_tools:
+                    # Check if tool exists in tools.json
+                    try:
+                        from modules.tools.router import load_tools
+                        tools = load_tools()
+                        tool_config = tools.get(tool_name, {})
+                        if tool_name not in tools:
+                            warnings.append({
+                                'type': 'missing_tool',
+                                'node_id': node_id,
+                                'node_name': node.get('name'),
+                                'tool_name': tool_name,
+                                'message': f"Node '{node.get('name')}' enables non-existent tool '{tool_name}'"
+                            })
+                        elif tool_config.get('enabled', True) == False:
+                            warnings.append({
+                                'type': 'disabled_tool',
+                                'node_id': node_id,
+                                'node_name': node.get('name'),
+                                'tool_name': tool_name,
+                                'message': f"Node '{node.get('name')}' enables disabled tool '{tool_name}'"
+                            })
+                    except Exception:
+                        pass
+        
+        # Check 4: Check for nodes without any connections (might be unintentional)
+        connected_nodes = set()
+        for conn in self.connections:
+            connected_nodes.add(conn['from'])
+            connected_nodes.add(conn['to'])
+        
+        # Add bridged nodes to connected set
+        for bridge in self.bridges:
+            if bridge.get('from') in self.nodes:
+                connected_nodes.add(bridge.get('from'))
+            if bridge.get('to') in self.nodes:
+                connected_nodes.add(bridge.get('to'))
+        
+        # Nodes that don't require connections (check various possible node type IDs)
+        no_connection_required = [
+            'trigger_node', 
+            'repeater_node', 
+            'annotation', 
+            'comment', 
+            'scheduled_start',
+            'annotation_node',
+            'comment_node'
+        ]
+        
+        for node_id, node in self.nodes.items():
+            node_type = node.get('nodeTypeId', '').lower()
+            node_name = node.get('name', '').lower()
+            
+            # Check if it's an annotation/comment by name or type
+            is_annotation = (node_type in no_connection_required or 
+                           'annotation' in node_name or 
+                           'comment' in node_name)
+            
+            if node_id not in connected_nodes and not is_annotation:
+                warnings.append({
+                    'type': 'unconnected_node',
+                    'node_id': node_id,
+                    'node_name': node.get('name'),
+                    'message': f"Node '{node.get('name')}' has no connections"
+                })
+        
+        return {
+            'valid': len(issues) == 0,
+            'issues': issues,
+            'warnings': warnings
+        }
+
     async def run(self, initial_input: dict, start_node_id: str = None):
         """Executes the flow in order, passing data between nodes."""
         if settings.get("debug_mode"):

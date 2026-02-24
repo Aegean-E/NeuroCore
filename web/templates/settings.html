@@ -23,6 +23,7 @@
         <aside class="w-64 flex-shrink-0 bg-slate-950/50 rounded-xl border border-slate-800 p-4 flex flex-col gap-2">
             <h3 class="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2 px-2">Configuration</h3>
             <a href="#" onclick="switchTab(event, 'general')" class="settings-nav-link block px-3 py-2 rounded-lg bg-slate-800 text-white text-sm font-medium transition-all">General</a>
+            <a href="#" onclick="switchTab(event, 'flow-execution')" class="settings-nav-link block px-3 py-2 rounded-lg text-slate-400 hover:bg-slate-800 hover:text-white text-sm font-medium transition-all">Flow Execution</a>
             <a href="#" onclick="switchTab(event, 'modules')" class="settings-nav-link block px-3 py-2 rounded-lg text-slate-400 hover:bg-slate-800 hover:text-white text-sm font-medium transition-all">Modules</a>
             <div id="settings-modules-nav" hx-get="/settings/modules-nav" hx-trigger="modulesChanged from:body">
                 {% include 'settings_modules_nav.html' %}
@@ -81,16 +82,6 @@
                                         </label>
                                         <input type="hidden" name="save_ui_show_footer" value="1">
                                     </div>
-                                </div>
-                            </div>
-
-                            <div class="border-t border-slate-800 pt-6">
-                                <h3 class="text-lg font-bold text-white mb-4">Flow Execution</h3>
-                                <div>
-                                    <label class="block text-sm font-medium text-slate-400 mb-2">Max Node Loops</label>
-                                    <input type="number" name="max_node_loops" value="{{ settings.max_node_loops }}" min="0"
-                                           class="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all">
-                                    <p class="text-xs text-slate-600 mt-2">Maximum number of times a single node can execute in one flow run. Set to 0 for infinite loops.</p>
                                 </div>
                             </div>
 
@@ -179,6 +170,36 @@
                         Save Settings
                     </button>
                 </div>
+            </div>
+
+            <!-- Flow Execution Section -->
+            <div id="flow-execution" class="settings-tab hidden flex flex-col h-full">
+                <form id="flow-settings-form" hx-post="/settings/save" hx-swap="none" class="max-w-3xl">
+                    <div class="overflow-y-auto custom-scrollbar flex-grow p-8 scroll-smooth pb-24">
+                        <div class="mb-6">
+                            <h2 class="text-xl font-bold text-white">Flow Execution</h2>
+                            <p class="text-sm text-slate-500">Configure AI Flow execution behavior.</p>
+                        </div>
+                        
+                        <div class="space-y-6">
+                            <div class="bg-slate-900 border border-slate-800 rounded-xl p-6">
+                                <h3 class="text-lg font-bold text-white mb-4">Loop Protection</h3>
+                                <div>
+                                    <label class="block text-sm font-medium text-slate-400 mb-2">Max Node Loops</label>
+                                    <input type="number" name="max_node_loops" value="{{ settings.max_node_loops }}" min="0"
+                                           class="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all">
+                                    <p class="text-xs text-slate-600 mt-2">Maximum number of times a single node can execute in one flow run. Set to 0 for infinite loops.</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="p-6 border-t border-slate-800 bg-slate-950/80 backdrop-blur absolute bottom-0 left-0 right-0 flex justify-end">
+                        <button onclick="document.getElementById('flow-settings-form').requestSubmit()" class="bg-blue-600 hover:bg-blue-500 text-white px-8 py-3 rounded-xl text-sm font-semibold transition-all shadow-lg shadow-blue-500/20">
+                            Save Settings
+                        </button>
+                    </div>
+                </form>
             </div>
 
             <!-- Modules Section -->

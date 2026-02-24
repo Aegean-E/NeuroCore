@@ -13,5 +13,6 @@
             "singleton": false,
             "configurable": true
         }
-    ]
+    ],
+    "load_error": null
 }
