@@ -24,19 +24,27 @@
                     {% endif %}
                 {% endfor %}
 
-                <!-- Knowledge Base -->
-                {% for module in modules %}
-                    {% if module.id == 'knowledge_base' and module.enabled %}
-                    <li><a href="/knowledge_base" class="hover:text-blue-400 transition-colors">Knowledge</a></li>
-                    {% endif %}
-                {% endfor %}
-
-                <!-- Reasoning Book -->
-                {% for module in modules %}
-                    {% if module.id == 'reasoning_book' and module.enabled %}
-                    <li><a href="/reasoning_book" class="hover:text-blue-400 transition-colors">Reasoning</a></li>
-                    {% endif %}
-                {% endfor %}
+                <!-- Data Dropdown -->
+                <li class="relative group">
+                    <button class="hover:text-blue-400 transition-colors cursor-pointer">Data</button>
+                    <ul class="absolute left-0 mt-2 w-48 bg-slate-800 border border-slate-700 rounded-lg shadow-xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 z-50">
+                        {% for module in modules %}
+                            {% if module.id == 'knowledge_base' and module.enabled %}
+                            <li><a href="/knowledge_base" class="block px-4 py-2 text-sm text-slate-300 hover:bg-slate-700 hover:text-blue-400 first:rounded-t-lg">Knowledge</a></li>
+                            {% endif %}
+                        {% endfor %}
+                        {% for module in modules %}
+                            {% if module.id == 'memory_browser' and module.enabled %}
+                            <li><a href="/memory_browser" class="block px-4 py-2 text-sm text-slate-300 hover:bg-slate-700 hover:text-blue-400">Memory</a></li>
+                            {% endif %}
+                        {% endfor %}
+                        {% for module in modules %}
+                            {% if module.id == 'reasoning_book' and module.enabled %}
+                            <li><a href="/reasoning_book" class="block px-4 py-2 text-sm text-slate-300 hover:bg-slate-700 hover:text-blue-400 last:rounded-b-lg">Reasoning</a></li>
+                            {% endif %}
+                        {% endfor %}
+                    </ul>
+                </li>
 
                 <!-- AI Flow -->
                 <li><a href="/ai-flow" class="hover:text-blue-400 transition-colors">AI Flow</a></li>

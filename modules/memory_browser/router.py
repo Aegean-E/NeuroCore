@@ -6,6 +6,7 @@ from modules.memory.backend import memory_store
 from datetime import datetime
 import asyncio
 from functools import partial
+from core.settings import settings
 
 router = APIRouter()
 templates = Jinja2Templates(directory="web/templates")
@@ -16,9 +17,20 @@ def format_timestamp(ts):
 
 templates.env.filters["datetime"] = format_timestamp
 
+@router.get("", response_class=HTMLResponse)
+async def browser_page(request: Request):
+    module_manager = request.app.state.module_manager
+    enabled_modules = [m for m in module_manager.get_all_modules() if m.get("enabled")]
+    
+    return templates.TemplateResponse(request, "index.html", {
+        "modules": enabled_modules,
+        "active_module": "memory_browser",
+        "settings": settings.settings,
+        "full_width_content": True
+    })
+
 @router.get("/gui", response_class=HTMLResponse)
 async def browser_gui(request: Request):
-    # Initial load with default browse parameters
     loop = asyncio.get_running_loop()
     memories = await loop.run_in_executor(memory_store.executor, partial(memory_store.browse, limit=50))
     return templates.TemplateResponse(request, "memory_browser.html", {
