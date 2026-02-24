@@ -208,10 +208,21 @@ async def rename_flow(request: Request, flow_id: str, name: str = Form(...), set
     })
 
 @router.post("/ai-flow/{flow_id}/set-active", response_class=HTMLResponse)
-async def set_active_flow(request: Request, flow_id: str, settings_man: SettingsManager = Depends(get_settings_manager)):
+async def set_active_flow(request: Request, flow_id: str, action: str = Form("toggle"), settings_man: SettingsManager = Depends(get_settings_manager)):
     active_flows = settings_man.get("active_ai_flows", [])
-    if flow_id not in active_flows:
-        active_flows.append(flow_id)
+    
+    if action == "activate":
+        if flow_id not in active_flows:
+            active_flows.append(flow_id)
+    elif action == "deactivate":
+        if flow_id in active_flows:
+            active_flows.remove(flow_id)
+    else:
+        if flow_id in active_flows:
+            active_flows.remove(flow_id)
+        else:
+            active_flows.append(flow_id)
+    
     settings_man.save_settings({"active_ai_flows": active_flows})
     
     # Auto-start the flow if it has a Repeater node

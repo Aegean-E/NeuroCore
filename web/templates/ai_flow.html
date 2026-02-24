@@ -389,15 +389,15 @@
                     </svg>
                 </div>
                 <div class="flex-grow">
-                    <h3 class="text-lg font-semibold leading-6 text-white" id="modal-title">Clear Canvas</h3>
+                    <h3 class="text-lg font-semibold leading-6 text-white" id="modal-title">New Flow</h3>
                     <div class="mt-2">
-                        <p class="text-sm text-slate-400">Are you sure you want to clear the canvas? Any unsaved changes will be lost.</p>
+                        <p class="text-sm text-slate-400">Any unsaved changes in the canvas will be lost. Are you sure you want to create a new flow?</p>
                     </div>
                 </div>
             </div>
             <div class="mt-6 flex justify-end space-x-3">
                 <button type="button" onclick="closeClearModal()" class="rounded-xl px-4 py-2 text-sm font-semibold text-slate-300 hover:bg-slate-800 transition-colors">Cancel</button>
-                <button type="button" onclick="confirmClearCanvas()" class="rounded-xl bg-yellow-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-yellow-500 transition-colors">Clear Canvas</button>
+                <button type="button" onclick="confirmClearCanvas()" class="rounded-xl bg-yellow-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-yellow-500 transition-colors">Create New Flow</button>
             </div>
         </div>
     </div>
@@ -460,7 +460,7 @@
         let isPanning = false;
         let isSelecting = false;
         let selectionStart = { x: 0, y: 0 };
-        let selectedNodeIds = [];
+        let selectedNodeIds = new Set();
         let lastMouseX = 0, lastMouseY = 0;
 
         let isDrawingConnection = false;
@@ -684,10 +684,10 @@
                               canvasBoxRect.left > nodeRect.right || 
                               canvasBoxRect.bottom < nodeRect.top || 
                               canvasBoxRect.top > nodeRect.bottom)) {
-                            if (!selectedNodeIds.includes(node.id)) {
+                            if (!selectedNodeIds.has(node.id)) {
                                 newlySelected.push(node.id);
                             }
-                            selectedNodeIds.push(node.id);
+                            selectedNodeIds.add(node.id);
                             nodeEl.classList.add('selected-node');
                         }
                     }
@@ -695,8 +695,8 @@
                 
                 selectionBox.classList.add('hidden');
                 
-                if (selectedNodeIds.length > 0) {
-                    selectedNodeId = selectedNodeIds[0];
+                if (selectedNodeIds.size > 0) {
+                    selectedNodeId = Array.from(selectedNodeIds)[0];
                 }
             }
         });
@@ -712,10 +712,10 @@
                 if (selectedConnection) {
                     deleteSelectedConnection();
                 }
-                if (selectedNodeIds.length > 0) {
+                if (selectedNodeIds.size > 0) {
                     // Delete all selected nodes
                     [...selectedNodeIds].forEach(nodeId => deleteNode(nodeId));
-                    selectedNodeIds = [];
+                    selectedNodeIds = new Set();
                     selectedNodeId = null;
                 } else if (selectedNodeId) {
                     deleteNode(selectedNodeId);
@@ -756,6 +756,17 @@
                         copiedNodeData.isReverted
                     );
                 }
+            }
+
+            // Select All (Ctrl+A)
+            if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'a') {
+                event.preventDefault();
+                selectedNodeIds = new Set(nodes.map(n => n.id));
+                nodes.forEach(node => {
+                    const nodeEl = document.getElementById(node.id);
+                    if (nodeEl) nodeEl.classList.add('selected-node');
+                });
+                showToast(`Selected ${selectedNodeIds.size} nodes`, 'info');
             }
         });
 
@@ -1144,25 +1155,37 @@
                 }
                 isDragging = true;
 
-                // Handle node selection
-                if (!selectedNodeIds.includes(nodeId)) {
-                    // If Ctrl is not held, clear previous selection
-                    if (!e.ctrlKey && !e.metaKey) {
-                        clearNodeSelection();
-                    }
-                    
-                    // Select current node
-                    nodeElement.classList.add('selected-node');
-                    selectedNodeIds.push(nodeId);
-                    selectedNodeId = nodeId;
-                    
-                    // Also deselect any selected connection
-                    if (selectedConnection) {
-                        selectedConnection = null;
-                        drawConnections();
+                // Handle node selection with Ctrl toggle
+                if (e.ctrlKey || e.metaKey) {
+                    if (selectedNodeIds.has(nodeId)) {
+                        // Deselect if already selected
+                        nodeElement.classList.remove('selected-node');
+                        selectedNodeIds.delete(nodeId);
+                        if (selectedNodeId === nodeId) {
+                            selectedNodeId = selectedNodeIds.size > 0 ? Array.from(selectedNodeIds)[0] : null;
+                        }
                     } else {
-                        updateButtonStates();
+                        // Select new node while keeping existing selection
+                        nodeElement.classList.add('selected-node');
+                        selectedNodeIds.add(nodeId);
+                        selectedNodeId = nodeId;
                     }
+                } else {
+                    // Normal click - clear selection and select this node
+                    if (!selectedNodeIds.has(nodeId)) {
+                        clearNodeSelection();
+                        nodeElement.classList.add('selected-node');
+                        selectedNodeIds.add(nodeId);
+                    }
+                    selectedNodeId = nodeId;
+                }
+                
+                // Also deselect any selected connection
+                if (selectedConnection) {
+                    selectedConnection = null;
+                    drawConnections();
+                } else {
+                    updateButtonStates();
                 }
 
                 document.onmousemove = (e) => {
@@ -1174,8 +1197,8 @@
                     const dy = e.movementY / zoom;
                     
                     // Get all nodes to move (current node + any other selected nodes)
-                    const nodesToMove = selectedNodeIds.includes(nodeId) 
-                        ? selectedNodeIds 
+                    const nodesToMove = selectedNodeIds.has(nodeId) 
+                        ? Array.from(selectedNodeIds) 
                         : [nodeId];
                     
                     nodesToMove.forEach(id => {
@@ -1213,9 +1236,9 @@
                     if (e.clientX >= binRect.left && e.clientX <= binRect.right &&
                         e.clientY >= binRect.top && e.clientY <= binRect.bottom) {
                         // Delete all selected nodes if multiple are selected
-                        if (selectedNodeIds.length > 0) {
+                        if (selectedNodeIds.size > 0) {
                             [...selectedNodeIds].forEach(id => deleteNode(id));
-                            selectedNodeIds = [];
+                            selectedNodeIds = new Set();
                             selectedNodeId = null;
                         } else {
                             deleteNode(nodeData.id);
@@ -1412,8 +1435,23 @@
             }
         }
 
+        window.createNewFlow = function() {
+            if (nodes.length > 0) {
+                openClearModal();
+            } else {
+                const nameInput = document.querySelector('#save-flow-form input[name="name"]');
+                if(nameInput) nameInput.value = '';
+                const flowIdInput = document.getElementById('current-flow-id');
+                const updateBtn = document.getElementById('update-flow-btn');
+                if (flowIdInput) flowIdInput.value = '';
+                if (updateBtn) updateBtn.classList.add('hidden');
+                showToast('New flow ready', 'info');
+            }
+        }
+
         window.clearCanvas = function(withConfirmation = true) {
-            if (withConfirmation && !confirm('Are you sure you want to clear the canvas? This cannot be undone.')) {
+            if (withConfirmation) {
+                openClearModal();
                 return;
             }
             nodes = [];
