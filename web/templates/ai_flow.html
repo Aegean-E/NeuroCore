@@ -42,10 +42,10 @@
     
     {% include 'navbar.html' %}
 
-    <main class="flex-grow flex relative overflow-hidden h-[calc(100vh-64px)]">
+    <main class="flex-grow flex relative h-[calc(100vh-64px)] overflow-hidden min-w-0">
     <!-- Sidebar -->
-        <aside class="w-72 flex-shrink-0 bg-slate-950/80 backdrop-blur-md border-r border-slate-800 flex flex-col">
-            <div class="flex-1 overflow-y-auto p-4 space-y-4 custom-scrollbar">
+        <aside class="w-72 flex-shrink-0 bg-slate-950/80 backdrop-blur-md border-r border-slate-800 flex flex-col h-full overflow-hidden z-10 relative">
+            <div class="flex-1 overflow-y-auto overflow-x-hidden p-4 space-y-4 custom-scrollbar" style="max-height: 100%;">
                 <div class="flex justify-between items-center mb-3">
                     <h2 class="text-sm font-bold uppercase tracking-widest text-slate-500">Available Functions</h2>
                     <button onclick="toggleDisabledModules()" id="toggle-disabled-btn" class="text-slate-600 hover:text-blue-400 transition-colors" title="Show/Hide Disabled Modules">
@@ -147,14 +147,14 @@
 
         <!-- AI Flow Area -->
         <div id="canvas" 
-             class="flex-grow canvas-grid relative overflow-visible">
+             class="flex-1 canvas-grid relative overflow-hidden">
             <svg id="canvas-svg" class="absolute inset-0 w-full h-full pointer-events-none overflow-visible"></svg>
             <div id="selection-box" class="absolute border-2 border-blue-500 bg-blue-500/10 pointer-events-none z-20 hidden"></div>
         </div>
         <div id="canvas-bin" class="absolute bottom-5 right-5 w-20 h-20 bg-red-900/50 border-2 border-dashed border-red-700 rounded-full flex items-center justify-center text-red-500 opacity-50 transition-all pointer-events-none z-40">
             <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
         </div>
-        <button id="help-btn" class="absolute top-4 right-4 p-3 rounded-lg bg-slate-800/60 border border-slate-700/50 text-slate-400 hover:text-slate-200 hover:bg-slate-700/60 transition-all z-30" title="Help">
+        <button id="help-btn" onclick="openHelpModal()" class="absolute top-4 right-4 p-3 rounded-lg bg-slate-800/60 border border-slate-700/50 text-slate-400 hover:text-slate-200 hover:bg-slate-700/60 transition-all z-30" title="Help">
             <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
         </button>
     </main>
@@ -182,6 +182,22 @@
             <div class="mt-6 flex justify-end space-x-3">
                 <button type="button" onclick="closeDeleteModal()" class="rounded-xl px-4 py-2 text-sm font-semibold text-slate-300 hover:bg-slate-800 transition-colors">Cancel</button>
                 <button type="button" id="confirm-delete-btn" class="rounded-xl bg-red-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-red-500 transition-colors">Delete</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Help Modal -->
+    <div id="help-modal" class="fixed inset-0 z-50 flex items-center justify-center hidden" aria-labelledby="help-modal-title" role="dialog" aria-modal="true">
+        <div class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm transition-opacity opacity-0" id="help-modal-backdrop"></div>
+        <div class="relative transform overflow-hidden rounded-2xl bg-slate-900 border border-slate-800 text-left shadow-2xl transition-all scale-95 opacity-0 sm:w-full sm:max-w-2xl max-h-[80vh]" id="help-modal-panel">
+            <div class="flex justify-between items-center p-4 border-b border-slate-800">
+                <h3 class="text-lg font-semibold leading-6 text-white" id="help-modal-title">AI Flow Help</h3>
+                <button onclick="closeHelpModal()" class="text-slate-500 hover:text-slate-300">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                </button>
+            </div>
+            <div id="help-content" class="overflow-y-auto max-h-[calc(80vh-60px)]">
+                {% include 'ai_flow_help.html' %}
             </div>
         </div>
     </div>
@@ -780,7 +796,7 @@
 
             const isConfigurable = configurableNodeTypeIds.has(nodeTypeId);
             const isTriggerable = nodeTypeId === 'trigger_node' || nodeTypeId === 'repeater_node';
-            const isSyncNode = ['reasoning_load', 'reasoning_save', 'memory_recall', 'memory_save', 'knowledge_query', 'query_knowledge', 'system_prompt'].includes(nodeTypeId);
+            const isSyncNode = ['reasoning_load', 'reasoning_save', 'memory_recall', 'memory_save', 'knowledge_query', 'query_knowledge', 'system_prompt', 'check_goal'].includes(nodeTypeId);
             const iconPath = moduleIcons[moduleId];
 
             const nodeElement = document.createElement('div');
@@ -1504,6 +1520,33 @@
             setTimeout(() => {
                 modal.classList.add('hidden');
             }, 200); // Match transition duration
+        }
+
+        window.openHelpModal = function() {
+            const modal = document.getElementById('help-modal');
+            const backdrop = document.getElementById('help-modal-backdrop');
+            const panel = document.getElementById('help-modal-panel');
+
+            modal.classList.remove('hidden');
+            requestAnimationFrame(() => {
+                backdrop.classList.remove('opacity-0');
+                panel.classList.remove('opacity-0', 'scale-95');
+                panel.classList.add('opacity-100', 'scale-100');
+            });
+        }
+
+        window.closeHelpModal = function() {
+            const modal = document.getElementById('help-modal');
+            const backdrop = document.getElementById('help-modal-backdrop');
+            const panel = document.getElementById('help-modal-panel');
+
+            backdrop.classList.add('opacity-0');
+            panel.classList.remove('opacity-100', 'scale-100');
+            panel.classList.add('opacity-0', 'scale-95');
+
+            setTimeout(() => {
+                modal.classList.add('hidden');
+            }, 200);
         }
 
         window.openClearModal = function() {

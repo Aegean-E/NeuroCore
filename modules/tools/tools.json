@@ -364,11 +364,11 @@
         },
         "enabled": true
     },
-    "CompleteGoal": {
+    "MarkGoalComplete": {
         "definition": {
             "type": "function",
             "function": {
-                "name": "CompleteGoal",
+                "name": "MarkGoalComplete",
                 "description": "Marks a goal as completed.",
                 "parameters": {
                     "type": "object",
