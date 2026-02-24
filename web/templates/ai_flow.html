@@ -675,6 +675,7 @@
                 const width = existingConfig.width || 200;
                 const height = existingConfig.height || 100;
                 const bgColor = existingConfig.bgColor || '#713f12';
+                const textColor = existingConfig.textColor || '#fde047';
                 const textAlign = existingConfig.textAlign || 'left';
                 const fontSize = existingConfig.fontSize || '14';
                 const fontStyle = existingConfig.fontStyle || 'normal';
@@ -686,7 +687,7 @@
                 nodeElement.style.width = `${width}px`;
                 nodeElement.style.height = `${height}px`;
                 nodeElement.innerHTML = `
-                    <div class="comment-toolbar hidden flex items-center justify-between px-2 py-1 bg-yellow-900/60 border-b border-yellow-600/30 text-xs">
+                    <div class="comment-toolbar hidden flex items-center justify-center px-2 py-1 bg-yellow-900/60 border-b border-yellow-600/30 text-xs">
                         <div class="flex items-center space-x-1">
                             <button type="button" class="toolbar-btn p-1 hover:bg-yellow-700/50 rounded" data-align="left" title="Align Left">
                                 <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h10M4 18h14"></path></svg>
@@ -713,11 +714,13 @@
                             </select>
                             <div class="w-px h-4 bg-yellow-600/30 mx-1"></div>
                             <input type="color" class="toolbar-color w-5 h-5 rounded cursor-pointer bg-transparent border-0" value="${bgColor}" title="Background Color">
+                            <div class="w-px h-4 bg-yellow-600/30 mx-1"></div>
+                            <input type="color" class="toolbar-text-color w-5 h-5 rounded cursor-pointer bg-transparent border-0" value="${textColor}" title="Text Color">
                         </div>
                     </div>
-                    <textarea class="comment-textarea flex-grow w-full h-full bg-transparent text-yellow-200 p-2 resize-none focus:outline-none custom-scrollbar" 
+                    <textarea class="comment-textarea flex-grow w-full h-full bg-transparent p-2 resize-none focus:outline-none custom-scrollbar" 
                         placeholder="Type your comment..."
-                        style="text-align: ${textAlign}; font-size: ${fontSize}px; font-style: ${fontStyle}; font-weight: ${fontWeight};">${existingConfig.text || ''}</textarea>
+                        style="text-align: ${textAlign}; font-size: ${fontSize}px; font-style: ${fontStyle}; font-weight: ${fontWeight}; color: ${textColor};">${existingConfig.text || ''}</textarea>
                     <div class="comment-resize-handle absolute bottom-0 right-0 w-4 h-4 cursor-se-resize"></div>
                 `;
             } else {
@@ -793,6 +796,7 @@
             }
             if (nodeTypeId === 'comment_node') {
                 if (!nodeData.config.bgColor) nodeData.config.bgColor = '#713f12';
+                if (!nodeData.config.textColor) nodeData.config.textColor = '#fde047';
                 if (!nodeData.config.textAlign) nodeData.config.textAlign = 'left';
                 if (!nodeData.config.fontSize) nodeData.config.fontSize = '14';
                 if (!nodeData.config.fontStyle) nodeData.config.fontStyle = 'normal';
@@ -881,6 +885,17 @@
                         nodeData.config.bgColor = color;
                     });
                     colorInput.addEventListener('mousedown', (e) => e.stopPropagation());
+                }
+
+                const textColorInput = nodeElement.querySelector('.toolbar-text-color');
+                if (textColorInput) {
+                    textColorInput.addEventListener('input', (e) => {
+                        e.stopPropagation();
+                        const color = e.target.value;
+                        textarea.style.color = color;
+                        nodeData.config.textColor = color;
+                    });
+                    textColorInput.addEventListener('mousedown', (e) => e.stopPropagation());
                 }
 
                 // Prevent toolbar interactions from triggering node drag
