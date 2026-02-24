@@ -674,13 +674,50 @@
             if (nodeTypeId === 'comment_node') {
                 const width = existingConfig.width || 200;
                 const height = existingConfig.height || 100;
-                nodeElement.className = 'absolute bg-yellow-900/40 border-2 border-dashed border-yellow-600/50 p-2 rounded-xl shadow-lg flex flex-col cursor-move';
+                const bgColor = existingConfig.bgColor || '#713f12';
+                const textAlign = existingConfig.textAlign || 'left';
+                const fontSize = existingConfig.fontSize || '14';
+                const fontStyle = existingConfig.fontStyle || 'normal';
+                const fontWeight = existingConfig.fontWeight || 'normal';
+                
+                nodeElement.className = 'absolute bg-yellow-900/40 border-2 border-dashed border-yellow-600/50 rounded-xl shadow-lg flex flex-col cursor-move';
                 nodeElement.style.left = `${x}px`;
                 nodeElement.style.top = `${y}px`;
                 nodeElement.style.width = `${width}px`;
                 nodeElement.style.height = `${height}px`;
                 nodeElement.innerHTML = `
-                    <textarea class="flex-grow w-full h-full bg-transparent text-yellow-200 text-sm p-2 resize-none focus:outline-none custom-scrollbar" placeholder="Type your comment...">${existingConfig.text || ''}</textarea>
+                    <div class="comment-toolbar hidden flex items-center justify-between px-2 py-1 bg-yellow-900/60 border-b border-yellow-600/30 text-xs">
+                        <div class="flex items-center space-x-1">
+                            <button type="button" class="toolbar-btn p-1 hover:bg-yellow-700/50 rounded" data-align="left" title="Align Left">
+                                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h10M4 18h14"></path></svg>
+                            </button>
+                            <button type="button" class="toolbar-btn p-1 hover:bg-yellow-700/50 rounded" data-align="center" title="Align Center">
+                                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M7 12h10M5 18h14"></path></svg>
+                            </button>
+                            <button type="button" class="toolbar-btn p-1 hover:bg-yellow-700/50 rounded" data-align="right" title="Align Right">
+                                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M10 12h10M6 18h14"></path></svg>
+                            </button>
+                            <div class="w-px h-4 bg-yellow-600/30 mx-1"></div>
+                            <button type="button" class="toolbar-btn p-1 hover:bg-yellow-700/50 rounded" data-fontstyle="italic" title="Italic">
+                                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 4h4m-2 0v16m-4 0h8"></path></svg>
+                            </button>
+                            <button type="button" class="toolbar-btn p-1 hover:bg-yellow-700/50 rounded" data-fontweight="bold" title="Bold">
+                                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 4h8a4 4 0 014 4 4 4 0 01-4 4H6zM6 12h9a4 4 0 014 4 4 4 0 01-4 4H6z"></path></svg>
+                            </button>
+                            <div class="w-px h-4 bg-yellow-600/30 mx-1"></div>
+                            <select class="toolbar-select bg-yellow-900/50 text-yellow-200 text-xs px-1 py-0.5 rounded border border-yellow-600/30 focus:outline-none">
+                                <option value="12" ${fontSize === '12' ? 'selected' : ''}>Small</option>
+                                <option value="14" ${fontSize === '14' ? 'selected' : ''}>Medium</option>
+                                <option value="16" ${fontSize === '16' ? 'selected' : ''}>Large</option>
+                                <option value="18" ${fontSize === '18' ? 'selected' : ''}>XL</option>
+                            </select>
+                            <div class="w-px h-4 bg-yellow-600/30 mx-1"></div>
+                            <input type="color" class="toolbar-color w-5 h-5 rounded cursor-pointer bg-transparent border-0" value="${bgColor}" title="Background Color">
+                        </div>
+                    </div>
+                    <textarea class="comment-textarea flex-grow w-full h-full bg-transparent text-yellow-200 p-2 resize-none focus:outline-none custom-scrollbar" 
+                        placeholder="Type your comment..."
+                        style="text-align: ${textAlign}; font-size: ${fontSize}px; font-style: ${fontStyle}; font-weight: ${fontWeight};">${existingConfig.text || ''}</textarea>
                     <div class="comment-resize-handle absolute bottom-0 right-0 w-4 h-4 cursor-se-resize"></div>
                 `;
             } else {
@@ -754,6 +791,13 @@
             if (nodeTypeId === 'tool_dispatcher' && !nodeData.config.allowed_tools) {
                 nodeData.config.allowed_tools = [];
             }
+            if (nodeTypeId === 'comment_node') {
+                if (!nodeData.config.bgColor) nodeData.config.bgColor = '#713f12';
+                if (!nodeData.config.textAlign) nodeData.config.textAlign = 'left';
+                if (!nodeData.config.fontSize) nodeData.config.fontSize = '14';
+                if (!nodeData.config.fontStyle) nodeData.config.fontStyle = 'normal';
+                if (!nodeData.config.fontWeight) nodeData.config.fontWeight = 'normal';
+            }
             
             nodes.push(nodeData);
 
@@ -762,12 +806,88 @@
             
             // Logic specific to comment nodes
             if (nodeTypeId === 'comment_node') {
-                const textarea = nodeElement.querySelector('textarea');
+                const textarea = nodeElement.querySelector('.comment-textarea');
                 textarea.addEventListener('input', () => {
                     nodeData.config.text = textarea.value;
                 });
                 // Prevent node drag when interacting with textarea
                 textarea.addEventListener('mousedown', (e) => e.stopPropagation());
+
+                // Toolbar event handlers
+                const toolbarBtns = nodeElement.querySelectorAll('.toolbar-btn');
+                toolbarBtns.forEach(btn => {
+                    btn.addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        const align = btn.dataset.align;
+                        const fontstyle = btn.dataset.fontstyle;
+                        const fontweight = btn.dataset.fontweight;
+                        
+                        if (align) {
+                            textarea.style.textAlign = align;
+                            nodeData.config.textAlign = align;
+                            toolbarBtns.forEach(b => {
+                                if (b.dataset.align) b.classList.remove('bg-yellow-600', 'text-white');
+                            });
+                            btn.classList.add('bg-yellow-600', 'text-white');
+                        }
+                        if (fontstyle) {
+                            const newStyle = textarea.style.fontStyle === 'italic' ? 'normal' : 'italic';
+                            textarea.style.fontStyle = newStyle;
+                            nodeData.config.fontStyle = newStyle;
+                            btn.classList.toggle('bg-yellow-600');
+                            btn.classList.toggle('text-white');
+                        }
+                        if (fontweight) {
+                            const newWeight = textarea.style.fontWeight === 'bold' ? 'normal' : 'bold';
+                            textarea.style.fontWeight = newWeight;
+                            nodeData.config.fontWeight = newWeight;
+                            btn.classList.toggle('bg-yellow-600');
+                            btn.classList.toggle('text-white');
+                        }
+                    });
+                });
+
+                // Set initial toolbar states
+                const currentAlign = nodeData.config.textAlign || 'left';
+                toolbarBtns.forEach(btn => {
+                    if (btn.dataset.align === currentAlign) {
+                        btn.classList.add('bg-yellow-600', 'text-white');
+                    }
+                    if (btn.dataset.fontstyle === 'italic' && textarea.style.fontStyle === 'italic') {
+                        btn.classList.add('bg-yellow-600', 'text-white');
+                    }
+                    if (btn.dataset.fontweight === 'bold' && textarea.style.fontWeight === 'bold') {
+                        btn.classList.add('bg-yellow-600', 'text-white');
+                    }
+                });
+
+                const fontSelect = nodeElement.querySelector('.toolbar-select');
+                if (fontSelect) {
+                    fontSelect.addEventListener('change', (e) => {
+                        e.stopPropagation();
+                        const size = e.target.value;
+                        textarea.style.fontSize = size + 'px';
+                        nodeData.config.fontSize = size;
+                    });
+                    fontSelect.addEventListener('mousedown', (e) => e.stopPropagation());
+                }
+
+                const colorInput = nodeElement.querySelector('.toolbar-color');
+                if (colorInput) {
+                    colorInput.addEventListener('input', (e) => {
+                        e.stopPropagation();
+                        const color = e.target.value;
+                        nodeElement.style.backgroundColor = color + '40';
+                        nodeData.config.bgColor = color;
+                    });
+                    colorInput.addEventListener('mousedown', (e) => e.stopPropagation());
+                }
+
+                // Prevent toolbar interactions from triggering node drag
+                const toolbar = nodeElement.querySelector('.comment-toolbar');
+                if (toolbar) {
+                    toolbar.addEventListener('mousedown', (e) => e.stopPropagation());
+                }
 
                 const resizeHandle = nodeElement.querySelector('.comment-resize-handle');
                 resizeHandle.addEventListener('mousedown', (e) => {
@@ -792,6 +912,15 @@
                     }
                     document.addEventListener('mousemove', doResize);
                     document.addEventListener('mouseup', stopResize);
+                });
+
+                // Click to show/hide toolbar
+                nodeElement.addEventListener('click', (e) => {
+                    if (e.target.closest('.toolbar-btn') || e.target.closest('.toolbar-select') || e.target.closest('.toolbar-color')) return;
+                    const toolbar = nodeElement.querySelector('.comment-toolbar');
+                    if (toolbar) {
+                        toolbar.classList.toggle('hidden');
+                    }
                 });
             }
 
