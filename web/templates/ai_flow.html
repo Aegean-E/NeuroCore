@@ -509,13 +509,14 @@
         }
         
         function clearNodeSelection() {
-            selectedNodeIds = [];
+            selectedNodeIds = new Set();
             nodes.forEach(node => {
                 const nodeEl = document.getElementById(node.id);
                 if (nodeEl) {
                     nodeEl.classList.remove('selected-node');
                 }
             });
+            selectedNodeId = null;
         }
 
         // --- Event Listeners for Pan, Zoom, and Interaction ---
@@ -552,6 +553,15 @@
                 clearConnectionState();
                 event.preventDefault();
                 return;
+            }
+            
+            // Deselect on left click on empty space
+            if (event.button === 0 && isEmptySpace) {
+                if (selectedNodeId || selectedNodeIds.size > 0) {
+                    clearNodeSelection();
+                    selectedConnection = null;
+                    drawConnections();
+                }
             }
             
             // Ctrl + Left click for selection box
@@ -2258,9 +2268,9 @@
     </script>
 
     <script>
-        const activeFlowId = "{{ active_flow_id }}";
-        if (activeFlowId && activeFlowId !== 'None') {
-            window.addEventListener('load', () => loadFlowById(activeFlowId));
+        const activeFlowIds = {{ active_flow_ids | tojson }};
+        if (activeFlowIds && activeFlowIds.length > 0) {
+            window.addEventListener('load', () => loadFlowById(activeFlowIds[0]));
         }
     </script>
 </body>

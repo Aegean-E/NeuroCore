@@ -104,8 +104,8 @@ class FlowManager:
         }
 
     def _ensure_default_active(self):
-        if not settings.get("active_ai_flow"):
-            settings.save_settings({"active_ai_flow": "default-flow-001"})
+        if not settings.get("active_ai_flows"):
+            settings.save_settings({"active_ai_flows": []})
 
     def _save_flows_to_disk(self, flows):
         # Lock should be held by caller
@@ -163,13 +163,13 @@ class FlowManager:
             return False
 
     def make_active_flow_default(self):
-        """Overwrites the default flow with the currently active flow."""
+        """Overwrites the default flow with the first active flow."""
         with self.lock:
-            active_id = settings.get("active_ai_flow")
-            if not active_id or active_id not in self.flows:
+            active_ids = settings.get("active_ai_flows", [])
+            if not active_ids or active_ids[0] not in self.flows:
                 return False
             
-            # Create a deep copy of the active flow
+            active_id = active_ids[0]
             active_flow = copy.deepcopy(self.flows[active_id])
             
             default_id = "default-flow-001"

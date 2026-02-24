@@ -385,5 +385,27 @@
             }
         },
         "enabled": true
+    },
+    "DeleteGoal": {
+        "definition": {
+            "type": "function",
+            "function": {
+                "name": "DeleteGoal",
+                "description": "Deletes a goal from the system.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "goal_id": {
+                            "type": "number",
+                            "description": "The ID of the goal to delete."
+                        }
+                    },
+                    "required": [
+                        "goal_id"
+                    ]
+                }
+            }
+        },
+        "enabled": true
     }
 }

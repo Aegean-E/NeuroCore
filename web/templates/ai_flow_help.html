@@ -49,8 +49,9 @@
             <p>The <strong class="text-white">Goals</strong> feature enables autonomous agents:</p>
             <ul class="list-disc list-inside text-slate-400 text-xs space-y-1">
                 <li>Use <strong class="text-emerald-400">SetGoal</strong> tool to create a goal</li>
-                <li>Use <strong class="text-emerald-400">Check Goal</strong> node to inject goal into context</li>
+                <li>Use <strong class="text-blue-400">Check Goal</strong> node to inject goal into context</li>
                 <li>Use <strong class="text-emerald-400">MarkGoalComplete</strong> tool when done</li>
+                <li>Use <strong class="text-red-400">DeleteGoal</strong> tool to remove a goal</li>
             </ul>
             <p class="text-xs text-slate-500 mt-2">Example flow: Chat Input → Check Goal → LLM Core → Tool Dispatcher → Chat Output</p>
         </div>
@@ -71,6 +72,31 @@
             <p>Enable tools in <strong class="text-white">System Prompt</strong> node config:</p>
             <p class="text-xs text-slate-500">1. Click System Prompt node → 2. Select tools → 3. Save</p>
             <p>Custom tools can be created in <strong class="text-white">Settings → Tools</strong></p>
+        </div>
+    </div>
+
+    <div class="border-t border-slate-700 pt-4">
+        <h3 class="text-lg font-bold text-blue-400 mb-2">Tool Dispatcher</h3>
+        <div class="space-y-2 text-sm text-slate-300">
+            <p>Executes tools enabled in <strong class="text-white">System Prompt</strong>:</p>
+            <div class="bg-slate-800/50 rounded-lg p-3">
+                <p class="text-xs text-slate-400 mb-1">Flow order:</p>
+                <p class="text-xs text-white">System Prompt → LLM Core → Tool Dispatcher → (Tool executes) → LLM Core → ...</p>
+                <p class="text-xs text-slate-500 mt-2">LLM decides which tool to call, Tool Dispatcher executes it, result returns to LLM.</p>
+            </div>
+            <p class="text-xs text-slate-500">Available: SetGoal, MarkGoalComplete, Weather, Calculator, etc.</p>
+        </div>
+    </div>
+
+    <div class="border-t border-slate-700 pt-4">
+        <h3 class="text-lg font-bold text-blue-400 mb-2">Multiple Active Flows</h3>
+        <div class="space-y-2 text-sm text-slate-300">
+            <p>Run multiple flows simultaneously:</p>
+            <ol class="list-decimal list-inside text-xs text-slate-400 space-y-1">
+                <li>Set a flow as active in <strong class="text-white">Settings → AI Flow</strong></li>
+                <li>Use <strong class="text-white">Repeater</strong> node for scheduled tasks</li>
+                <li>Each flow runs independently</li>
+            </ol>
         </div>
     </div>
 </div>

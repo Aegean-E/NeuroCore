@@ -116,12 +116,10 @@ async def send_message(
 
     # Add user message to history
     session_manager.add_message(session_id, "user", user_content)
-    # Reload session to get the updated history
     active_session = session_manager.get_session(session_id)
     
-    # --- New AI Flow Execution Logic ---
-    active_flow_id = settings.get("active_ai_flow")
-    active_flow = flow_manager.get_flow(active_flow_id) if active_flow_id else None
+    active_flow_ids = settings.get("active_ai_flows", [])
+    active_flow = flow_manager.get_flow(active_flow_ids[0]) if active_flow_ids else None
 
     if not active_flow:
         ai_response = "Error: No active AI Flow is set. Please go to the AI Flow page to create and activate a flow."

@@ -169,11 +169,11 @@ async def toggle_module(request: Request, module_id: str, action: str, module_ma
 
 @router.get("/ai-flow", response_class=HTMLResponse)
 async def ai_flow_page(request: Request, module_manager: ModuleManager = Depends(get_module_manager), settings_man: SettingsManager = Depends(get_settings_manager)):
-    active_flow_id = settings_man.get("active_ai_flow")
+    active_flow_ids = settings_man.get("active_ai_flows", [])
     return templates.TemplateResponse(request, "ai_flow.html", {
         "modules": module_manager.get_all_modules(),
         "flows": flow_manager.list_flows(),
-        "active_flow_id": active_flow_id,
+        "active_flow_ids": active_flow_ids,
         "settings": settings_man.settings
     })
 
@@ -196,7 +196,7 @@ async def save_ai_flow(request: Request, name: str = Form(...), nodes: str = For
     
     return templates.TemplateResponse(request, "ai_flow_list.html", {
         "flows": flow_manager.list_flows(),
-        "active_flow_id": settings.get("active_ai_flow")
+        "active_flow_ids": settings.get("active_ai_flows", [])
     }, headers={"HX-Trigger": json.dumps({"showMessage": {"level": "success", "message": "Flow saved successfully"}})})
 
 @router.post("/ai-flow/{flow_id}/rename", response_class=HTMLResponse)
@@ -204,12 +204,15 @@ async def rename_flow(request: Request, flow_id: str, name: str = Form(...), set
     flow_manager.rename_flow(flow_id, name)
     return templates.TemplateResponse(request, "ai_flow_list.html", {
         "flows": flow_manager.list_flows(),
-        "active_flow_id": settings_man.get("active_ai_flow")
+        "active_flow_ids": settings_man.get("active_ai_flows", [])
     })
 
 @router.post("/ai-flow/{flow_id}/set-active", response_class=HTMLResponse)
 async def set_active_flow(request: Request, flow_id: str, settings_man: SettingsManager = Depends(get_settings_manager)):
-    settings_man.save_settings({"active_ai_flow": flow_id})
+    active_flows = settings_man.get("active_ai_flows", [])
+    if flow_id not in active_flows:
+        active_flows.append(flow_id)
+    settings_man.save_settings({"active_ai_flows": active_flows})
     
     # Auto-start the flow if it has a Repeater node
     flow = flow_manager.get_flow(flow_id)
@@ -228,20 +231,18 @@ async def set_active_flow(request: Request, flow_id: str, settings_man: Settings
                 runner = FlowRunner(flow_id)
                 await runner.run({"_repeat_count": 1}, start_node_id=node['id'])
             
-            # Get background tasks from app state
             if hasattr(request.app.state, 'background_tasks'):
                 task = asyncio.create_task(run_flow())
                 request.app.state.background_tasks.add(task)
     
     return templates.TemplateResponse(request, "ai_flow_list.html", {
         "flows": flow_manager.list_flows(),
-        "active_flow_id": flow_id
+        "active_flow_ids": active_flows
     })
 
 @router.post("/ai-flow/stop-active", response_class=HTMLResponse)
 async def stop_active_flow(request: Request, settings_man: SettingsManager = Depends(get_settings_manager)):
-    """Stops the currently active flow by clearing the active flow setting and canceling tasks."""
-    # Cancel all running background tasks
+    """Stops all active flows by clearing the active flows list and canceling tasks."""
     if hasattr(request.app.state, 'background_tasks'):
         stopped_count = 0
         for task in list(request.app.state.background_tasks):
@@ -250,20 +251,22 @@ async def stop_active_flow(request: Request, settings_man: SettingsManager = Dep
                 stopped_count += 1
         print(f"[System] Cancelled {stopped_count} background tasks")
     
-    settings_man.save_settings({"active_ai_flow": None})
+    settings_man.save_settings({"active_ai_flows": []})
     return templates.TemplateResponse(request, "ai_flow_list.html", {
         "flows": flow_manager.list_flows(),
-        "active_flow_id": None
-    }, headers={"HX-Trigger": json.dumps({"showMessage": {"level": "info", "message": "Active flow stopped"}})})
+        "active_flow_ids": []
+    }, headers={"HX-Trigger": json.dumps({"showMessage": {"level": "info", "message": "All active flows stopped"}})})
 
 @router.post("/ai-flow/{flow_id}/delete", response_class=HTMLResponse)
 async def delete_flow(request: Request, flow_id: str, settings_man: SettingsManager = Depends(get_settings_manager)):
-    if settings_man.get("active_ai_flow") == flow_id:
-        settings_man.save_settings({"active_ai_flow": None})
+    active_flows = settings_man.get("active_ai_flows", [])
+    if flow_id in active_flows:
+        active_flows.remove(flow_id)
+        settings_man.save_settings({"active_ai_flows": active_flows})
     flow_manager.delete_flow(flow_id)
     return templates.TemplateResponse(request, "ai_flow_list.html", {
         "flows": flow_manager.list_flows(),
-        "active_flow_id": settings_man.get("active_ai_flow")
+        "active_flow_ids": active_flows
     })
 
 @router.post("/ai-flow/make-default")

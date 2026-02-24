@@ -189,11 +189,12 @@ class TelegramService:
         session_manager.add_message(sess_id, "user", user_content)
         
         # 4. Run Active Flow
-        active_flow_id = settings.get("active_ai_flow")
-        if not active_flow_id:
+        active_flow_ids = settings.get("active_ai_flows", [])
+        if not active_flow_ids:
             self.bridge.send_message("⚠️ No active AI Flow configured on server.", chat_id)
             return
 
+        active_flow_id = active_flow_ids[0]
         try:
             runner = FlowRunner(flow_id=active_flow_id)
             session = session_manager.get_session(sess_id)

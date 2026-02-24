@@ -34,23 +34,18 @@ async def lifespan(app: FastAPI):
     # Initialize background tasks set to prevent GC of fire-and-forget tasks
     app.state.background_tasks = set()
 
-    # Auto-start active flow if it contains a Repeater node
-    active_flow_id = settings.get("active_ai_flow")
-    if active_flow_id:
+    # Auto-start all active flows that contain Repeater nodes
+    active_flow_ids = settings.get("active_ai_flows", [])
+    for active_flow_id in active_flow_ids:
         flow = flow_manager.get_flow(active_flow_id)
         if flow:
-            # Define node types that should auto-start in the background
-            # This allows multiple independent chains (e.g. Repeater, Cron, Event Watcher) to run simultaneously
             background_node_types = ["repeater_node"]
-            
-            # Find all nodes of these types
             start_nodes = [n for n in flow.get("nodes", []) if n.get("nodeTypeId") in background_node_types]
             
             for node in start_nodes:
                 print(f"[System] Auto-starting flow '{flow.get('name')}' from {node['nodeTypeId']} '{node['id']}'.")
                 if settings.get("debug_mode"):
                     debug_logger.log(active_flow_id, node['id'], node.get('name'), "auto_start", {})
-                # Start with _repeat_count=1 to skip Chat Input nodes and prevent ghost replies
                 runner = FlowRunner(active_flow_id)
                 task = asyncio.create_task(runner.run({"_repeat_count": 1}, start_node_id=node['id']))
                 app.state.background_tasks.add(task)
@@ -66,11 +61,11 @@ os.makedirs("web/static", exist_ok=True)
 app.mount("/static", StaticFiles(directory="web/static"), name="static")
 app.include_router(core_router)
 
-# Debug Endpoint to manually fire the active flow
+# Debug Endpoint to manually fire all active flows
 @app.post("/debug/fire-flow")
 async def debug_fire_flow():
-    active_flow_id = settings.get("active_ai_flow")
-    if active_flow_id:
+    active_flow_ids = settings.get("active_ai_flows", [])
+    for active_flow_id in active_flow_ids:
         flow = flow_manager.get_flow(active_flow_id)
         if flow:
             background_node_types = ["repeater_node"]
