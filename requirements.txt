@@ -1,0 +1,22 @@
+# NeuroCore Dependencies
+
+# Web Framework
+fastapi
+uvicorn
+python-multipart
+
+# HTTP Client
+httpx
+
+# Templating
+jinja2
+
+# Data & AI
+numpy
+faiss-cpu
+
+# Testing
+pytest<9
+pytest-cov
+pytest-httpx
+pytest-asyncio
