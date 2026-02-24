@@ -87,8 +87,16 @@ async def test_chat_send_route(client, httpx_mock, mock_chat_sessions, monkeypat
     session = mock_chat_sessions.create_session("Send Test")
     session_id = session['id']
 
+    # Mock settings to return an active flow
+    def mock_settings_get(key, default=None):
+        if key == "active_ai_flows":
+            return ["test-flow-1"]
+        return default
+
     # Patch FlowRunner to return a fixed response, avoiding actual flow execution logic
-    with patch("modules.chat.router.FlowRunner") as MockRunner:
+    with patch("modules.chat.router.settings.get", side_effect=mock_settings_get), \
+         patch("modules.chat.router.flow_manager.get_flow", return_value={"id": "test-flow-1"}), \
+         patch("modules.chat.router.FlowRunner") as MockRunner:
         runner_instance = MockRunner.return_value
         runner_instance.run = AsyncMock(return_value={"content": "Mocked AI Response"})
         

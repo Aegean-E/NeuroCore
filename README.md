@@ -9,6 +9,16 @@
   <a href="https://fastapi.tiangolo.com"><img src="https://img.shields.io/badge/FastAPI-009688?style=for-the-badge&logo=fastapi&logoColor=white" alt="FastAPI"></a>
   <a href="https://htmx.org"><img src="https://img.shields.io/badge/HTMX-333333?style=for-the-badge&logo=htmx&logoColor=white" alt="HTMX"></a>
   <a href="https://tailwindcss.com"><img src="https://img.shields.io/badge/Tailwind_CSS-38B2AC?style=for-the-badge&logo=tailwind-css&logoColor=white" alt="Tailwind CSS"></a>
+  <img src="https://img.shields.io/badge/tests-passing-green?style=for-the-badge&color=green" alt="Tests">
+  <a href="https://github.com/Aegean-E/NeuroCore/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg?style=for-the-badge" alt="License"></a>
+</p>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/🧠_AI_Memory-gray?style=flat&color=blue" alt="AI Memory">
+  <img src="https://img.shields.io/badge/📚_RAG-gray?style=flat&color=green" alt="RAG">
+  <img src="https://img.shields.io/badge/🔧_Tools-gray?style=flat&color=orange" alt="Tools">
+  <img src="https://img.shields.io/badge/🤖_Autonomous-gray?style=flat&color=purple" alt="Autonomous Agents">
+  <img src="https://img.shields.io/badge/🐳_Docker-gray?style=flat&color=cyan" alt="Docker">
 </p>
 
 ---

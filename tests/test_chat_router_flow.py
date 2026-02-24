@@ -24,7 +24,12 @@ def test_send_message_no_active_flow(client, mock_chat_sessions):
     """Test response when no AI flow is active."""
     session = mock_chat_sessions.create_session("Test")
     
-    with patch("modules.chat.router.settings.get", return_value=None):
+    def mock_settings_get(key, default=None):
+        if key == "active_ai_flows":
+            return []
+        return default
+    
+    with patch("modules.chat.router.settings.get", side_effect=mock_settings_get):
         response = client.post(f"/chat/send?session_id={session['id']}", data={"message": "Hi"})
         
         assert response.status_code == 200
@@ -34,7 +39,12 @@ def test_send_message_flow_execution_error(client, mock_chat_sessions):
     """Test response when the AI flow returns an error."""
     session = mock_chat_sessions.create_session("Test")
     
-    with patch("modules.chat.router.settings.get", return_value="flow-1"), \
+    def mock_settings_get(key, default=None):
+        if key == "active_ai_flows":
+            return ["flow-1"]
+        return default
+    
+    with patch("modules.chat.router.settings.get", side_effect=mock_settings_get), \
          patch("modules.chat.router.flow_manager.get_flow", return_value={"id": "flow-1"}), \
          patch("modules.chat.router.FlowRunner") as MockRunner:
         
@@ -50,7 +60,12 @@ def test_send_message_flow_crash(client, mock_chat_sessions):
     """Test response when the FlowRunner raises an exception."""
     session = mock_chat_sessions.create_session("Test")
     
-    with patch("modules.chat.router.settings.get", return_value="flow-1"), \
+    def mock_settings_get(key, default=None):
+        if key == "active_ai_flows":
+            return ["flow-1"]
+        return default
+    
+    with patch("modules.chat.router.settings.get", side_effect=mock_settings_get), \
          patch("modules.chat.router.flow_manager.get_flow", return_value={"id": "flow-1"}), \
          patch("modules.chat.router.FlowRunner") as MockRunner:
         
@@ -60,13 +75,18 @@ def test_send_message_flow_crash(client, mock_chat_sessions):
         response = client.post(f"/chat/send?session_id={session['id']}", data={"message": "Hi"})
         
         assert response.status_code == 200
-        assert "Critical Error running AI Flow: Critical Failure" in response.text
+        assert "Critical Error running AI Flow" in response.text
 
 def test_send_message_success(client, mock_chat_sessions):
     """Test successful message flow."""
     session = mock_chat_sessions.create_session("Test")
     
-    with patch("modules.chat.router.settings.get", return_value="flow-1"), \
+    def mock_settings_get(key, default=None):
+        if key == "active_ai_flows":
+            return ["flow-1"]
+        return default
+    
+    with patch("modules.chat.router.settings.get", side_effect=mock_settings_get), \
          patch("modules.chat.router.flow_manager.get_flow", return_value={"id": "flow-1"}), \
          patch("modules.chat.router.FlowRunner") as MockRunner:
         

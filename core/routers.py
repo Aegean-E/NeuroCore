@@ -429,6 +429,14 @@ async def save_settings_route(request: Request, settings_man: SettingsManager = 
     for field in text_fields:
         if field in form_data:
             updates[field] = form_data[field]
+    
+    # Handle numeric fields
+    for field in ["temperature", "max_tokens"]:
+        if field in form_data:
+            try:
+                updates[field] = float(form_data[field])
+            except (ValueError, TypeError):
+                pass
             
     if "request_timeout" in form_data:
         try:

@@ -71,6 +71,10 @@ class FlowRunner:
             source = conn['from']
             target = conn['to']
             
+            # Skip orphaned connections (connections to non-existent nodes)
+            if source not in self.nodes or target not in self.nodes:
+                continue
+            
             targets = [target]
             # If target is bridged, the source effectively feeds the whole bridge group
             if target in self.bridge_groups:

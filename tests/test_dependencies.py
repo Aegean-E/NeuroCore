@@ -10,7 +10,13 @@ def test_get_llm_bridge_uses_settings():
     """
     # Create a mock SettingsManager
     mock_settings = MagicMock()
-    mock_settings.get.return_value = "http://mock-url.com/v1"
+    mock_settings.get.side_effect = lambda key, default=None: {
+        "llm_api_url": "http://mock-url.com/v1",
+        "llm_api_key": "",
+        "embedding_api_url": "",
+        "embedding_model": "",
+        "request_timeout": 60.0
+    }.get(key, default)
 
     # Call the dependency function with the mock
     bridge = get_llm_bridge(settings=mock_settings)

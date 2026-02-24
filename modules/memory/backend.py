@@ -883,11 +883,16 @@ REASON: Brief explanation (1-2 sentences)"""
         return self.update_goal(goal_id, status="completed")
 
     def get_next_goal(self) -> Optional[Dict]:
-        """Get the highest priority pending/in_progress goal."""
+        """Get the highest priority pending/in_progress goal. In_progress goals take priority regardless of lower priority."""
         with self._connect() as con:
             row = con.execute("""
                 SELECT id, description, priority, status, context, created_at, updated_at, deadline, completed_at
-                FROM goals WHERE status IN ('pending', 'in_progress') ORDER BY priority DESC, created_at ASC LIMIT 1
+                FROM goals WHERE status IN ('pending', 'in_progress') 
+                ORDER BY 
+                    CASE WHEN status = 'in_progress' THEN 0 ELSE 1 END,
+                    priority DESC, 
+                    created_at ASC 
+                LIMIT 1
             """).fetchone()
         
         if not row:

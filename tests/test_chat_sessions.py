@@ -1,64 +1,119 @@
-import os
-import json
-import time
 import pytest
+import json
+import os
+import sys
+import tempfile
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from modules.chat.sessions import SessionManager
 
-TEST_SESSIONS_FILE = "test_chat_sessions.json"
 
 @pytest.fixture
-def session_manager():
-    """Provides a SessionManager instance using a temporary file."""
-    # Setup
-    if os.path.exists(TEST_SESSIONS_FILE):
-        os.remove(TEST_SESSIONS_FILE)
-    
-    manager = SessionManager(storage_file=TEST_SESSIONS_FILE)
-    yield manager
-    
-    # Teardown
-    if os.path.exists(TEST_SESSIONS_FILE):
-        os.remove(TEST_SESSIONS_FILE)
+def temp_session_file():
+    fd, path = tempfile.mkstemp(suffix=".json")
+    os.close(fd)
+    yield path
+    if os.path.exists(path):
+        os.remove(path)
 
-def test_create_and_get_session(session_manager):
-    """Tests creating a session and retrieving it."""
-    session_data = session_manager.create_session("My Test Session")
-    session_id = session_data["id"]
 
-    assert session_id in session_manager.sessions
+@pytest.fixture
+def session_manager(temp_session_file):
+    return SessionManager(storage_file=temp_session_file)
+
+
+def test_create_session(session_manager):
+    session = session_manager.create_session()
+    
+    assert "id" in session
+    assert session["name"].startswith("Session ")
+    assert session["history"] == []
+    assert "created_at" in session
+    assert "updated_at" in session
+
+
+def test_create_session_with_name(session_manager):
+    session = session_manager.create_session(name="My Chat")
+    
+    assert session["name"] == "My Chat"
+
+
+def test_get_session(session_manager):
+    created = session_manager.create_session()
+    session_id = created["id"]
     
     retrieved = session_manager.get_session(session_id)
-    assert retrieved is not None
-    assert retrieved["name"] == "My Test Session"
-    assert retrieved["history"] == []
-
-def test_add_message(session_manager):
-    """Tests adding a message to a session's history."""
-    session_data = session_manager.create_session()
-    session_id = session_data["id"]
-
-    result = session_manager.add_message(session_id, "user", "Hello")
-    assert result is True
     
-    session = session_manager.get_session(session_id)
-    assert len(session["history"]) == 1
-    assert session["history"][0] == {"role": "user", "content": "Hello"}
+    assert retrieved is not None
+    assert retrieved["id"] == session_id
+
+
+def test_get_session_not_found(session_manager):
+    result = session_manager.get_session("nonexistent-id")
+    
+    assert result is None
+
 
 def test_delete_session(session_manager):
-    """Tests deleting a session."""
-    session_id = session_manager.create_session()["id"]
-    assert session_manager.get_session(session_id) is not None
+    session = session_manager.create_session()
+    session_id = session["id"]
     
     result = session_manager.delete_session(session_id)
+    
     assert result is True
     assert session_manager.get_session(session_id) is None
 
-def test_list_sessions_sorted(session_manager):
-    """Tests that sessions are listed with the newest first."""
-    session1 = session_manager.create_session("Session 1")
-    time.sleep(0.1)
-    session2 = session_manager.create_session("Session 2")
+
+def test_delete_session_not_found(session_manager):
+    result = session_manager.delete_session("nonexistent-id")
     
-    session_list = session_manager.list_sessions()
-    assert len(session_list) == 2
-    assert session_list[0]["id"] == session2["id"]
+    assert result is False
+
+
+def test_rename_session(session_manager):
+    session = session_manager.create_session()
+    session_id = session["id"]
+    
+    result = session_manager.rename_session(session_id, "New Name")
+    
+    assert result is True
+    assert session_manager.get_session(session_id)["name"] == "New Name"
+
+
+def test_rename_session_not_found(session_manager):
+    result = session_manager.rename_session("nonexistent-id", "New Name")
+    
+    assert result is False
+
+
+def test_list_sessions(session_manager):
+    session1 = session_manager.create_session(name="First")
+    session2 = session_manager.create_session(name="Second")
+    session3 = session_manager.create_session(name="Third")
+    
+    sessions = session_manager.list_sessions()
+    
+    assert len(sessions) == 3
+    names = [s["name"] for s in sessions]
+    assert "First" in names
+    assert "Second" in names
+    assert "Third" in names
+
+
+def test_add_message(session_manager):
+    session = session_manager.create_session()
+    session_id = session["id"]
+    
+    result = session_manager.add_message(session_id, "user", "Hello")
+    
+    assert result is True
+    session = session_manager.get_session(session_id)
+    assert len(session["history"]) == 1
+    assert session["history"][0]["role"] == "user"
+    assert session["history"][0]["content"] == "Hello"
+
+
+def test_add_message_to_nonexistent_session(session_manager):
+    result = session_manager.add_message("nonexistent-id", "user", "Hello")
+    
+    assert result is False

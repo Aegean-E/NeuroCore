@@ -60,7 +60,9 @@ class EventManager:
 
     def delete_event(self, event_id):
         events = self._load_events()
+        initial_count = len(events)
         events = [e for e in events if e.get("id") != event_id]
         self._save_events(events)
+        return len(events) < initial_count
 
 event_manager = EventManager()
