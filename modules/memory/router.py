@@ -177,3 +177,66 @@ async def get_meta_memories(request: Request, limit: int = 50, offset: int = 0):
         return {"meta_memories": meta}
     except Exception as e:
         return {"meta_memories": [], "error": str(e)}
+
+@router.get("/goals")
+async def get_goals(request: Request, status: str = None, limit: int = 50, offset: int = 0):
+    try:
+        loop = asyncio.get_running_loop()
+        goals = await loop.run_in_executor(memory_store.executor, lambda: memory_store.get_goals(status, limit, offset))
+        return {"goals": goals}
+    except Exception as e:
+        return {"goals": [], "error": str(e)}
+
+@router.get("/goals/{goal_id}")
+async def get_goal(request: Request, goal_id: int):
+    try:
+        loop = asyncio.get_running_loop()
+        goal = await loop.run_in_executor(memory_store.executor, lambda: memory_store.get_goal(goal_id))
+        return {"goal": goal} if goal else Response(status_code=404)
+    except Exception as e:
+        return {"goal": None, "error": str(e)}
+
+@router.post("/goals")
+async def create_goal(request: Request, description: str = Form(...), priority: int = Form(0), deadline: int = Form(None)):
+    try:
+        loop = asyncio.get_running_loop()
+        goal_id = await loop.run_in_executor(memory_store.executor, lambda: memory_store.create_goal(description, priority, deadline))
+        return {"goal_id": goal_id, "message": "Goal created"}
+    except Exception as e:
+        return {"error": str(e)}, 500
+
+@router.put("/goals/{goal_id}")
+async def update_goal(request: Request, goal_id: int, description: str = Form(None), priority: int = Form(None), status: str = Form(None), context: str = Form(None), deadline: int = Form(None)):
+    try:
+        loop = asyncio.get_running_loop()
+        success = await loop.run_in_executor(memory_store.executor, lambda: memory_store.update_goal(goal_id, description, priority, status, context, deadline))
+        return {"success": success}
+    except Exception as e:
+        return {"error": str(e)}, 500
+
+@router.delete("/goals/{goal_id}")
+async def delete_goal(request: Request, goal_id: int):
+    try:
+        loop = asyncio.get_running_loop()
+        success = await loop.run_in_executor(memory_store.executor, lambda: memory_store.delete_goal(goal_id))
+        return {"success": success}
+    except Exception as e:
+        return {"error": str(e)}, 500
+
+@router.post("/goals/{goal_id}/complete")
+async def complete_goal(request: Request, goal_id: int):
+    try:
+        loop = asyncio.get_running_loop()
+        success = await loop.run_in_executor(memory_store.executor, lambda: memory_store.complete_goal(goal_id))
+        return {"success": success}
+    except Exception as e:
+        return {"error": str(e)}, 500
+
+@router.get("/goals/next")
+async def get_next_goal(request: Request):
+    try:
+        loop = asyncio.get_running_loop()
+        goal = await loop.run_in_executor(memory_store.executor, memory_store.get_next_goal)
+        return {"goal": goal}
+    except Exception as e:
+        return {"goal": None, "error": str(e)}

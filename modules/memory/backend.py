@@ -114,6 +114,22 @@ class MemoryStore:
         con.execute("CREATE INDEX IF NOT EXISTS idx_meta_action ON meta_memories(action);")
         con.execute("CREATE INDEX IF NOT EXISTS idx_meta_created_at ON meta_memories(created_at);")
 
+        con.execute("""
+            CREATE TABLE IF NOT EXISTS goals (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                description TEXT NOT NULL,
+                priority INTEGER DEFAULT 0,
+                status TEXT DEFAULT 'pending',
+                context TEXT,
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL,
+                deadline INTEGER DEFAULT NULL,
+                completed_at INTEGER DEFAULT NULL
+            )
+        """)
+        con.execute("CREATE INDEX IF NOT EXISTS idx_goals_status ON goals(status);")
+        con.execute("CREATE INDEX IF NOT EXISTS idx_goals_priority ON goals(priority DESC);")
+
     def _parse_embedding(self, blob) -> Optional[np.ndarray]:
         if blob is None: return None
         try:
@@ -752,6 +768,142 @@ REASON: Brief explanation (1-2 sentences)"""
             }
             for r in rows
         ]
+
+    def create_goal(self, description: str, priority: int = 0, deadline: int = None, context: str = None) -> int:
+        """Create a new goal. Returns goal ID."""
+        with self.write_lock:
+            with self._connect() as con:
+                cur = con.execute("""
+                    INSERT INTO goals (description, priority, status, context, created_at, updated_at, deadline)
+                    VALUES (?, ?, 'pending', ?, ?, ?, ?)
+                """, (description, priority, context, int(time.time()), int(time.time()), deadline))
+                return cur.lastrowid
+
+    def get_goals(self, status: str = None, limit: int = 50, offset: int = 0) -> List[Dict]:
+        """Get goals, optionally filtered by status."""
+        with self._connect() as con:
+            if status:
+                rows = con.execute("""
+                    SELECT id, description, priority, status, context, created_at, updated_at, deadline, completed_at
+                    FROM goals WHERE status = ? ORDER BY priority DESC, created_at DESC LIMIT ? OFFSET ?
+                """, (status, limit, offset)).fetchall()
+            else:
+                rows = con.execute("""
+                    SELECT id, description, priority, status, context, created_at, updated_at, deadline, completed_at
+                    FROM goals ORDER BY priority DESC, created_at DESC LIMIT ? OFFSET ?
+                """, (limit, offset)).fetchall()
+        
+        return [
+            {
+                "id": r[0],
+                "description": r[1],
+                "priority": r[2],
+                "status": r[3],
+                "context": r[4],
+                "created_at": r[5],
+                "updated_at": r[6],
+                "deadline": r[7],
+                "completed_at": r[8]
+            }
+            for r in rows
+        ]
+
+    def get_goal(self, goal_id: int) -> Optional[Dict]:
+        """Get a single goal by ID."""
+        with self._connect() as con:
+            row = con.execute("""
+                SELECT id, description, priority, status, context, created_at, updated_at, deadline, completed_at
+                FROM goals WHERE id = ?
+            """, (goal_id,)).fetchone()
+        
+        if not row:
+            return None
+        
+        return {
+            "id": row[0],
+            "description": row[1],
+            "priority": row[2],
+            "status": row[3],
+            "context": row[4],
+            "created_at": row[5],
+            "updated_at": row[6],
+            "deadline": row[7],
+            "completed_at": row[8]
+        }
+
+    def update_goal(self, goal_id: int, description: str = None, priority: int = None, status: str = None, context: str = None, deadline: int = None) -> bool:
+        """Update a goal. Returns True if successful."""
+        goal = self.get_goal(goal_id)
+        if not goal:
+            return False
+        
+        with self.write_lock:
+            with self._connect() as con:
+                updates = []
+                params = []
+                
+                if description is not None:
+                    updates.append("description = ?")
+                    params.append(description)
+                if priority is not None:
+                    updates.append("priority = ?")
+                    params.append(priority)
+                if status is not None:
+                    updates.append("status = ?")
+                    params.append(status)
+                    if status == "completed":
+                        updates.append("completed_at = ?")
+                        params.append(int(time.time()))
+                if context is not None:
+                    updates.append("context = ?")
+                    params.append(context)
+                if deadline is not None:
+                    updates.append("deadline = ?")
+                    params.append(deadline)
+                
+                if not updates:
+                    return False
+                
+                updates.append("updated_at = ?")
+                params.append(int(time.time()))
+                params.append(goal_id)
+                
+                con.execute(f"UPDATE goals SET {', '.join(updates)} WHERE id = ?", params)
+                return True
+
+    def delete_goal(self, goal_id: int) -> bool:
+        """Delete a goal. Returns True if successful."""
+        with self.write_lock:
+            with self._connect() as con:
+                cur = con.execute("DELETE FROM goals WHERE id = ?", (goal_id,))
+                return cur.rowcount > 0
+
+    def complete_goal(self, goal_id: int) -> bool:
+        """Mark a goal as completed. Returns True if successful."""
+        return self.update_goal(goal_id, status="completed")
+
+    def get_next_goal(self) -> Optional[Dict]:
+        """Get the highest priority pending/in_progress goal."""
+        with self._connect() as con:
+            row = con.execute("""
+                SELECT id, description, priority, status, context, created_at, updated_at, deadline, completed_at
+                FROM goals WHERE status IN ('pending', 'in_progress') ORDER BY priority DESC, created_at ASC LIMIT 1
+            """).fetchone()
+        
+        if not row:
+            return None
+        
+        return {
+            "id": row[0],
+            "description": row[1],
+            "priority": row[2],
+            "status": row[3],
+            "context": row[4],
+            "created_at": row[5],
+            "updated_at": row[6],
+            "deadline": row[7],
+            "completed_at": row[8]
+        }
 
 # Global Instance
 memory_store = MemoryStore()

@@ -333,5 +333,57 @@
             }
         },
         "enabled": true
+    },
+    "SetGoal": {
+        "definition": {
+            "type": "function",
+            "function": {
+                "name": "SetGoal",
+                "description": "Sets a new goal for the agent to work on.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "description": {
+                            "type": "string",
+                            "description": "The goal description - what should be achieved."
+                        },
+                        "priority": {
+                            "type": "number",
+                            "description": "Priority level (higher = more important, default 0)."
+                        },
+                        "deadline": {
+                            "type": "number",
+                            "description": "Optional deadline as Unix timestamp."
+                        }
+                    },
+                    "required": [
+                        "description"
+                    ]
+                }
+            }
+        },
+        "enabled": true
+    },
+    "CompleteGoal": {
+        "definition": {
+            "type": "function",
+            "function": {
+                "name": "CompleteGoal",
+                "description": "Marks a goal as completed.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "goal_id": {
+                            "type": "number",
+                            "description": "The ID of the goal to mark as complete."
+                        }
+                    },
+                    "required": [
+                        "goal_id"
+                    ]
+                }
+            }
+        },
+        "enabled": true
     }
 }

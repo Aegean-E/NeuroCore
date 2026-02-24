@@ -280,9 +280,41 @@ class MemorySaveExecutor:
     async def send(self, processed_data: dict) -> dict:
         return processed_data
 
+class CheckGoalExecutor:
+    def __init__(self):
+        self.config = ConfigLoader.get_config()
+
+    async def receive(self, input_data: dict, config: dict = None) -> dict:
+        config = config or {}
+        messages = input_data.get("messages", [])
+        
+        loop = asyncio.get_running_loop()
+        goal = await loop.run_in_executor(memory_store.executor, memory_store.get_next_goal)
+        
+        if not goal:
+            return input_data
+        
+        goal_str = f"Goal #{goal['id']}: {goal['description']}\nStatus: {goal['status']}\nPriority: {goal['priority']}"
+        if goal.get('context'):
+            goal_str += f"\nContext: {goal['context']}"
+        
+        system_msg = {
+            "role": "system",
+            "content": f"Current active goal:\n{goal_str}\nFocus on completing this goal."
+        }
+        
+        new_messages = messages[:-1] + [system_msg] + [messages[-1]] if messages else [system_msg]
+        
+        return {**input_data, "messages": new_messages, "current_goal": goal}
+
+    async def send(self, processed_data: dict) -> dict:
+        return processed_data
+
 async def get_executor_class(node_type_id: str):
     if node_type_id == "memory_recall":
         return MemoryRecallExecutor
     if node_type_id == "memory_save":
         return MemorySaveExecutor
+    if node_type_id == "check_goal":
+        return CheckGoalExecutor
     return None

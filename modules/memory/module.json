@@ -32,6 +32,13 @@
             "description": "Stores the current interaction into long-term memory.",
             "singleton": false,
             "configurable": false
+        },
+        {
+            "id": "check_goal",
+            "name": "Check Goal",
+            "description": "Retrieves the current active goal and injects it into the conversation context.",
+            "singleton": false,
+            "configurable": false
         }
     ],
     "load_error": null
