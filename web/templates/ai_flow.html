@@ -147,12 +147,16 @@
 
         <!-- AI Flow Area -->
         <div id="canvas" 
-             class="flex-grow canvas-grid relative overflow-hidden">
+             class="flex-grow canvas-grid relative overflow-visible">
             <svg id="canvas-svg" class="absolute inset-0 w-full h-full pointer-events-none overflow-visible"></svg>
+            <div id="selection-box" class="absolute border-2 border-blue-500 bg-blue-500/10 pointer-events-none z-20 hidden"></div>
         </div>
         <div id="canvas-bin" class="absolute bottom-5 right-5 w-20 h-20 bg-red-900/50 border-2 border-dashed border-red-700 rounded-full flex items-center justify-center text-red-500 opacity-50 transition-all pointer-events-none z-40">
             <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
         </div>
+        <button id="help-btn" class="absolute top-4 right-4 p-3 rounded-lg bg-slate-800/60 border border-slate-700/50 text-slate-400 hover:text-slate-200 hover:bg-slate-700/60 transition-all z-30" title="Help">
+            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+        </button>
     </main>
 
     <!-- Delete Confirmation Modal -->
@@ -438,6 +442,9 @@
         
         let panX = 0, panY = 0, zoom = 1;
         let isPanning = false;
+        let isSelecting = false;
+        let selectionStart = { x: 0, y: 0 };
+        let selectedNodeIds = [];
         let lastMouseX = 0, lastMouseY = 0;
 
         let isDrawingConnection = false;
@@ -484,6 +491,16 @@
             isDrawingBridge = false;
             connectionStart = { node: null, element: null };
         }
+        
+        function clearNodeSelection() {
+            selectedNodeIds = [];
+            nodes.forEach(node => {
+                const nodeEl = document.getElementById(node.id);
+                if (nodeEl) {
+                    nodeEl.classList.remove('selected-node');
+                }
+            });
+        }
 
         // --- Event Listeners for Pan, Zoom, and Interaction ---
         canvas.addEventListener('wheel', (event) => {
@@ -517,6 +534,29 @@
             // Clear drawing connection on empty space
             if ((isDrawingConnection || isDrawingBridge) && isEmptySpace) {
                 clearConnectionState();
+                event.preventDefault();
+                return;
+            }
+            
+            // Ctrl + Left click for selection box
+            if (event.ctrlKey && event.button === 0 && isEmptySpace) {
+                isSelecting = true;
+                const rect = canvas.getBoundingClientRect();
+                selectionStart = {
+                    x: event.clientX - rect.left,
+                    y: event.clientY - rect.top
+                };
+                
+                const selectionBox = document.getElementById('selection-box');
+                selectionBox.style.left = selectionStart.x + 'px';
+                selectionBox.style.top = selectionStart.y + 'px';
+                selectionBox.style.width = '0px';
+                selectionBox.style.height = '0px';
+                selectionBox.classList.remove('hidden');
+                
+                // Deselect previous selections
+                clearNodeSelection();
+                
                 event.preventDefault();
                 return;
             }
@@ -555,12 +595,83 @@
                 panY += event.movementY;
                 updateCanvasTransform();
             }
+            
+            if (isSelecting) {
+                // Get current mouse position in screen coordinates
+                const currentScreenX = event.clientX - rect.left;
+                const currentScreenY = event.clientY - rect.top;
+                
+                const selectionBox = document.getElementById('selection-box');
+                const left = Math.min(selectionStart.x, currentScreenX);
+                const top = Math.min(selectionStart.y, currentScreenY);
+                const width = Math.abs(currentScreenX - selectionStart.x);
+                const height = Math.abs(currentScreenY - selectionStart.y);
+                
+                selectionBox.style.left = left + 'px';
+                selectionBox.style.top = top + 'px';
+                selectionBox.style.width = width + 'px';
+                selectionBox.style.height = height + 'px';
+            }
         });
 
         window.addEventListener('mouseup', (event) => {
             if (isPanning) {
                 isPanning = false;
                 canvas.style.cursor = 'default';
+            }
+            
+            if (isSelecting) {
+                isSelecting = false;
+                const selectionBox = document.getElementById('selection-box');
+                const boxLeft = parseInt(selectionBox.style.left);
+                const boxTop = parseInt(selectionBox.style.top);
+                const boxWidth = parseInt(selectionBox.style.width);
+                const boxHeight = parseInt(selectionBox.style.height);
+                
+                // Convert selection box from screen coordinates to canvas coordinates
+                const canvasBoxRect = {
+                    left: (boxLeft - panX) / zoom,
+                    top: (boxTop - panY) / zoom,
+                    right: (boxLeft + boxWidth - panX) / zoom,
+                    bottom: (boxTop + boxHeight - panY) / zoom
+                };
+                
+                // If Ctrl is not held, clear previous selection first
+                if (!event.ctrlKey && !event.metaKey) {
+                    clearNodeSelection();
+                }
+                
+                // Check which nodes are within the selection box
+                const newlySelected = [];
+                nodes.forEach(node => {
+                    const nodeEl = document.getElementById(node.id);
+                    if (nodeEl) {
+                        const nodeRect = {
+                            left: parseInt(nodeEl.style.left),
+                            top: parseInt(nodeEl.style.top),
+                            right: parseInt(nodeEl.style.left) + nodeEl.offsetWidth,
+                            bottom: parseInt(nodeEl.style.top) + nodeEl.offsetHeight
+                        };
+                        
+                        // Check intersection
+                        if (!(canvasBoxRect.right < nodeRect.left || 
+                              canvasBoxRect.left > nodeRect.right || 
+                              canvasBoxRect.bottom < nodeRect.top || 
+                              canvasBoxRect.top > nodeRect.bottom)) {
+                            if (!selectedNodeIds.includes(node.id)) {
+                                newlySelected.push(node.id);
+                            }
+                            selectedNodeIds.push(node.id);
+                            nodeEl.classList.add('selected-node');
+                        }
+                    }
+                });
+                
+                selectionBox.classList.add('hidden');
+                
+                if (selectedNodeIds.length > 0) {
+                    selectedNodeId = selectedNodeIds[0];
+                }
             }
         });
 
@@ -575,7 +686,12 @@
                 if (selectedConnection) {
                     deleteSelectedConnection();
                 }
-                if (selectedNodeId) {
+                if (selectedNodeIds.length > 0) {
+                    // Delete all selected nodes
+                    [...selectedNodeIds].forEach(nodeId => deleteNode(nodeId));
+                    selectedNodeIds = [];
+                    selectedNodeId = null;
+                } else if (selectedNodeId) {
                     deleteNode(selectedNodeId);
                     selectedNodeId = null;
                 }
@@ -1003,17 +1119,15 @@
                 isDragging = true;
 
                 // Handle node selection
-                if (selectedNodeId !== nodeId) {
-                    // Deselect previous node
-                    if (selectedNodeId) {
-                        const prevNode = document.getElementById(selectedNodeId);
-                        if (prevNode) {
-                            prevNode.classList.remove('selected-node');
-                        }
+                if (!selectedNodeIds.includes(nodeId)) {
+                    // If Ctrl is not held, clear previous selection
+                    if (!e.ctrlKey && !e.metaKey) {
+                        clearNodeSelection();
                     }
                     
                     // Select current node
                     nodeElement.classList.add('selected-node');
+                    selectedNodeIds.push(nodeId);
                     selectedNodeId = nodeId;
                     
                     // Also deselect any selected connection
@@ -1030,12 +1144,25 @@
                     bin.style.pointerEvents = 'auto';
 
                     if (!isDragging) return;
-                    let newX = nodeData.x + e.movementX / zoom;
-                    let newY = nodeData.y + e.movementY / zoom;
-                    nodeElement.style.left = `${newX}px`;
-                    nodeElement.style.top = `${newY}px`;
-                    nodeData.x = newX;
-                    nodeData.y = newY;
+                    const dx = e.movementX / zoom;
+                    const dy = e.movementY / zoom;
+                    
+                    // Get all nodes to move (current node + any other selected nodes)
+                    const nodesToMove = selectedNodeIds.includes(nodeId) 
+                        ? selectedNodeIds 
+                        : [nodeId];
+                    
+                    nodesToMove.forEach(id => {
+                        const nodeDataToMove = nodes.find(n => n.id === id);
+                        const nodeElToMove = document.getElementById(id);
+                        if (nodeDataToMove && nodeElToMove) {
+                            nodeDataToMove.x += dx;
+                            nodeDataToMove.y += dy;
+                            nodeElToMove.style.left = `${nodeDataToMove.x}px`;
+                            nodeElToMove.style.top = `${nodeDataToMove.y}px`;
+                        }
+                    });
+                    
                     drawConnections();
 
                     const binRect = bin.getBoundingClientRect();
@@ -1059,7 +1186,14 @@
                     const binRect = bin.getBoundingClientRect();
                     if (e.clientX >= binRect.left && e.clientX <= binRect.right &&
                         e.clientY >= binRect.top && e.clientY <= binRect.bottom) {
-                        deleteNode(nodeData.id);
+                        // Delete all selected nodes if multiple are selected
+                        if (selectedNodeIds.length > 0) {
+                            [...selectedNodeIds].forEach(id => deleteNode(id));
+                            selectedNodeIds = [];
+                            selectedNodeId = null;
+                        } else {
+                            deleteNode(nodeData.id);
+                        }
                     }
 
                     document.onmousemove = null; 
