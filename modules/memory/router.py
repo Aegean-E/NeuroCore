@@ -107,3 +107,73 @@ async def wipe_memories(request: Request):
         return Response(status_code=200, headers={"HX-Trigger": json.dumps({"memoryWiped": None, "showMessage": {"level": "success", "message": "All memories wiped successfully"}})})
     except Exception as e:
         return Response(status_code=500, headers={"HX-Trigger": json.dumps({"showMessage": {"level": "error", "message": f"Failed to wipe memories: {str(e)}"}})})
+
+@router.post("/update")
+async def update_memory(request: Request, memory_id: int = Form(...), text: str = Form(None), mem_type: str = Form(None), verified: bool = Form(None)):
+    try:
+        loop = asyncio.get_running_loop()
+        new_id = await loop.run_in_executor(
+            memory_store.executor, 
+            lambda: memory_store.update_entry(memory_id, text=text, mem_type=mem_type, verified=verified)
+        )
+        if new_id:
+            return Response(status_code=200, headers={"HX-Trigger": json.dumps({"showMessage": {"level": "success", "message": f"Memory updated (new ID: {new_id})"}})})
+        return Response(status_code=404, headers={"HX-Trigger": json.dumps({"showMessage": {"level": "error", "message": "Memory not found"}})})
+    except Exception as e:
+        return Response(status_code=500, headers={"HX-Trigger": json.dumps({"showMessage": {"level": "error", "message": f"Failed to update memory: {str(e)}"}})})
+
+@router.post("/delete")
+async def delete_memory(request: Request, memory_id: int = Form(...), reason: str = Form(None)):
+    try:
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(memory_store.executor, lambda: memory_store.delete_entry(memory_id, reason=reason))
+        return Response(status_code=200, headers={"HX-Trigger": json.dumps({"memoryDeleted": str(memory_id), "showMessage": {"level": "success", "message": f"Memory {memory_id} deleted"}})})
+    except Exception as e:
+        return Response(status_code=500, headers={"HX-Trigger": json.dumps({"showMessage": {"level": "error", "message": f"Failed to delete memory: {str(e)}"}})})
+
+@router.post("/merge")
+async def merge_memories(request: Request, memory_ids: str = Form(...), new_text: str = Form(...), new_type: str = Form("BELIEF"), new_verified: bool = Form(False)):
+    try:
+        ids = json.loads(memory_ids)
+        if not isinstance(ids, list) or len(ids) < 2:
+            return Response(status_code=400, headers={"HX-Trigger": json.dumps({"showMessage": {"level": "error", "message": "At least 2 memory IDs required"}})})
+        
+        loop = asyncio.get_running_loop()
+        new_id = await loop.run_in_executor(
+            memory_store.executor, 
+            lambda: memory_store.merge_memories(ids, new_text, new_type, new_verified)
+        )
+        if new_id:
+            return Response(status_code=200, headers={"HX-Trigger": json.dumps({"showMessage": {"level": "success", "message": f"Memories merged into new ID: {new_id}"}})})
+        return Response(status_code=400, headers={"HX-Trigger": json.dumps({"showMessage": {"level": "error", "message": "Failed to merge memories"}})})
+    except Exception as e:
+        return Response(status_code=500, headers={"HX-Trigger": json.dumps({"showMessage": {"level": "error", "message": f"Failed to merge memories: {str(e)}"}})})
+
+@router.get("/conflicts")
+async def get_conflicts(request: Request, memory_ids: str = None):
+    try:
+        ids = json.loads(memory_ids) if memory_ids else None
+        loop = asyncio.get_running_loop()
+        conflicts = await loop.run_in_executor(memory_store.executor, lambda: memory_store.find_conflicts(ids) if ids else memory_store.find_conflicts())
+        return {"conflicts": conflicts}
+    except Exception as e:
+        return {"conflicts": [], "error": str(e)}
+
+@router.post("/conflicts/scan")
+async def scan_conflicts(request: Request, memory_ids: str = None):
+    try:
+        ids = json.loads(memory_ids) if memory_ids else None
+        loop = asyncio.get_running_loop()
+        conflicts = await loop.run_in_executor(memory_store.executor, lambda: memory_store.find_conflicts(ids) if ids else memory_store.find_conflicts())
+        return Response(status_code=200, headers={"HX-Trigger": json.dumps({"showMessage": {"level": "success", "message": f"Found {len(conflicts)} conflicts"}})})
+    except Exception as e:
+        return Response(status_code=500, headers={"HX-Trigger": json.dumps({"showMessage": {"level": "error", "message": f"Conflict scan failed: {str(e)}"}})})
+
+@router.get("/meta")
+async def get_meta_memories(request: Request, limit: int = 50, offset: int = 0):
+    try:
+        loop = asyncio.get_running_loop()
+        meta = await loop.run_in_executor(memory_store.executor, lambda: memory_store.get_meta_memories(limit, offset))
+        return {"meta_memories": meta}
+    except Exception as e:
+        return {"meta_memories": [], "error": str(e)}

@@ -101,6 +101,19 @@ class MemoryStore:
         try: con.execute("ALTER TABLE memories ADD COLUMN access_count INTEGER DEFAULT 0")
         except sqlite3.OperationalError: pass
 
+        con.execute("""
+            CREATE TABLE IF NOT EXISTS meta_memories (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                action TEXT NOT NULL,
+                target_ids TEXT NOT NULL,
+                new_value TEXT,
+                description TEXT,
+                created_at INTEGER NOT NULL
+            )
+        """)
+        con.execute("CREATE INDEX IF NOT EXISTS idx_meta_action ON meta_memories(action);")
+        con.execute("CREATE INDEX IF NOT EXISTS idx_meta_created_at ON meta_memories(created_at);")
+
     def _parse_embedding(self, blob) -> Optional[np.ndarray]:
         if blob is None: return None
         try:
@@ -499,6 +512,246 @@ class MemoryStore:
             
         stats['grand_total'] = stats['total'] + stats['archived']
         return stats
+
+    def log_meta_memory(self, action: str, target_ids: List[int], new_value: str = None, description: str = None) -> int:
+        """Logs an action to the meta_memories table."""
+        with self.write_lock:
+            with self._connect() as con:
+                cur = con.execute("""
+                    INSERT INTO meta_memories (action, target_ids, new_value, description, created_at)
+                    VALUES (?, ?, ?, ?, ?)
+                """, (action, json.dumps(target_ids), new_value, description, int(time.time())))
+                return cur.lastrowid
+
+    def update_entry(self, memory_id: int, text: str = None, mem_type: str = None, verified: bool = None) -> Optional[int]:
+        """
+        Updates a memory entry. Archives the old version via parent_id.
+        Returns the new memory ID, or None if not found.
+        """
+        with self.write_lock:
+            with self._connect() as con:
+                current = con.execute("""
+                    SELECT text, type, verified FROM memories WHERE id = ? AND deleted = 0 AND parent_id IS NULL
+                """, (memory_id,)).fetchone()
+                
+                if not current:
+                    return None
+                
+                old_text, old_type, old_verified = current[0], current[1], current[2]
+                
+                new_text = text if text is not None else old_text
+                new_type = mem_type if mem_type is not None else old_type
+                new_verified = verified if verified is not None else bool(old_verified)
+                
+                con.execute("UPDATE memories SET parent_id = ? WHERE id = ?", (memory_id, memory_id))
+                
+                cur = con.execute("""
+                    INSERT INTO memories (identity, type, subject, text, confidence, created_at, embedding, source, verified, parent_id)
+                    SELECT identity, ?, subject, ?, confidence, ?, embedding, source, ?, NULL
+                    FROM memories WHERE id = ?
+                """, (new_type, new_text, int(time.time()), 1 if new_verified else 0, memory_id))
+                new_id = cur.lastrowid
+                
+                changes = []
+                if text and text != old_text:
+                    changes.append(f"changed text from '{old_text}' to '{text}'")
+                if mem_type and mem_type != old_type:
+                    changes.append(f"changed type from '{old_type}' to '{mem_type}'")
+                if verified is not None and verified != bool(old_verified):
+                    changes.append(f"changed verified from {bool(old_verified)} to {verified}")
+                
+                description = f"Updated memory #{memory_id}: {', '.join(changes)}" if changes else f"Updated memory #{memory_id}"
+                self.log_meta_memory("edit", [memory_id], json.dumps({"new_id": new_id}), description)
+                
+                if FAISS_AVAILABLE and self.faiss_index:
+                    with self.faiss_lock:
+                        self.faiss_index.remove_ids(np.array([memory_id]).astype('int64'))
+                        self._save_faiss_index()
+                
+                return new_id
+
+    def delete_entry(self, memory_id: int, reason: str = None):
+        """Hard deletes a memory entry. Logs to meta_memories."""
+        old_text = None
+        with self._connect() as con:
+            row = con.execute("SELECT text FROM memories WHERE id = ?", (memory_id,)).fetchone()
+            if row:
+                old_text = row[0]
+        
+        with self.write_lock:
+            with self._connect() as con:
+                con.execute("DELETE FROM memories WHERE id = ?", (memory_id,))
+            
+            if FAISS_AVAILABLE and self.faiss_index:
+                with self.faiss_lock:
+                    self.faiss_index.remove_ids(np.array([memory_id]).astype('int64'))
+                    self._save_faiss_index()
+            
+            description = f"Deleted memory #{memory_id}" + (f": {reason}" if reason else "")
+            self.log_meta_memory("delete", [memory_id], reason, description)
+
+    def merge_memories(self, memory_ids: List[int], new_text: str, new_type: str = "BELIEF", new_verified: bool = False) -> Optional[int]:
+        """
+        Merges multiple memories into one. Archives originals via parent_id.
+        Returns the new merged memory ID, or None if failed.
+        """
+        if not memory_ids or len(memory_ids) < 2:
+            return None
+        
+        with self.write_lock:
+            with self._connect() as con:
+                originals = con.execute(f"""
+                    SELECT id, text, embedding, identity FROM memories 
+                    WHERE id IN ({','.join(['?'] * len(memory_ids))}) AND deleted = 0 AND parent_id IS NULL
+                """, memory_ids).fetchall()
+                
+                if len(originals) < 2:
+                    return None
+                
+                for orig_id, _, _, _ in originals:
+                    con.execute("UPDATE memories SET parent_id = ? WHERE id = ?", (orig_id, orig_id))
+                
+                avg_embedding = None
+                embeddings = []
+                for _, _, emb, _ in originals:
+                    if emb:
+                        parsed = self._parse_embedding(emb)
+                        if parsed is not None:
+                            embeddings.append(parsed)
+                
+                if embeddings:
+                    avg_embedding = np.mean(embeddings, axis=0)
+                
+                emb_np = avg_embedding if avg_embedding is not None else None
+                embedding_blob = None
+                if emb_np is not None:
+                    embedding_blob = emb_np.tobytes()
+                
+                cur = con.execute("""
+                    INSERT INTO memories (identity, type, subject, text, confidence, created_at, embedding, source, verified)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    self.compute_identity(new_text),
+                    new_type,
+                    "User",
+                    new_text,
+                    1.0,
+                    int(time.time()),
+                    embedding_blob,
+                    "merge",
+                    1 if new_verified else 0
+                ))
+                new_id = cur.lastrowid
+                
+                if FAISS_AVAILABLE and emb_np is not None and self.faiss_index:
+                    with self.faiss_lock:
+                        emb_np_2d = emb_np.reshape(1, -1)
+                        faiss.normalize_L2(emb_np_2d)
+                        self.faiss_index.add_with_ids(emb_np_2d, np.array([new_id]).astype('int64'))
+                        self._save_faiss_index()
+                
+                description = f"Merged memories {', '.join(['#' + str(mid) for mid in memory_ids])} into #{new_id}: {new_text[:50]}..."
+                self.log_meta_memory("merge", memory_ids, json.dumps({"new_id": new_id, "new_text": new_text}), description)
+                
+                return new_id
+
+    def find_conflicts(self, memory_ids: List[int] = None) -> List[Dict]:
+        """
+        Finds contradictory memories using LLM.
+        If memory_ids provided, checks only those. Otherwise checks all active memories.
+        Returns list of dicts with conflicting memory pairs and LLM reason.
+        """
+        from core.llm import LLMBridge
+        from core.settings import settings
+        
+        with self._connect() as con:
+            if memory_ids:
+                placeholders = ','.join(['?'] * len(memory_ids))
+                rows = con.execute(f"""
+                    SELECT id, text, type FROM memories 
+                    WHERE id IN ({placeholders}) AND deleted = 0 AND parent_id IS NULL
+                """, memory_ids).fetchall()
+            else:
+                rows = con.execute("""
+                    SELECT id, text, type FROM memories 
+                    WHERE deleted = 0 AND parent_id IS NULL
+                """).fetchall()
+        
+        memories = [{"id": r[0], "text": r[1], "type": r[2]} for r in rows]
+        
+        if len(memories) < 2:
+            return []
+        
+        conflicts = []
+        client = LLMBridge(
+            base_url=settings.get("llm_api_url"),
+            api_key=settings.get("llm_api_key"),
+            timeout=30.0
+        )
+        
+        for i in range(len(memories)):
+            for j in range(i + 1, len(memories)):
+                mem1 = memories[i]
+                mem2 = memories[j]
+                
+                prompt = f"""Do these two memories contradict each other?
+Memory A (id={mem1['id']}): {mem1['text']}
+Memory B (id={mem2['id']}): {mem2['text']}
+
+Answer in this exact format:
+CONFLICT: YES or NO
+REASON: Brief explanation (1-2 sentences)"""
+                
+                try:
+                    import asyncio
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                    try:
+                        response = loop.run_until_complete(client.chat_completion(
+                            messages=[{"role": "user", "content": prompt}],
+                            temperature=0,
+                            max_tokens=100
+                        ))
+                        result_text = response.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
+                    finally:
+                        loop.close()
+                    
+                    if result_text.startswith("CONFLICT: YES"):
+                        reason_start = result_text.find("REASON:") + 7
+                        reason = result_text[reason_start:].strip() if reason_start > 6 else "Contradictory content"
+                        
+                        conflicts.append({
+                            "memory_1": mem1,
+                            "memory_2": mem2,
+                            "reason": reason
+                        })
+                        
+                        self.log_meta_memory("conflict", [mem1['id'], mem2['id']], None, f"Conflict detected: #{mem1['id']} contradicts #{mem2['id']}: {reason}")
+                        
+                except Exception as e:
+                    print(f"Conflict check failed for {mem1['id']} vs {mem2['id']}: {e}")
+        
+        return conflicts
+
+    def get_meta_memories(self, limit: int = 50, offset: int = 0) -> List[Dict]:
+        """Retrieves meta-memory audit logs."""
+        with self._connect() as con:
+            rows = con.execute("""
+                SELECT id, action, target_ids, new_value, description, created_at 
+                FROM meta_memories ORDER BY created_at DESC LIMIT ? OFFSET ?
+            """, (limit, offset)).fetchall()
+        
+        return [
+            {
+                "id": r[0],
+                "action": r[1],
+                "target_ids": json.loads(r[2]),
+                "new_value": r[3],
+                "description": r[4],
+                "created_at": r[5]
+            }
+            for r in rows
+        ]
 
 # Global Instance
 memory_store = MemoryStore()
