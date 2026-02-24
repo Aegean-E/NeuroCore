@@ -262,6 +262,25 @@ python main.py
 
 Access at `http://localhost:8000`
 
+### Docker
+
+NeuroCore can also be run using Docker:
+
+```bash
+# Build and run
+docker-compose up -d --build
+
+# View logs
+docker-compose logs -f
+
+# Stop
+docker-compose down
+```
+
+Access at `http://localhost:8000`
+
+**Note:** Create a `settings.json` with your LLM configuration before running, or it will be created with defaults on first start. The `data/` folder and `settings.json` are mounted from your host for persistence.
+
 ---
 
 ## 📂 Project Structure
