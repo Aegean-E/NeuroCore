@@ -653,7 +653,7 @@ class FaissDocumentStore:
         
         # Basic sanitization for FTS5
         # Remove characters that might interfere with standard query syntax if not intended
-        safe_query = query.replace('"', '').replace("'", "").replace("*", "")
+        safe_query = query.replace('"', '').replace("'", "").replace("*", "").replace(".", " ")
         
         results = []
         with self._connect() as con:

@@ -11,7 +11,6 @@ from core.settings import settings
 router = APIRouter()
 templates = Jinja2Templates(directory="web/templates")
 
-# Helper filter for templates
 def format_timestamp(ts):
     return datetime.fromtimestamp(ts).strftime('%Y-%m-%d %H:%M')
 
@@ -32,7 +31,11 @@ async def browser_page(request: Request):
 @router.get("/gui", response_class=HTMLResponse)
 async def browser_gui(request: Request):
     loop = asyncio.get_running_loop()
-    memories = await loop.run_in_executor(memory_store.executor, partial(memory_store.browse, limit=50))
+    
+    def fetch():
+        return memory_store.browse(limit=50)
+    
+    memories = await loop.run_in_executor(None, fetch)
     return templates.TemplateResponse(request, "memory_browser.html", {
         "memories": memories
     })
@@ -46,10 +49,23 @@ async def list_memories(
 ):
     try:
         loop = asyncio.get_running_loop()
-        memories = await loop.run_in_executor(memory_store.executor, partial(memory_store.browse, search_text=q, filter_date=filter_date, mem_type=filter_type if filter_type else None, limit=50))
-        return templates.TemplateResponse(request, "memory_list.html", {"memories": memories})
+        
+        def fetch_memories():
+            search_text = str(q) if q else None
+            mem_type = str(filter_type) if filter_type else None
+            fdate = str(filter_date) if filter_date else "ALL"
+            return memory_store.browse(search_text=search_text, filter_date=fdate, mem_type=mem_type, limit=50)
+        
+        memories = await loop.run_in_executor(None, fetch_memories)
+        
+        if memories is None:
+            memories = []
+            
+        return templates.TemplateResponse("memory_list.html", {"memories": memories})
     except Exception as e:
-        return HTMLResponse(f"<div class='p-4 text-red-400 italic'>Error loading memories: {str(e)}</div>")
+        import traceback
+        traceback.print_exc()
+        return HTMLResponse(content=f"<div class='p-4 text-red-400 italic'>Error loading memories: {str(e)}</div>", status_code=500)
 
 @router.delete("/delete/{memory_id}")
 async def delete_memory(request: Request, memory_id: int):
@@ -58,4 +74,22 @@ async def delete_memory(request: Request, memory_id: int):
         await loop.run_in_executor(memory_store.executor, partial(memory_store.delete_entry, memory_id))
         return Response(status_code=200, headers={"HX-Trigger": json.dumps({"showMessage": {"level": "info", "message": "Memory deleted"}})})
     except Exception as e:
-        return Response(status_code=200, headers={"HX-Trigger": json.dumps({"showMessage": {"level": "error", "message": f"Delete failed: {str(e)}"}})})
+        return Response(status_code=200, headers={"HX-Trigger": json.dumps({"showMessage": {"level": "error", "message": "Delete failed"}})})
+
+@router.post("/boost/{memory_id}")
+async def boost_memory(request: Request, memory_id: int, boost: int = 1):
+    try:
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(memory_store.executor, partial(memory_store.boost_importance, memory_id, boost))
+        return Response(status_code=200, headers={"HX-Trigger": json.dumps({"showMessage": {"level": "success", "message": "Memory boosted"}, "memoryRefresh": None})})
+    except Exception as e:
+        return Response(status_code=200, headers={"HX-Trigger": json.dumps({"showMessage": {"level": "error", "message": "Boost failed"}})})
+
+@router.post("/unboost/{memory_id}")
+async def unboost_memory(request: Request, memory_id: int):
+    try:
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(memory_store.executor, partial(memory_store.boost_importance, memory_id, -1))
+        return Response(status_code=200, headers={"HX-Trigger": json.dumps({"showMessage": {"level": "info", "message": "Boost removed"}, "memoryRefresh": None})})
+    except Exception as e:
+        return Response(status_code=200, headers={"HX-Trigger": json.dumps({"showMessage": {"level": "error", "message": "Unboost failed"}})})

@@ -100,6 +100,8 @@ class MemoryStore:
         except sqlite3.OperationalError: pass
         try: con.execute("ALTER TABLE memories ADD COLUMN access_count INTEGER DEFAULT 0")
         except sqlite3.OperationalError: pass
+        try: con.execute("ALTER TABLE memories ADD COLUMN importance_boost INTEGER DEFAULT 0")
+        except sqlite3.OperationalError: pass
 
         con.execute("""
             CREATE TABLE IF NOT EXISTS meta_memories (
@@ -339,6 +341,7 @@ class MemoryStore:
                 mid = r[0]
                 mem_expires_at = r[2]
                 access_count = r[4] if len(r) > 4 else 0
+                importance_boost = 0
                 
                 # Get expires_at for this memory
                 expires_at = con.execute("SELECT expires_at FROM memories WHERE id = ?", (mid,)).fetchone()
@@ -347,7 +350,7 @@ class MemoryStore:
                 
                 if mid in candidate_scores:
                     base_score = candidate_scores[mid]
-                    boosted_score = base_score * (1 + access_count * access_weight)
+                    boosted_score = base_score * (1 + access_count * access_weight) * (1 + importance_boost * 0.5)
                     results.append({
                         "id": mid,
                         "text": r[1],
@@ -373,10 +376,22 @@ class MemoryStore:
             rows = con.execute("SELECT id, text, created_at FROM memories WHERE deleted = 0 AND parent_id IS NULL ORDER BY created_at DESC LIMIT ?", (limit,)).fetchall()
         return [{"id": r[0], "text": r[1], "created_at": r[2]} for r in rows]
 
-    def browse(self, limit: int = 50, offset: int = 0, search_text: str = None, filter_date: str = "ALL", mem_type: str = None, source: str = None) -> List[Dict]:
+    def browse(self, limit: int = 50, offset: int = 0, search_text: str = None, filter_date: str = "ALL", mem_type: str = None, source: str = None, sort_field: str = None, sort_dir: str = None) -> List[Dict]:
         """
         Retrieves memories with optional filtering for the Memory Browser UI.
         """
+        # Set defaults
+        if not sort_field:
+            sort_field = "created_at"
+        if not sort_dir:
+            sort_dir = "DESC"
+            
+        # Validate sort params to prevent SQL injection
+        allowed_fields = {"created_at", "type", "subject", "importance_boost", "access_count"}
+        if sort_field not in allowed_fields:
+            sort_field = "created_at"
+        sort_dir = "DESC" if sort_dir.upper() == "DESC" else "ASC"
+        
         query = "SELECT id, subject, text, confidence, created_at, parent_id, type, source FROM memories WHERE deleted = 0 AND parent_id IS NULL"
         params = []
         
@@ -405,7 +420,7 @@ class MemoryStore:
             query += " AND type = ?"
             params.append(mem_type)
             
-        query += " ORDER BY created_at DESC LIMIT ? OFFSET ?"
+        query += f" ORDER BY {sort_field} {sort_dir} LIMIT ? OFFSET ?"
         params.extend([limit, offset])
         
         with self._connect() as con:
@@ -420,7 +435,8 @@ class MemoryStore:
                 "created_at": r[4],
                 "is_consolidated": r[5] is not None,
                 "type": r[6],
-                "source": r[7] if len(r) > 7 else "chat"
+                "source": r[7] if len(r) > 7 else "chat",
+                "importance_boost": 0
             }
             for r in rows
         ]
@@ -490,6 +506,10 @@ class MemoryStore:
                 with self.faiss_lock:
                     self.faiss_index.remove_ids(np.array([memory_id]).astype('int64'))
                     self._save_faiss_index()
+
+    def boost_importance(self, memory_id: int, boost: int = 1):
+        with self._connect() as con:
+            con.execute("UPDATE memories SET importance_boost = importance_boost + ? WHERE id = ?", (boost, memory_id))
 
     def wipe_all(self):
         with self.write_lock:
