@@ -115,13 +115,16 @@ class ConditionalRouterExecutor:
         
         Config options:
         - check_field: field to check for existence (default: "tool_calls")
-        - Also supports "requires_continuation" field for tool dispatcher feedback
+          - "tool_calls" - check if LLM returned tool calls
+          - "requires_continuation" - check if more tools need to run (from tool dispatcher)
+          - "max_tools_per_turn" - limit tools per turn, route to false when exceeded
         """
         if input_data is None:
             return None
             
         config = config or {}
         check_field = config.get("check_field", "tool_calls")
+        max_tools = config.get("max_tools_per_turn", 0)
         
         # Determine condition
         condition_met = False
@@ -129,6 +132,10 @@ class ConditionalRouterExecutor:
             # Special handling for requires_continuation (from tool dispatcher)
             if check_field == "requires_continuation":
                 condition_met = input_data.get("requires_continuation", False)
+            # Check tool count for max_tools_per_turn
+            elif check_field == "max_tools_per_turn":
+                tool_count = input_data.get("_tool_count", 0)
+                condition_met = tool_count < max_tools
             elif input_data.get(check_field):
                 condition_met = True
             

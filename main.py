@@ -40,16 +40,21 @@ async def lifespan(app: FastAPI):
         flow = flow_manager.get_flow(active_flow_id)
         if flow:
             background_node_types = ["repeater_node"]
-            start_nodes = [n for n in flow.get("nodes", []) if n.get("nodeTypeId") in background_node_types]
+            nodes = flow.get("nodes", [])
+            connections = flow.get("connections", [])
             
-            for node in start_nodes:
-                print(f"[System] Auto-starting flow '{flow.get('name')}' from {node['nodeTypeId']} '{node['id']}'.")
-                if settings.get("debug_mode"):
-                    debug_logger.log(active_flow_id, node['id'], node.get('name'), "auto_start", {})
-                runner = FlowRunner(active_flow_id)
-                task = asyncio.create_task(runner.run({"_repeat_count": 1}, start_node_id=node['id']))
-                app.state.background_tasks.add(task)
-                task.add_done_callback(lambda t, fid=active_flow_id, nid=node['id']: background_task_callback(t, fid, nid))
+            # Only start repeater nodes that have incoming connections
+            for node in nodes:
+                if node.get("nodeTypeId") in background_node_types:
+                    has_incoming = any(c.get("to") == node.get("id") for c in connections)
+                    if has_incoming:
+                        print(f"[System] Auto-starting flow '{flow.get('name')}' from {node['nodeTypeId']} '{node['id']}'.")
+                        if settings.get("debug_mode"):
+                            debug_logger.log(active_flow_id, node['id'], node.get('name'), "auto_start", {})
+                        runner = FlowRunner(active_flow_id)
+                        task = asyncio.create_task(runner.run({"_repeat_count": 1}, start_node_id=node['id']))
+                        app.state.background_tasks.add(task)
+                        task.add_done_callback(lambda t, fid=active_flow_id, nid=node['id']: background_task_callback(t, fid, nid))
 
     yield
     # Add shutdown logic here if needed in the future
@@ -69,21 +74,25 @@ async def debug_fire_flow():
         flow = flow_manager.get_flow(active_flow_id)
         if flow:
             background_node_types = ["repeater_node"]
-            start_nodes = [n for n in flow.get("nodes", []) if n.get("nodeTypeId") in background_node_types]
+            nodes = flow.get("nodes", [])
+            connections = flow.get("connections", [])
             
-            if start_nodes:
-                node = start_nodes[0]
-                print(f"[Debug] Manually firing flow '{flow.get('name')}' from {node['nodeTypeId']} '{node['id']}'.")
-                if settings.get("debug_mode"):
-                    debug_logger.log(active_flow_id, node['id'], node.get('name'), "manual_trigger", {})
-                runner = FlowRunner(active_flow_id)
-                task = asyncio.create_task(runner.run({"_repeat_count": 1}, start_node_id=node['id']))
-                
-                if hasattr(app.state, "background_tasks"):
-                    app.state.background_tasks.add(task)
-                    task.add_done_callback(lambda t, fid=active_flow_id, nid=node['id']: background_task_callback(t, fid, nid))
-                
-                return {"status": "fired", "node": node['id']}
+            # Find repeater nodes with incoming connections
+            for node in nodes:
+                if node.get("nodeTypeId") in background_node_types:
+                    has_incoming = any(c.get("to") == node.get("id") for c in connections)
+                    if has_incoming:
+                        print(f"[Debug] Manually firing flow '{flow.get('name')}' from {node['nodeTypeId']} '{node['id']}'.")
+                        if settings.get("debug_mode"):
+                            debug_logger.log(active_flow_id, node['id'], node.get('name'), "manual_trigger", {})
+                        runner = FlowRunner(active_flow_id)
+                        task = asyncio.create_task(runner.run({"_repeat_count": 1}, start_node_id=node['id']))
+                        
+                        if hasattr(app.state, "background_tasks"):
+                            app.state.background_tasks.add(task)
+                            task.add_done_callback(lambda t, fid=active_flow_id, nid=node['id']: background_task_callback(t, fid, nid))
+                        
+                        return {"status": "fired", "node": node['id']}
     return {"status": "failed"}
 
 # --- Server Startup ---

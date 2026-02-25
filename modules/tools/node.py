@@ -38,6 +38,9 @@ class ToolDispatcherExecutor:
         if remaining_tools:
             input_data["_remaining_tool_calls"] = remaining_tools
         
+        # Track tool count
+        input_data["_tool_count"] = tool_count + len(tool_calls_to_run)
+        
         # Check if we've hit the limit
         should_continue = len(tool_calls_to_run) < len(tool_calls)
 

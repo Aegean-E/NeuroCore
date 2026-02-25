@@ -361,14 +361,22 @@
         <div id="config-conditional-router" class="hidden">
             <div class="space-y-4">
                 <div class="bg-slate-950 border border-slate-700 rounded-xl p-4">
-                    <p class="text-sm text-slate-300 font-semibold mb-1">✓ Tool Exists</p>
-                    <p class="text-xs text-slate-500">Routes based on whether tools were called. True if tool_calls field is present, False otherwise.</p>
+                    <p class="text-sm text-slate-300 font-semibold mb-1">Check Field Options</p>
+                    <p class="text-xs text-slate-500 mb-2">• tool_calls - check if LLM returned tool calls</p>
+                    <p class="text-xs text-slate-500 mb-2">• requires_continuation - check if tool dispatcher has more tools pending</p>
+                    <p class="text-xs text-slate-500">• max_tools_per_turn - limit tools per turn with max_tools_per_turn value</p>
                 </div>
                 
                 <div>
                     <label class="block text-sm font-medium text-slate-400 mb-2">Field to Check</label>
                     <input type="text" id="router-check-field" class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" placeholder="tool_calls">
                     <p class="text-xs text-slate-500 mt-2">The field name to check for existence in the data.</p>
+                </div>
+
+                <div>
+                    <label class="block text-sm font-medium text-slate-400 mb-2">Max Tools Per Turn</label>
+                    <input type="number" id="router-max-tools" class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" placeholder="5" min="1" max="20">
+                    <p class="text-xs text-slate-500 mt-2">Max tools to allow per turn. Only used when Field to Check is "max_tools_per_turn".</p>
                 </div>
                 
                 <div class="border-t border-slate-800 pt-4 mt-4">
@@ -379,8 +387,7 @@
                         Loading connected nodes...
                     </div>
                 </div>
-            </div>
-        </div>
+                </div>
             </div>
             <div class="flex justify-end space-x-3">
                 <button type="button" onclick="closeConfigModal()" class="rounded-xl px-4 py-2 text-sm font-semibold text-slate-300 hover:bg-slate-800 transition-colors">Cancel</button>
@@ -1997,6 +2004,7 @@
             } else if (node.nodeTypeId === 'conditional_router') {
                 document.getElementById('config-conditional-router').classList.remove('hidden');
                 document.getElementById('router-check-field').value = node.config.check_field || 'tool_calls';
+                document.getElementById('router-max-tools').value = node.config.max_tools_per_turn || '';
                 
                 // Load connected nodes and restore saved selections
                 loadConnectedNodes(node.id);
@@ -2089,6 +2097,7 @@
                     newConfig = { allowed_tools: allowed };
                 } else if (node.nodeTypeId === 'conditional_router') {
                     const checkField = document.getElementById('router-check-field').value || 'tool_calls';
+                    const maxTools = parseInt(document.getElementById('router-max-tools').value) || 0;
                     
                     // Collect all selected true branches
                     const trueBranches = Array.from(document.querySelectorAll('.router-true-branch:checked'))
@@ -2101,6 +2110,10 @@
                     newConfig = {
                         check_field: checkField
                     };
+
+                    if (maxTools > 0) {
+                        newConfig.max_tools_per_turn = maxTools;
+                    }
                     
                     if (trueBranches.length > 0) {
                         newConfig.true_branches = trueBranches;

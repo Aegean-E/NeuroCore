@@ -404,7 +404,17 @@ async def set_active_flow(request: Request, flow_id: str, action: str = Form("to
     flow = flow_manager.get_flow(flow_id)
     if flow:
         background_node_types = ["repeater_node"]
-        start_nodes = [n for n in flow.get("nodes", []) if n.get("nodeTypeId") in background_node_types]
+        nodes = flow.get("nodes", [])
+        connections = flow.get("connections", [])
+        
+        # Find repeater nodes that have incoming connections
+        start_nodes = []
+        for n in nodes:
+            if n.get("nodeTypeId") in background_node_types:
+                # Check if this node has any incoming connections
+                has_incoming = any(c.get("to") == n.get("id") for c in connections)
+                if has_incoming:
+                    start_nodes.append(n)
         
         if start_nodes:
             from core.flow_runner import FlowRunner
@@ -431,10 +441,17 @@ async def stop_active_flow(request: Request, settings_man: SettingsManager = Dep
     """Stops all active flows by clearing the active flows list and canceling tasks."""
     if hasattr(request.app.state, 'background_tasks'):
         stopped_count = 0
+        tasks_to_cancel = []
         for task in list(request.app.state.background_tasks):
             if not task.done():
                 task.cancel()
+                tasks_to_cancel.append(task)
                 stopped_count += 1
+        
+        # Wait for tasks to actually be cancelled
+        if tasks_to_cancel:
+            await asyncio.gather(*tasks_to_cancel, return_exceptions=True)
+        
         print(f"[System] Cancelled {stopped_count} background tasks")
     
     settings_man.save_settings({"active_ai_flows": []})
@@ -442,6 +459,8 @@ async def stop_active_flow(request: Request, settings_man: SettingsManager = Dep
         "flows": flow_manager.list_flows(),
         "active_flow_ids": []
     }, headers={"HX-Trigger": json.dumps({"showMessage": {"level": "info", "message": "All active flows stopped"}})})
+
+# Also need to import asyncio at the top of routers.py
 
 @router.post("/ai-flow/{flow_id}/delete", response_class=HTMLResponse)
 async def delete_flow(request: Request, flow_id: str, settings_man: SettingsManager = Depends(get_settings_manager)):
