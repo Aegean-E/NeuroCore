@@ -130,15 +130,20 @@ class MemorySaveExecutor:
             extraction_model = self.config.get("arbiter_model")
             
             default_prompt = (
-                "Extract concise, self-contained facts from the text below (Subject: {subject}).\n"
-                "Rules:\n"
-                "1. Return ONLY a JSON list of strings. Example: [\"User lives in Paris\"]\n"
-                "2. Replace pronouns (it, he, she, they) with specific names/entities to make facts standalone.\n"
-                "3. Ignore greetings, questions, generic small talk, and general world knowledge (e.g. geography, history, science facts).\n"
-                "4. Focus on personal details, preferences, specific events, or new instructions.\n"
-                "5. If no useful facts are found, return [].\n\n"
-                "Text: \"{text}\"\n\n"
-                "JSON:"
+                'Extract facts from the conversation below. Each fact must be self-contained and fully understandable when viewed in isolation.\n'
+                'Subject: {subject}\n'
+                'Rules:\n'
+                '1. Return ONLY a JSON list of objects. Example: [{"fact": "John lives in Paris and works as a developer", "type": "FACT"}]\n'
+                '2. ALWAYS include WHO the fact is about (use names, not pronouns like he/she/they). Facts must be understandable without any context.\n'
+                '3. Avoid vague statements like "likes coffee" - instead say "John prefers coffee over tea"\n'
+                '4. Include relevant details: "John goes to gym every Monday and Wednesday morning"\n'
+                '5. Ignore greetings, questions, generic small talk, and general world knowledge.\n'
+                '6. Focus on personal details, preferences, specific events, or instructions.\n'
+                '7. If no useful facts found, return [].\n'
+                '8. Choose type from: BELIEF, FACT, RULE, EXPERIENCE, PREFERENCE, IDENTITY.\n'
+                '   - IDENTITY: Facts about the assistant itself (its name, personality, capabilities, preferences).\n\n'
+                'Conversation:\n"{text}"\n\n'
+                'JSON:'
             )
             prompt_template = self.config.get("arbiter_prompt") or default_prompt
             prompt = prompt_template.replace("{subject}", subject).replace("{text}", text)
@@ -174,10 +179,22 @@ class MemorySaveExecutor:
                 except Exception as e:
                     print(f"Memory extraction JSON parse failed: {e}")
 
-            for fact in facts:
-                if not isinstance(fact, str): continue
+            valid_types = ["BELIEF", "FACT", "RULE", "EXPERIENCE", "PREFERENCE", "IDENTITY"]
+            for item in facts:
+                if isinstance(item, dict):
+                    fact = item.get("fact")
+                    mem_type = item.get("type", "BELIEF")
+                    if mem_type not in valid_types:
+                        mem_type = "BELIEF"
+                elif isinstance(item, str):
+                    fact = item
+                    mem_type = "BELIEF"
+                else:
+                    continue
                 
-                # Use the mem_type passed to the background task
+                if not fact:
+                    continue
+                
                 embedding = await llm_bridge.get_embedding(fact)
                 if embedding:
                     await self.arbiter.consider(

@@ -43,7 +43,7 @@ class MemoryArbiter:
             print(f"❌ [Arbiter] Confidence gate failed: {confidence} < {min_conf}")
             return None
 
-        valid_types = ["BELIEF", "FACT", "RULE", "EXPERIENCE", "PREFERENCE"]
+        valid_types = ["BELIEF", "FACT", "RULE", "EXPERIENCE", "PREFERENCE", "IDENTITY"]
         if mem_type not in valid_types:
             mem_type = "BELIEF"
         

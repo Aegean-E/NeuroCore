@@ -212,7 +212,7 @@ class MemoryStore:
         identity = self.compute_identity(text)
         timestamp = created_at if created_at is not None else int(time.time())
         
-        valid_types = ["BELIEF", "FACT", "RULE", "EXPERIENCE", "PREFERENCE"]
+        valid_types = ["BELIEF", "FACT", "RULE", "EXPERIENCE", "PREFERENCE", "IDENTITY"]
         final_type = mem_type if mem_type in valid_types else "BELIEF"
         
         # Convert belief to fact if verified

@@ -7,13 +7,23 @@
 {% for mem in memories %}
 <div class="group bg-slate-900/50 hover:bg-slate-800 border border-slate-800 rounded-xl p-4 transition-all relative">
     <div class="grid grid-cols-12 gap-4 items-center">
-        <!-- Subject -->
-        <div class="col-span-2 text-xs text-slate-400 truncate" title="{{ mem.subject }}">
-            {{ mem.subject }}
+        <!-- Type + Subject -->
+        <div class="col-span-3 text-xs text-slate-400 truncate" title="{{ mem.subject }}">
+            <span class="inline-block px-2 py-0.5 rounded text-xs font-medium 
+                {% if mem.mem_type == 'BELIEF' %}bg-blue-900/50 text-blue-400
+                {% elif mem.mem_type == 'FACT' %}bg-green-900/50 text-green-400
+                {% elif mem.mem_type == 'RULE' %}bg-purple-900/50 text-purple-400
+                {% elif mem.mem_type == 'EXPERIENCE' %}bg-orange-900/50 text-orange-400
+                {% elif mem.mem_type == 'PREFERENCE' %}bg-pink-900/50 text-pink-400
+                {% elif mem.mem_type == 'IDENTITY' %}bg-cyan-900/50 text-cyan-400
+                {% else %}bg-slate-700 text-slate-400{% endif %}">
+                {{ mem.mem_type }}
+            </span>
+            <span class="block truncate mt-1">{{ mem.subject }}</span>
         </div>
 
         <!-- Content -->
-        <div class="col-span-8 text-sm text-slate-200">
+        <div class="col-span-7 text-sm text-slate-200">
             {{ mem.text }}
         </div>
 

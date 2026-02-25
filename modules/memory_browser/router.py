@@ -41,11 +41,12 @@ async def browser_gui(request: Request):
 async def list_memories(
     request: Request, 
     q: str = Query(None),
-    filter_date: str = Query("ALL")
+    filter_date: str = Query("ALL"),
+    filter_type: str = Query("")
 ):
     try:
         loop = asyncio.get_running_loop()
-        memories = await loop.run_in_executor(memory_store.executor, partial(memory_store.browse, search_text=q, filter_date=filter_date, limit=50))
+        memories = await loop.run_in_executor(memory_store.executor, partial(memory_store.browse, search_text=q, filter_date=filter_date, mem_type=filter_type if filter_type else None, limit=50))
         return templates.TemplateResponse(request, "memory_list.html", {"memories": memories})
     except Exception as e:
         return HTMLResponse(f"<div class='p-4 text-red-400 italic'>Error loading memories: {str(e)}</div>")
