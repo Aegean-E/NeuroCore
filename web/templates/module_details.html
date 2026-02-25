@@ -160,53 +160,82 @@
               hx-swap="none"
               hx-on::after-request="const btn = this.querySelector('button[type=submit]'); const orig = btn.innerText; btn.innerText = 'Saved!'; btn.classList.remove('bg-blue-600', 'hover:bg-blue-500'); btn.classList.add('bg-emerald-600', 'hover:bg-emerald-500'); setTimeout(() => { btn.innerText = orig; btn.classList.add('bg-blue-600', 'hover:bg-blue-500'); btn.classList.remove('bg-emerald-600', 'hover:bg-emerald-500'); }, 2000);">
             
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div>
-                    <label class="block text-sm font-medium text-slate-400 mb-2">Save Confidence Threshold</label>
-                    <input type="number" name="save_confidence_threshold" value="{{ module.config.save_confidence_threshold }}" step="0.05" min="0.0" max="1.0"
-                           class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all">
-                    <p class="text-xs text-slate-500 mt-2">Minimum confidence (0.0-1.0) required to save a memory. Default is 0.75. If an Arbiter Model is set, it provides this score.</p>
+            <div class="space-y-6">
+                <div class="bg-slate-900 rounded-xl border border-slate-800 p-6">
+                    <h4 class="text-sm font-semibold text-slate-300 mb-4 uppercase tracking-wider">Memory Extraction</h4>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-sm font-medium text-slate-400 mb-2">Save Confidence Threshold</label>
+                            <input type="number" name="save_confidence_threshold" value="{{ module.config.save_confidence_threshold }}" step="0.05" min="0.0" max="1.0"
+                                   class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all">
+                            <p class="text-xs text-slate-500 mt-2">Minimum confidence (0.0 to 1.0) required to save a memory. Lower values save more memories but may include noise. Higher values only save high-quality memories. Default: 0.75</p>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-slate-400 mb-2">Similarity Threshold</label>
+                            <input type="number" name="similarity_threshold" value="{{ module.config.similarity_threshold }}" step="0.05" min="0.0" max="1.0"
+                                   class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all">
+                            <p class="text-xs text-slate-500 mt-2">Rejects new memories too similar to existing ones (0.0 to 1.0). Set to 1.0 to allow duplicates, lower to prevent redundancy. Default: 0.9</p>
+                        </div>
+                    </div>
                 </div>
-                <div>
-                    <label class="block text-sm font-medium text-slate-400 mb-2">Consolidation Threshold</label>
-                    <input type="number" name="consolidation_threshold" value="{{ module.config.consolidation_threshold }}" step="0.01" min="0.5" max="1.0"
-                           class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all">
-                    <p class="text-xs text-slate-500 mt-2">Determines how similar two memories must be to be merged (0.5 to 1.0). Higher values require near-exact matches.</p>
+
+                <div class="bg-slate-900 rounded-xl border border-slate-800 p-6">
+                    <h4 class="text-sm font-semibold text-slate-300 mb-4 uppercase tracking-wider">Memory Recall</h4>
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <div>
+                            <label class="block text-sm font-medium text-slate-400 mb-2">Recall Limit</label>
+                            <input type="number" name="recall_limit" value="{{ module.config.recall_limit }}" min="1" max="20"
+                                   class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all">
+                            <p class="text-xs text-slate-500 mt-2">How many memories to retrieve for each response (1 to 20). Higher values provide more context but may overwhelm the model. Default: 3</p>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-slate-400 mb-2">Minimum Score</label>
+                            <input type="number" name="recall_min_score" value="{{ module.config.recall_min_score }}" step="0.05" min="0.0" max="1.0"
+                                   class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all">
+                            <p class="text-xs text-slate-500 mt-2">Minimum similarity (0.0 to 1.0) needed to retrieve a memory. Higher values return only very relevant memories. Lower returns more but may include noise. Default: 0.8</p>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-slate-400 mb-2">Access Weight</label>
+                            <input type="number" name="recall_access_weight" value="{{ module.config.recall_access_weight }}" step="0.05" min="0.0" max="1.0"
+                                   class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all">
+                            <p class="text-xs text-slate-500 mt-2">How much to boost frequently accessed memories (0.0 to 1.0). Set to 0.0 to disable. Higher values make popular memories appear more often. Default: 0.1</p>
+                        </div>
+                    </div>
                 </div>
-                <div>
-                    <label class="block text-sm font-medium text-slate-400 mb-2">Recall Limit</label>
-                    <input type="number" name="recall_limit" value="{{ module.config.recall_limit }}" min="1" max="20"
-                           class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all">
-                    <p class="text-xs text-slate-500 mt-2">The maximum number of past memories to bring into the current conversation context.</p>
+
+                <div class="bg-slate-900 rounded-xl border border-slate-800 p-6">
+                    <h4 class="text-sm font-semibold text-slate-300 mb-4 uppercase tracking-wider">Memory Database</h4>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-sm font-medium text-slate-400 mb-2">Consolidation Threshold</label>
+                            <input type="number" name="consolidation_threshold" value="{{ module.config.consolidation_threshold }}" step="0.01" min="0.5" max="1.0"
+                                   class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all">
+                            <p class="text-xs text-slate-500 mt-2">How similar memories must be (0.5 to 1.0) to merge together. Higher values require near-exact matches. Lower values merge more loosely related memories. Default: 0.92</p>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-slate-400 mb-2">Belief TTL (Days)</label>
+                            <input type="number" name="belief_ttl_days" value="{{ module.config.belief_ttl_days }}" min="1" max="365"
+                                   class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all">
+                            <p class="text-xs text-slate-500 mt-2">How long temporary beliefs last before expiring (1 to 365 days). Set higher for longer memory persistence. Permanent facts use TTL of 0 or are not applied. Default: 30</p>
+                        </div>
+                    </div>
                 </div>
-                <div>
-                    <label class="block text-sm font-medium text-slate-400 mb-2">Minimum Score</label>
-                    <input type="number" name="recall_min_score" value="{{ module.config.recall_min_score }}" step="0.05" min="0.0" max="1.0"
-                           class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all">
-                    <p class="text-xs text-slate-500 mt-2">Determines how relevant a memory must be to the current topic to be recalled (0.0 to 1.0). Higher values filter out loosely related memories.</p>
-                </div>
-                <div>
-                    <label class="block text-sm font-medium text-slate-400 mb-2">Similarity Threshold</label>
-                    <input type="number" name="similarity_threshold" value="{{ module.config.similarity_threshold }}" step="0.05" min="0.0" max="1.0"
-                           class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all">
-                    <p class="text-xs text-slate-500 mt-2">Rejects new memories that are too similar to existing ones (0.0 to 1.0). Default is 0.9.</p>
-                </div>
-                <div>
-                    <label class="block text-sm font-medium text-slate-400 mb-2">Belief TTL (Days)</label>
-                    <input type="number" name="belief_ttl_days" value="{{ module.config.belief_ttl_days }}" min="1" max="365"
-                           class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all">
-                    <p class="text-xs text-slate-500 mt-2">Time-to-live for BELIEF type memories in days. Default is 30.</p>
-                </div>
-                <div class="col-span-1 md:col-span-2">
-                    <label class="block text-sm font-medium text-slate-400 mb-2">Arbiter Model (Optional)</label>
-                    <input type="text" name="arbiter_model" value="{{ module.config.arbiter_model }}" placeholder="e.g. qwen2.5-0.5b-instruct"
-                           class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all">
-                    <p class="text-xs text-slate-500 mt-2">Model used for memory extraction. If empty, uses the default chat model.</p>
-                </div>
-                <div class="col-span-1 md:col-span-2">
-                    <label class="block text-sm font-medium text-slate-400 mb-2">Arbiter Prompt</label>
-                    <textarea name="arbiter_prompt" rows="4" class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all custom-scrollbar">{{ module.config.arbiter_prompt }}</textarea>
-                    <p class="text-xs text-slate-500 mt-2">The prompt used for extraction. Use <code>{text}</code> and <code>{subject}</code> as placeholders.</p>
+
+                <div class="bg-slate-900 rounded-xl border border-slate-800 p-6">
+                    <h4 class="text-sm font-semibold text-slate-300 mb-4 uppercase tracking-wider">Extraction Model</h4>
+                    <div class="space-y-4">
+                        <div>
+                            <label class="block text-sm font-medium text-slate-400 mb-2">Arbiter Model (Optional)</label>
+                            <input type="text" name="arbiter_model" value="{{ module.config.arbiter_model }}" placeholder="e.g. qwen2.5-0.5b-instruct"
+                                   class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all">
+                            <p class="text-xs text-slate-500 mt-2">Model to use for extracting facts from conversation. Leave empty to use the default chat model. A smaller model can be used for faster extraction.</p>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-slate-400 mb-2">Arbiter Prompt</label>
+                            <textarea name="arbiter_prompt" rows="4" class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all custom-scrollbar">{{ module.config.arbiter_prompt }}</textarea>
+                            <p class="text-xs text-slate-500 mt-2">Prompt used to extract facts from conversation. Use <code>{text}</code> for the conversation content and <code>{subject}</code> for the person (e.g., "User").</p>
+                        </div>
+                    </div>
                 </div>
             </div>
 

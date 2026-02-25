@@ -69,7 +69,8 @@ async def save_memory_settings(
     arbiter_model: str = Form(None),
     arbiter_prompt: str = Form(None),
     similarity_threshold: float = Form(None),
-    belief_ttl_days: int = Form(None)
+    belief_ttl_days: int = Form(None),
+    recall_access_weight: float = Form(None)
 ):
     module_manager = request.app.state.module_manager
     memory_module = module_manager.modules.get("memory")
@@ -86,6 +87,7 @@ async def save_memory_settings(
     if arbiter_prompt is not None: config["arbiter_prompt"] = arbiter_prompt
     if similarity_threshold is not None: config["similarity_threshold"] = similarity_threshold
     if belief_ttl_days is not None: config["belief_ttl_days"] = belief_ttl_days
+    if recall_access_weight is not None: config["recall_access_weight"] = recall_access_weight
     
     module_manager.update_module_config("memory", config)
     

@@ -81,11 +81,12 @@ class MemoryRecallExecutor:
             min_score = 0.0
 
         source_filter = config.get("source_filter") or None
+        access_weight = float(config.get("recall_access_weight", 0.0))
 
         loop = asyncio.get_running_loop()
         results = await loop.run_in_executor(
             memory_store.executor, 
-            partial(memory_store.search, embedding, limit=limit, source_filter=source_filter)
+            partial(memory_store.search, embedding, limit=limit, source_filter=source_filter, access_weight=access_weight)
         )
         
         # Filter results by minimum score if configured

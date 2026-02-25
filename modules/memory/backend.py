@@ -264,7 +264,7 @@ class MemoryStore:
                     self.faiss_index.remove_ids(np.array([child_id]).astype('int64'))
                     self._save_faiss_index()
 
-    def search(self, query_embedding: List[float], limit: int = 5, source_filter: str = None) -> List[Dict]:
+    def search(self, query_embedding: List[float], limit: int = 5, source_filter: str = None, access_weight: float = 0.0) -> List[Dict]:
         if not query_embedding: return []
         
         q_emb_np = np.array(query_embedding, dtype='float32')
@@ -324,7 +324,7 @@ class MemoryStore:
             top_ids = candidate_ids[:limit]
             
             placeholders = ','.join(['?'] * len(top_ids))
-            query = f"SELECT id, text, created_at, type FROM memories WHERE id IN ({placeholders}) AND deleted = 0 AND parent_id IS NULL"
+            query = f"SELECT id, text, created_at, type, access_count FROM memories WHERE id IN ({placeholders}) AND deleted = 0 AND parent_id IS NULL"
             params = list(top_ids)
             
             if source_filter:
@@ -337,7 +337,8 @@ class MemoryStore:
             valid_ids = []
             for r in rows:
                 mid = r[0]
-                mem_expires_at = r[2]  # This is created_at, need to get expires_at
+                mem_expires_at = r[2]
+                access_count = r[4] if len(r) > 4 else 0
                 
                 # Get expires_at for this memory
                 expires_at = con.execute("SELECT expires_at FROM memories WHERE id = ?", (mid,)).fetchone()
@@ -345,12 +346,14 @@ class MemoryStore:
                     continue  # Skip expired memories
                 
                 if mid in candidate_scores:
+                    base_score = candidate_scores[mid]
+                    boosted_score = base_score * (1 + access_count * access_weight)
                     results.append({
                         "id": mid,
                         "text": r[1],
                         "created_at": r[2],
                         "type": r[3],
-                        "score": candidate_scores[mid]
+                        "score": boosted_score
                     })
                     valid_ids.append(mid)
             
