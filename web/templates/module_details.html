@@ -185,6 +185,18 @@
                            class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all">
                     <p class="text-xs text-slate-500 mt-2">Determines how relevant a memory must be to the current topic to be recalled (0.0 to 1.0). Higher values filter out loosely related memories.</p>
                 </div>
+                <div>
+                    <label class="block text-sm font-medium text-slate-400 mb-2">Similarity Threshold</label>
+                    <input type="number" name="similarity_threshold" value="{{ module.config.similarity_threshold }}" step="0.05" min="0.0" max="1.0"
+                           class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all">
+                    <p class="text-xs text-slate-500 mt-2">Rejects new memories that are too similar to existing ones (0.0 to 1.0). Default is 0.9.</p>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-slate-400 mb-2">Belief TTL (Days)</label>
+                    <input type="number" name="belief_ttl_days" value="{{ module.config.belief_ttl_days }}" min="1" max="365"
+                           class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all">
+                    <p class="text-xs text-slate-500 mt-2">Time-to-live for BELIEF type memories in days. Default is 30.</p>
+                </div>
                 <div class="col-span-1 md:col-span-2">
                     <label class="block text-sm font-medium text-slate-400 mb-2">Arbiter Model (Optional)</label>
                     <input type="text" name="arbiter_model" value="{{ module.config.arbiter_model }}" placeholder="e.g. qwen2.5-0.5b-instruct"

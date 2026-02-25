@@ -67,7 +67,9 @@ async def save_memory_settings(
     consolidation_threshold: float = Form(None),
     auto_consolidation_hours: float = Form(None),
     arbiter_model: str = Form(None),
-    arbiter_prompt: str = Form(None)
+    arbiter_prompt: str = Form(None),
+    similarity_threshold: float = Form(None),
+    belief_ttl_days: int = Form(None)
 ):
     module_manager = request.app.state.module_manager
     memory_module = module_manager.modules.get("memory")
@@ -82,6 +84,8 @@ async def save_memory_settings(
     if auto_consolidation_hours is not None: config["auto_consolidation_hours"] = auto_consolidation_hours
     if arbiter_model is not None: config["arbiter_model"] = arbiter_model
     if arbiter_prompt is not None: config["arbiter_prompt"] = arbiter_prompt
+    if similarity_threshold is not None: config["similarity_threshold"] = similarity_threshold
+    if belief_ttl_days is not None: config["belief_ttl_days"] = belief_ttl_days
     
     module_manager.update_module_config("memory", config)
     

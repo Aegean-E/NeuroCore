@@ -141,7 +141,7 @@ class MemorySaveExecutor:
                 '6. Focus on personal details, preferences, specific events, or instructions.\n'
                 '7. If no useful facts found, return [].\n'
                 '8. Choose type from: BELIEF, FACT, RULE, EXPERIENCE, PREFERENCE, IDENTITY.\n'
-                '   - IDENTITY: Facts about the assistant itself (its name, personality, capabilities, preferences).\n\n'
+                '   - IDENTITY: Facts about identity (user's name, background, personality, or assistant's own identity).\n'
                 'Conversation:\n"{text}"\n\n'
                 'JSON:'
             )

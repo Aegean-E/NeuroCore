@@ -16,7 +16,7 @@
         "auto_consolidation_hours": 24,
         "belief_ttl_days": 30,
         "arbiter_model": "",
-        "arbiter_prompt": "Extract concise, self-contained facts from the text below (Subject: {subject}).\nRules:\n1. Return ONLY a JSON list of strings. Example: [\"User lives in Paris\"]\n2. Replace pronouns (it, he, she, they) with specific names/entities to make facts standalone.\n3. Ignore greetings, questions, generic small talk, and general world knowledge (e.g. geography, history, science facts).\n4. Focus on personal details, preferences, specific events, or new instructions.\n5. If no useful facts are found, return [].\n\nText: \"{text}\"\n\nJSON:"
+        "arbiter_prompt": "Extract facts from the conversation below. Each fact must be self-contained and fully understandable when viewed in isolation.\nSubject: {subject}\nRules:\n1. Return ONLY a JSON list of objects. Example: [{\"fact\": \"John lives in Paris and works as a developer\", \"type\": \"FACT\"}]\n2. ALWAYS include WHO the fact is about (use names, not pronouns like he/she/they). Facts must be understandable without any context.\n3. Avoid vague statements like \"likes coffee\" - instead say \"John prefers coffee over tea\"\n4. Include relevant details: \"John goes to gym every Monday and Wednesday morning\"\n5. Ignore greetings, questions, generic small talk, and general world knowledge.\n6. Focus on personal details, preferences, specific events, or instructions.\n7. If no useful facts found, return [].\n8. Choose type from: BELIEF, FACT, RULE, EXPERIENCE, PREFERENCE, IDENTITY.\n   - IDENTITY: Facts about identity (user's name, background, personality, or assistant's own identity)\n\nConversation:\n\"{text}\"\n\nJSON:"
     },
     "provides_nodes": [
         {
