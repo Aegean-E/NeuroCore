@@ -115,6 +115,7 @@ class ConditionalRouterExecutor:
         
         Config options:
         - check_field: field to check for existence (default: "tool_calls")
+        - Also supports "requires_continuation" field for tool dispatcher feedback
         """
         if input_data is None:
             return None
@@ -125,7 +126,10 @@ class ConditionalRouterExecutor:
         # Determine condition
         condition_met = False
         if isinstance(input_data, dict):
-            if input_data.get(check_field):
+            # Special handling for requires_continuation (from tool dispatcher)
+            if check_field == "requires_continuation":
+                condition_met = input_data.get("requires_continuation", False)
+            elif input_data.get(check_field):
                 condition_met = True
             
             # Check OpenAI format for tool_calls if not found at top level

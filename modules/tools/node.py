@@ -24,9 +24,24 @@ class ToolDispatcherExecutor:
 
         library = self._load_tools()
         allowed_tools = config.get("allowed_tools", []) # From node config
+        max_tools_per_turn = config.get("max_tools_per_turn", 5) # Default 5 tools per turn
         results = []
+        
+        # Track tool count in context if available
+        tool_count = input_data.get("_tool_count", 0)
 
-        for tool_call in tool_calls:
+        # Limit tool calls to max_tools_per_turn
+        tool_calls_to_run = tool_calls[:max_tools_per_turn]
+        remaining_tools = tool_calls[max_tools_per_turn:]
+        
+        # Store remaining tools for next turn
+        if remaining_tools:
+            input_data["_remaining_tool_calls"] = remaining_tools
+        
+        # Check if we've hit the limit
+        should_continue = len(tool_calls_to_run) < len(tool_calls)
+
+        for tool_call in tool_calls_to_run:
             func_name = tool_call["function"]["name"]
             args = json.loads(tool_call["function"]["arguments"])
             
@@ -69,7 +84,7 @@ class ToolDispatcherExecutor:
             "tool_results": results,
             "assistant_message": message,
             "messages": messages,
-            "requires_continuation": True
+            "requires_continuation": not should_continue
         }
 
     async def send(self, processed_data: dict) -> dict:
