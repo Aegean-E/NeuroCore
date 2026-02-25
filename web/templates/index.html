@@ -13,6 +13,8 @@
     <style>
         .custom-scrollbar::-webkit-scrollbar { width: 4px; }
         .custom-scrollbar::-webkit-scrollbar-thumb { background: #4a5568; border-radius: 2px; }
+        @keyframes fade-in { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        .animate-fade-in { animation: fade-in 0.4s ease-out forwards; }
     </style>
 </head>
 <body class="bg-slate-900 text-slate-100 min-h-screen flex flex-col font-sans">
@@ -64,8 +66,14 @@
         <!-- Dynamic Content Area -->
         <section class="flex-grow flex flex-col bg-slate-950/50 rounded-2xl border border-slate-800 shadow-2xl relative overflow-hidden">
             <div id="module-content" class="absolute inset-0 p-6 overflow-y-auto custom-scrollbar">
-                {% if active_module %}
+                {% if active_module and active_module != 'dashboard' %}
                 <div hx-get="/{{ active_module }}/gui" hx-trigger="load" hx-swap="outerHTML">
+                    <div class="flex items-center justify-center h-full">
+                        <div class="w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+                    </div>
+                </div>
+                {% elif active_module == 'dashboard' %}
+                <div hx-get="/dashboard/gui" hx-trigger="load" hx-swap="innerHTML">
                     <div class="flex items-center justify-center h-full">
                         <div class="w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
                     </div>

@@ -7,9 +7,12 @@
                 {% set ns.chat_enabled = true %}
             {% endif %}
         {% endfor %}
-        <a href="{{ '/chat' if ns.chat_enabled else '/' }}" class="text-2xl font-bold bg-gradient-to-r from-blue-400 to-emerald-400 bg-clip-text text-transparent hover:opacity-80 transition-opacity">NeuroCore</a>
+        <a href="/" class="text-2xl font-bold bg-gradient-to-r from-blue-400 to-emerald-400 bg-clip-text text-transparent hover:opacity-80 transition-opacity">NeuroCore</a>
         <nav>
             <ul class="flex space-x-6 text-sm font-medium text-slate-400">
+                <!-- Home -->
+                <li><a href="/" class="hover:text-blue-400 transition-colors">Home</a></li>
+
                 <!-- Chat -->
                 {% for module in modules %}
                     {% if module.id == 'chat' and module.enabled %}

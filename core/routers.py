@@ -50,9 +50,167 @@ HIDDEN_CONFIG_KEYS = {
 async def read_root(request: Request, module_manager: ModuleManager = Depends(get_module_manager), settings_man: SettingsManager = Depends(get_settings_manager)):
     return templates.TemplateResponse(request, "index.html", {
         "modules": module_manager.get_all_modules(),
-        "active_module": None,
-        "settings": settings_man.settings
+        "active_module": "dashboard",
+        "settings": settings_man.settings,
+        "hide_module_list": True,
+        "hide_status_panel": True,
+        "full_width_content": True
     })
+
+# --- Dashboard ---
+
+@router.get("/dashboard/gui", response_class=HTMLResponse)
+async def get_dashboard(request: Request):
+    return templates.TemplateResponse(request, "dashboard.html", {})
+
+@router.get("/dashboard/stats", response_class=HTMLResponse)
+async def get_dashboard_stats(request: Request):
+    import json
+    from pathlib import Path
+    
+    base_dir = Path(__file__).resolve().parent.parent
+    
+    # Memory count
+    memory_count = 0
+    memory_path = base_dir / "data" / "memory.sqlite3"
+    if memory_path.exists():
+        try:
+            import sqlite3
+            conn = sqlite3.connect(str(memory_path))
+            cursor = conn.cursor()
+            cursor.execute("SELECT COUNT(*) FROM memories WHERE is_archived = 0")
+            memory_count = cursor.fetchone()[0]
+            conn.close()
+        except: pass
+    
+    # Chat sessions count
+    sessions_count = 0
+    sessions_path = base_dir / "chat_sessions.json"
+    if sessions_path.exists():
+        try:
+            with open(sessions_path, 'r') as f:
+                sessions = json.load(f)
+            sessions_count = len(sessions)
+        except: pass
+    
+    # Knowledge base docs count
+    docs_count = 0
+    kb_path = base_dir / "data" / "knowledge_base.sqlite3"
+    if kb_path.exists():
+        try:
+            import sqlite3
+            conn = sqlite3.connect(str(kb_path))
+            cursor = conn.cursor()
+            cursor.execute("SELECT COUNT(*) FROM documents")
+            docs_count = cursor.fetchone()[0]
+            conn.close()
+        except: pass
+    
+    # Tools count
+    tools_count = 0
+    tools_path = base_dir / "modules" / "tools" / "library"
+    print(f"DEBUG: Checking tools_path: {tools_path}, exists: {tools_path.exists()}")
+    if tools_path.exists():
+        try:
+            files = list(tools_path.iterdir())
+            py_files = [f for f in files if f.suffix == '.py' and not f.name.startswith('_') and f.name != '__init__.py']
+            tools_count = len(py_files)
+            print(f"DEBUG: Found {tools_count} tools: {[f.name for f in py_files]}")
+        except Exception as e:
+            print(f"DEBUG: Error counting tools: {e}")
+            pass
+    else:
+        print(f"DEBUG: tools_path does not exist!")
+    
+    html = f"""
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <div class="group bg-slate-800/50 rounded-xl border border-slate-700/50 p-5 hover:border-blue-500/30 transition-all duration-300 hover:shadow-lg hover:shadow-blue-500/5">
+            <div class="flex items-center justify-between mb-3">
+                <div class="w-10 h-10 rounded-lg bg-blue-500/20 flex items-center justify-center">
+                    <svg class="w-5 h-5 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"></path></svg>
+                </div>
+                <span class="text-xs text-slate-500">Memory</span>
+            </div>
+            <div class="text-3xl font-bold text-white">{memory_count}</div>
+            <div class="text-xs text-slate-500 mt-1">Stored Memories</div>
+        </div>
+        <div class="group bg-slate-800/50 rounded-xl border border-slate-700/50 p-5 hover:border-emerald-500/30 transition-all duration-300 hover:shadow-lg hover:shadow-emerald-500/5">
+            <div class="flex items-center justify-between mb-3">
+                <div class="w-10 h-10 rounded-lg bg-emerald-500/20 flex items-center justify-center">
+                    <svg class="w-5 h-5 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"></path></svg>
+                </div>
+                <span class="text-xs text-slate-500">Chat</span>
+            </div>
+            <div class="text-3xl font-bold text-white">{sessions_count}</div>
+            <div class="text-xs text-slate-500 mt-1">Active Sessions</div>
+        </div>
+        <div class="group bg-slate-800/50 rounded-xl border border-slate-700/50 p-5 hover:border-purple-500/30 transition-all duration-300 hover:shadow-lg hover:shadow-purple-500/5">
+            <div class="flex items-center justify-between mb-3">
+                <div class="w-10 h-10 rounded-lg bg-purple-500/20 flex items-center justify-center">
+                    <svg class="w-5 h-5 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"></path></svg>
+                </div>
+                <span class="text-xs text-slate-500">Knowledge</span>
+            </div>
+            <div class="text-3xl font-bold text-white">{docs_count}</div>
+            <div class="text-xs text-slate-500 mt-1">Documents Indexed</div>
+        </div>
+        <div class="group bg-slate-800/50 rounded-xl border border-slate-700/50 p-5 hover:border-orange-500/30 transition-all duration-300 hover:shadow-lg hover:shadow-orange-500/5">
+            <div class="flex items-center justify-between mb-3">
+                <div class="w-10 h-10 rounded-lg bg-orange-500/20 flex items-center justify-center">
+                    <svg class="w-5 h-5 text-orange-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
+                </div>
+                <span class="text-xs text-slate-500">Tools</span>
+            </div>
+            <div class="text-3xl font-bold text-white">{tools_count}</div>
+            <div class="text-xs text-slate-500 mt-1">Available Tools</div>
+        </div>
+    </div>
+    """
+    return html
+
+@router.get("/dashboard/recent-sessions", response_class=HTMLResponse)
+async def get_recent_sessions(request: Request):
+    import json
+    import os
+    from datetime import datetime
+    
+    sessions_path = "chat_sessions.json"
+    if not os.path.exists(sessions_path):
+        return '<p class="text-slate-500 text-sm italic">No sessions yet</p>'
+    
+    try:
+        with open(sessions_path, 'r') as f:
+            sessions = json.load(f)
+        
+        sorted_sessions = sorted(sessions.values(), key=lambda x: x.get('updated_at', ''), reverse=True)
+        recent = sorted_sessions[:5]
+        
+        if not recent:
+            return '<p class="text-slate-500 text-sm italic">No sessions yet</p>'
+        
+        html = ""
+        for s in recent:
+            updated = s.get('updated_at', '')
+            try:
+                dt = datetime.fromisoformat(updated.replace('Z', '+00:00'))
+                time_ago = dt.strftime('%b %d, %H:%M')
+            except:
+                time_ago = updated[:10] if len(updated) >= 10 else 'Unknown'
+            
+            html += f"""
+            <button onclick="htmx.ajax('GET', '/chat/gui?session_id={s['id']}', '#module-content')" class="w-full flex items-center justify-between p-3 rounded-lg hover:bg-slate-700/50 border border-transparent hover:border-slate-600/50 transition-all group text-left">
+                <div class="flex items-center gap-3 min-w-0">
+                    <div class="w-8 h-8 rounded-lg bg-slate-700 flex items-center justify-center flex-shrink-0">
+                        <svg class="w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"></path></svg>
+                    </div>
+                    <span class="text-sm text-slate-300 truncate">{s.get('name', 'Untitled')}</span>
+                </div>
+                <span class="text-xs text-slate-500 flex-shrink-0">{time_ago}</span>
+            </button>
+            """
+        return html
+    except Exception as e:
+        return f'<p class="text-slate-500 text-sm italic">Error loading sessions</p>'
 
 @router.get("/navbar", response_class=HTMLResponse)
 async def get_navbar(request: Request, module_manager: ModuleManager = Depends(get_module_manager), settings_man: SettingsManager = Depends(get_settings_manager)):
