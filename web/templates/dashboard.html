@@ -120,7 +120,7 @@
                 <svg class="w-5 h-5 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
                 Recent Sessions
             </h2>
-            <div id="recent-sessions" class="space-y-2 max-h-64 overflow-y-auto custom-scrollbar">
+            <div id="recent-sessions" hx-get="/dashboard/recent-sessions" hx-trigger="load" hx-swap="innerHTML" class="space-y-2 max-h-64 overflow-y-auto custom-scrollbar">
                 <div class="flex items-center justify-center h-24 text-slate-500">
                     <div class="flex items-center gap-2">
                         <div class="w-5 h-5 border-2 border-slate-600 border-t-blue-500 rounded-full animate-spin"></div>
@@ -183,10 +183,3 @@
         </div>
     </div>
 </div>
-
-<script>
-// Load recent sessions (stats loaded via hx-get above)
-document.addEventListener('DOMContentLoaded', function() {
-    htmx.ajax('GET', '/dashboard/recent-sessions', '#recent-sessions', {swap: 'innerHTML'});
-});
-</script>
