@@ -426,6 +426,7 @@ class FlowRunner:
                 else:
                     # Gather outputs from parents (including parents of bridged peers)
                     parent_outputs = []
+                    bridge_outputs = []
                     
                     # Identify all relevant incoming edges
                     relevant_edges = list(incoming_edges)
@@ -436,7 +437,7 @@ class FlowRunner:
                             if peer_id != node_id and peer_id in node_outputs:
                                 peer_output = node_outputs.get(peer_id)
                                 if peer_output is not None:
-                                    parent_outputs.append(peer_output)
+                                    bridge_outputs.append(peer_output)
                             # Also get edges to peers
                             peer_edges = [c for c in self.connections if c['to'] == peer_id]
                             relevant_edges.extend(peer_edges)
@@ -446,20 +447,43 @@ class FlowRunner:
                             p_out = node_outputs.get(edge['from'])
                             if p_out is not None:
                                 parent_outputs.append(p_out)
+                    
+                    # Deduplicate: Remove parent outputs that are also in bridge_outputs
+                    # (This happens when a node is both a bridge peer and has a regular connection)
+                    if bridge_outputs:
+                        bridge_keys = set()
+                        for bo in bridge_outputs:
+                            if isinstance(bo, dict):
+                                bridge_keys.add(id(bo))
+                        parent_outputs = [po for po in parent_outputs if id(po) not in bridge_keys]
 
-                    if not parent_outputs:
+                    if not parent_outputs and not bridge_outputs:
                         # Branch stopped (condition failed upstream) or no data
                         node_outputs[node_id] = None
                         continue
                     
-                    # Merge inputs from multiple parents
+                    # Merge inputs: parent outputs first, then bridge outputs (bridge injects context)
+                    # IMPORTANT: Merge in REVERSE order so the last bridge (closest to target) wins
                     node_input = {}
                     for po in parent_outputs:
                         if isinstance(po, dict):
                             node_input.update(po)
-                        else:
-                            # Fallback for non-dict outputs
-                            node_input = po
+                    
+                    # Merge bridge outputs in REVERSE order so the last bridge (closest to target) wins
+                    for po in reversed(bridge_outputs):
+                        if isinstance(po, dict):
+                            node_input.update(po)  # Bridge outputs take precedence
+                    
+                    if settings.get("debug_mode") and bridge_outputs:
+                        import json
+                        try:
+                            bridge_msg_preview = json.dumps(bridge_outputs[0].get("messages", [])[:2])
+                        except:
+                            bridge_msg_preview = str(bridge_outputs[0].get("messages", "N/A"))[:200]
+                        debug_logger.log(self.flow_id, node_id, node_meta['name'], "bridge_merge", {
+                            "bridge_count": len(bridge_outputs),
+                            "bridge_msg_preview": bridge_msg_preview
+                        })
 
                 if settings.get("debug_mode"):
                     debug_logger.log(self.flow_id, node_id, node_meta['name'], "input_resolved", {"input": node_input})

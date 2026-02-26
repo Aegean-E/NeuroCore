@@ -62,6 +62,42 @@ class SystemPromptExecutor:
         # Combine prompt with tools section
         full_prompt = prompt_text + tools_section
         
+        # Check for injected context from bridge nodes (memory, knowledge, reasoning)
+        # These are injected by Memory Recall, Query Knowledge, and Reasoning Load nodes
+        
+        # Memory context (injected as _memory_context by memory_recall)
+        memory_context = input_data.get("_memory_context")
+        if not memory_context:
+            messages = input_data.get("messages", [])
+            for msg in messages:
+                if isinstance(msg, dict) and msg.get("role") == "system":
+                    content = msg.get("content", "")
+                    if "Relevant memories retrieved" in content:
+                        memory_context = content
+                        break
+        
+        # Knowledge context (from query_knowledge node)
+        knowledge_context = input_data.get("knowledge_context")
+        
+        # Reasoning context (from reasoning_load node)
+        reasoning_context = input_data.get("reasoning_context")
+        
+        # Build context sections
+        context_parts = []
+        if reasoning_context:
+            context_parts.append(f"## Previous Reasoning\n{reasoning_context}")
+        if knowledge_context:
+            context_parts.append(f"## Relevant Knowledge\n{knowledge_context}")
+        if memory_context:
+            # Extract just the memory content (after "Relevant memories retrieved...")
+            if "Relevant memories retrieved" in memory_context:
+                context_parts.append(f"## User Memories\n{memory_context}")
+            else:
+                context_parts.append(f"## User Memories\n{memory_context}")
+        
+        if context_parts:
+            full_prompt = full_prompt + "\n\n" + "\n\n".join(context_parts)
+        
         # Get existing messages from the flow data
         messages = input_data.get("messages")
         if not isinstance(messages, list):

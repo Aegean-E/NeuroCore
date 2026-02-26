@@ -101,15 +101,13 @@ class MemoryRecallExecutor:
 
         # Format context
         context_str = "\n".join([f"- {r['text']}" for r in results])
-        system_msg = {
-            "role": "system", 
-            "content": f"Relevant memories retrieved from database:\n{context_str}\nUse these to answer the user if relevant."
-        }
-
-        # Inject into messages (before the last message)
-        new_messages = messages[:-1] + [system_msg] + [messages[-1]]
         
-        return {**input_data, "messages": new_messages}
+        # Return memory context in a special field for System Prompt to extract
+        # Don't inject as system message - let System Prompt handle the injection
+        return {
+            **input_data, 
+            "_memory_context": f"Relevant memories retrieved from database:\n{context_str}\nUse these to answer the user if relevant."
+        }
 
     async def send(self, processed_data: dict) -> dict:
         return processed_data

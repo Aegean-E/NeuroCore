@@ -55,9 +55,9 @@ class KnowledgeQueryExecutor:
         output = input_data.copy() if isinstance(input_data, dict) else {"original": input_data}
         output["knowledge_context"] = context_str
         
-        if "messages" in output and context_str:
-            output["messages"].append({"role": "system", "content": f"Relevant Knowledge Base Context:\n{context_str}"})
-            
+        # Don't inject into messages - let System Prompt handle the injection
+        # This prevents conflicts when multiple bridge nodes are used
+        
         return output
 
     async def send(self, processed_data: dict) -> dict:
