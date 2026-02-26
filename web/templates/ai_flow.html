@@ -423,45 +423,7 @@
         </div>
     </div>
 
-    <!-- Import/Export Modal -->
-    <div id="import-export-modal" class="fixed inset-0 z-50 flex items-center justify-center hidden" aria-labelledby="modal-title" role="dialog" aria-modal="true">
-        <div class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm transition-opacity opacity-0" id="import-export-modal-backdrop"></div>
-        <div class="relative transform overflow-hidden rounded-2xl bg-slate-900 border border-slate-800 text-left shadow-2xl transition-all scale-95 opacity-0 sm:w-full sm:max-w-lg p-6" id="import-export-modal-panel">
-            <div class="flex justify-between items-center mb-4">
-                <h3 class="text-lg font-semibold leading-6 text-white">Import / Export Flows</h3>
-                <button onclick="closeImportExportModal()" class="text-slate-500 hover:text-slate-300">
-                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
-                </button>
-            </div>
-            
-            <div class="space-y-4">
-                <!-- Export Section -->
-                <div class="border border-slate-700 rounded-lg p-4">
-                    <h4 class="font-semibold text-white mb-2">Export Flow</h4>
-                    <p class="text-xs text-slate-400 mb-3">Download a flow as JSON file</p>
-                    <select id="export-flow-select" class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm mb-2">
-                        <option value="">Select a flow...</option>
-                        {% for flow in flows %}
-                        <option value="{{ flow.id }}">{{ flow.name }}</option>
-                        {% endfor %}
-                    </select>
-                    <button onclick="exportSelectedFlow()" class="w-full bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-lg text-sm font-semibold transition-colors">
-                        Export Selected Flow
-                    </button>
-                </div>
-                
-                <!-- Import Section -->
-                <div class="border border-slate-700 rounded-lg p-4">
-                    <h4 class="font-semibold text-white mb-2">Import Flow</h4>
-                    <p class="text-xs text-slate-400 mb-3">Upload a flow JSON file</p>
-                    <input type="file" id="import-flow-file" accept=".json" class="w-full text-sm text-slate-400 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-blue-600 file:text-white hover:file:bg-blue-500 mb-2">
-                    <button onclick="importFlow()" class="w-full bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 rounded-lg text-sm font-semibold transition-colors">
-                        Import Flow
-                    </button>
-                </div>
-            </div>
-        </div>
-    </div>
+
 
     <script>
     (function() {
@@ -786,36 +748,91 @@
 
             // Copy (Ctrl+C)
             if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'c') {
-                if (selectedNodeId) {
-                    const node = nodes.find(n => n.id === selectedNodeId);
-                    if (node) {
+                const nodesToCopy = selectedNodeIds.size > 0 ? [...selectedNodeIds] : (selectedNodeId ? [selectedNodeId] : []);
+                
+                if (nodesToCopy.length > 0) {
+                    const nodeObjects = nodesToCopy.map(nodeId => nodes.find(n => n.id === nodeId)).filter(n => n !== undefined);
+                    
+                    if (nodeObjects.length > 0) {
+                        const minX = Math.min(...nodeObjects.map(n => n.x));
+                        const minY = Math.min(...nodeObjects.map(n => n.y));
+                        
+                        const nodeIdToIndex = {};
                         copiedNodeData = {
-                            moduleId: node.moduleId,
-                            name: node.name,
-                            nodeTypeId: node.nodeTypeId,
-                            config: JSON.parse(JSON.stringify(node.config || {})),
-                            isReverted: node.isReverted
+                            nodes: nodeObjects.map((node, index) => {
+                                nodeIdToIndex[node.id] = index;
+                                return {
+                                    moduleId: node.moduleId,
+                                    name: node.name,
+                                    nodeTypeId: node.nodeTypeId,
+                                    config: JSON.parse(JSON.stringify(node.config || {})),
+                                    isReverted: node.isReverted,
+                                    relX: node.x - minX,
+                                    relY: node.y - minY
+                                };
+                            }),
+                            connections: []
                         };
-                        showToast('Node copied', 'info');
+                        
+                        if (nodeObjects.length > 1) {
+                            const nodeIdSet = new Set(nodeObjects.map(n => n.id));
+                            connections.forEach(conn => {
+                                const fromIndex = nodeIdToIndex[conn.from.node];
+                                const toIndex = nodeIdToIndex[conn.to.node];
+                                if (fromIndex !== undefined && toIndex !== undefined) {
+                                    copiedNodeData.connections.push({
+                                        from: { index: fromIndex, port: conn.from.port },
+                                        to: { index: toIndex, port: conn.to.port }
+                                    });
+                                }
+                            });
+                        }
+                        
+                        showToast(`${nodeObjects.length} node(s) copied`, 'info');
                     }
                 }
             }
 
             // Paste (Ctrl+V)
             if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'v') {
-                if (copiedNodeData) {
+                if (copiedNodeData && copiedNodeData.nodes && copiedNodeData.nodes.length > 0) {
                     const x = (lastMouseX - panX) / zoom;
                     const y = (lastMouseY - panY) / zoom;
-                    createNode(
-                        copiedNodeData.moduleId,
-                        copiedNodeData.name,
-                        copiedNodeData.nodeTypeId,
-                        x,
-                        y,
-                        null,
-                        copiedNodeData.config,
-                        copiedNodeData.isReverted
-                    );
+                    
+                    const newNodes = [];
+                    
+                    copiedNodeData.nodes.forEach(nodeData => {
+                        const newNode = createNode(
+                            nodeData.moduleId,
+                            nodeData.name,
+                            nodeData.nodeTypeId,
+                            x + nodeData.relX,
+                            y + nodeData.relY,
+                            null,
+                            nodeData.config,
+                            nodeData.isReverted
+                        );
+                        if (newNode) {
+                            newNodes.push(newNode);
+                        }
+                    });
+                    
+                    if (copiedNodeData.connections && copiedNodeData.connections.length > 0 && newNodes.length > 0) {
+                        copiedNodeData.connections.forEach(conn => {
+                            const fromNodeId = newNodes[conn.from.index]?.id;
+                            const toNodeId = newNodes[conn.to.index]?.id;
+                            
+                            if (fromNodeId && toNodeId) {
+                                connections.push({
+                                    from: { node: fromNodeId, port: conn.from.port },
+                                    to: { node: toNodeId, port: conn.to.port }
+                                });
+                            }
+                        });
+                        drawConnections();
+                    }
+                    
+                    showToast(`${copiedNodeData.nodes.length} node(s) pasted`, 'info');
                 }
             }
 
@@ -1455,6 +1472,8 @@
                     inputArea.onclick = originalOutputHandler;
                 }
             }
+            
+            return nodeData;
         }
 
         window.loadFlowById = async function(flowId) {
@@ -1688,86 +1707,6 @@
         window.confirmClearCanvas = function() {
             clearCanvas(false);
             closeClearModal();
-        }
-
-        window.showImportExportModal = function() {
-            const modal = document.getElementById('import-export-modal');
-            const backdrop = document.getElementById('import-export-modal-backdrop');
-            const panel = document.getElementById('import-export-modal-panel');
-            modal.classList.remove('hidden');
-            requestAnimationFrame(() => {
-                backdrop.classList.remove('opacity-0');
-                panel.classList.remove('opacity-0', 'scale-95');
-                panel.classList.add('opacity-100', 'scale-100');
-            });
-        }
-
-        window.closeImportExportModal = function() {
-            const modal = document.getElementById('import-export-modal');
-            const backdrop = document.getElementById('import-export-modal-backdrop');
-            const panel = document.getElementById('import-export-modal-panel');
-            backdrop.classList.add('opacity-0');
-            panel.classList.remove('opacity-100', 'scale-100');
-            panel.classList.add('opacity-0', 'scale-95');
-            setTimeout(() => {
-                modal.classList.add('hidden');
-            }, 200);
-        }
-
-        window.exportSelectedFlow = async function() {
-            const flowId = document.getElementById('export-flow-select').value;
-            if (!flowId) {
-                showToast('Please select a flow to export', 'error');
-                return;
-            }
-            try {
-                const response = await fetch(`/ai-flow/${flowId}`);
-                const flowData = await response.json();
-                const blob = new Blob([JSON.stringify(flowData, null, 2)], { type: 'application/json' });
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = `${flowData.name || 'flow'}.json`;
-                a.click();
-                URL.revokeObjectURL(url);
-                showToast('Flow exported successfully', 'success');
-                closeImportExportModal();
-            } catch (error) {
-                showToast('Failed to export flow: ' + error.message, 'error');
-            }
-        }
-
-        window.importFlow = async function() {
-            const fileInput = document.getElementById('import-flow-file');
-            const file = fileInput.files[0];
-            if (!file) {
-                showToast('Please select a file to import', 'error');
-                return;
-            }
-            try {
-                const text = await file.text();
-                const flowData = JSON.parse(text);
-                if (!flowData.name || !flowData.nodes) {
-                    showToast('Invalid flow file format', 'error');
-                    return;
-                }
-                // Save imported flow with a new ID
-                const response = await fetch('/ai-flow/save', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                    body: `name=${encodeURIComponent(flowData.name + ' (imported)')}&nodes=${encodeURIComponent(JSON.stringify(flowData.nodes))}&connections=${encodeURIComponent(JSON.stringify(flowData.connections || []))}&bridges=${encodeURIComponent(JSON.stringify(flowData.bridges || []))}`
-                });
-                if (response.ok) {
-                    showToast('Flow imported successfully', 'success');
-                    closeImportExportModal();
-                    // Refresh the flow list
-                    document.getElementById('saved-flows-list').innerHTML = await response.text();
-                } else {
-                    showToast('Failed to import flow', 'error');
-                }
-            } catch (error) {
-                showToast('Failed to import flow: ' + error.message, 'error');
-            }
         }
 
         window.revertSelectedConnection = function() {
