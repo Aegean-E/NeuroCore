@@ -340,35 +340,34 @@ class MemoryStore:
             
             with self._connect() as con:
                 rows = con.execute(query, params).fetchall()
-            
-            valid_ids = []
-            for r in rows:
-                mid = r[0]
-                mem_expires_at = r[2]
-                access_count = r[4] if len(r) > 4 else 0
-                importance_boost = 0
                 
-                # Get expires_at for this memory
-                expires_at = con.execute("SELECT expires_at FROM memories WHERE id = ?", (mid,)).fetchone()
-                if expires_at and expires_at[0] and expires_at[0] < current_time:
-                    continue  # Skip expired memories
+                valid_ids = []
+                for r in rows:
+                    mid = r[0]
+                    mem_expires_at = r[2]
+                    access_count = r[4] if len(r) > 4 else 0
+                    importance_boost = 0
+                    
+                    # Get expires_at for this memory
+                    expires_at = con.execute("SELECT expires_at FROM memories WHERE id = ?", (mid,)).fetchone()
+                    if expires_at and expires_at[0] and expires_at[0] < current_time:
+                        continue  # Skip expired memories
+                    
+                    if mid in candidate_scores:
+                        base_score = candidate_scores[mid]
+                        boosted_score = base_score * (1 + access_count * access_weight) * (1 + importance_boost * 0.5)
+                        results.append({
+                            "id": mid,
+                            "text": r[1],
+                            "created_at": r[2],
+                            "type": r[3],
+                            "score": boosted_score
+                        })
+                        valid_ids.append(mid)
                 
-                if mid in candidate_scores:
-                    base_score = candidate_scores[mid]
-                    boosted_score = base_score * (1 + access_count * access_weight) * (1 + importance_boost * 0.5)
-                    results.append({
-                        "id": mid,
-                        "text": r[1],
-                        "created_at": r[2],
-                        "type": r[3],
-                        "score": boosted_score
-                    })
-                    valid_ids.append(mid)
-            
-            # Increment access_count for returned memories
-            if valid_ids:
-                placeholders = ','.join(['?'] * len(valid_ids))
-                with self._connect() as con:
+                # Increment access_count for returned memories
+                if valid_ids:
+                    placeholders = ','.join(['?'] * len(valid_ids))
                     con.execute(f"UPDATE memories SET access_count = access_count + 1 WHERE id IN ({placeholders})", valid_ids)
             
             results.sort(key=lambda x: x['score'], reverse=True)

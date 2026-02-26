@@ -383,20 +383,29 @@ class FlowRunner:
                                 bridge_executor_class = self._executor_cache[bridge_cache_key]
                             
                             if bridge_executor_class:
-                                bridge_executor = bridge_executor_class()
-                                bridge_config = (bridge_meta.get('config') or {}).copy()
-                                bridge_config['_flow_id'] = self.flow_id
-                                bridge_config['_node_id'] = bridge_node_id
-                                
-                                bridge_processed = await bridge_executor.receive(bridge_input, config=bridge_config)
-                                if bridge_processed is None:
+                                try:
+                                    bridge_executor = bridge_executor_class()
+                                    bridge_config = (bridge_meta.get('config') or {}).copy()
+                                    bridge_config['_flow_id'] = self.flow_id
+                                    bridge_config['_node_id'] = bridge_node_id
+                                    
+                                    bridge_processed = await bridge_executor.receive(bridge_input, config=bridge_config)
+                                    if bridge_processed is None:
+                                        break
+                                    bridge_output = await bridge_executor.send(bridge_processed)
+                                    node_outputs[bridge_node_id] = bridge_output
+                                    # Pass output as input to next bridge node
+                                    if isinstance(bridge_output, dict):
+                                        bridge_input = bridge_input.copy()
+                                        bridge_input.update(bridge_output)
+                                except Exception as bridge_err:
+                                    import traceback
+                                    print(f"[Bridge Error] Node {bridge_node_id} failed: {bridge_err}")
+                                    print(f"[Bridge Error] Traceback: {traceback.format_exc()}")
+                                    if settings.get("debug_mode"):
+                                        debug_logger.log(self.flow_id, bridge_node_id, bridge_meta.get('name', bridge_node_id), "bridge_error", {"error": str(bridge_err), "traceback": traceback.format_exc()})
+                                    # Continue without bridge output - don't fail the whole flow
                                     break
-                                bridge_output = await bridge_executor.send(bridge_processed)
-                                node_outputs[bridge_node_id] = bridge_output
-                                # Pass output as input to next bridge node
-                                if isinstance(bridge_output, dict):
-                                    bridge_input = bridge_input.copy()
-                                    bridge_input.update(bridge_output)
                 
                 if node_id in explicit_start_nodes:
                     # Explicit start node receives the initial input directly
