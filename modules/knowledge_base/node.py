@@ -36,6 +36,10 @@ class KnowledgeQueryExecutor:
         if not query:
             return input_data
 
+        # Check if knowledge base is empty before processing
+        if document_store.get_total_documents() == 0:
+            return input_data
+
         # Generate embedding for the query
         embedding = await self.llm.get_embedding(query)
 

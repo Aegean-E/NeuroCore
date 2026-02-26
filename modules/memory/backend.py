@@ -210,6 +210,11 @@ class MemoryStore:
         text_lower = " ".join(text.lower().strip().split())
         return hashlib.sha256(text_lower.encode("utf-8")).hexdigest()
 
+    def has_memories(self) -> bool:
+        with self._connect() as con:
+            result = con.execute("SELECT COUNT(*) FROM memories").fetchone()
+            return result[0] > 0
+
     def add_entry(self, text: str, embedding: Optional[List[float]] = None, confidence: float = 1.0, subject: str = "User", created_at: int = None, mem_type: str = "BELIEF", source: str = "chat", verified: bool = False, expires_at: int = None) -> int:
         identity = self.compute_identity(text)
         timestamp = created_at if created_at is not None else int(time.time())

@@ -36,6 +36,10 @@ class MemoryRecallExecutor:
         if not messages:
             return input_data
 
+        # Skip if memory is empty
+        if not memory_store.has_memories():
+            return input_data
+
         # Get the last user message to use as a query
         last_user_msg = next((m for m in reversed(messages) if m["role"] == "user"), None)
         if not last_user_msg:

@@ -5,7 +5,7 @@
 {% else %}
 {% for log in logs %}
 <div class="grid grid-cols-12 gap-4 items-start p-3 rounded-lg border border-slate-800/50 hover:bg-slate-800/50 transition-colors text-sm font-mono">
-    <div class="col-span-2 text-slate-500">{{ log.timestamp }}</div>
+    <div class="col-span-2 text-purple-400 font-semibold">{{ log.timestamp }}</div>
     <div class="col-span-2 font-semibold text-blue-400">{{ log.node_name }}</div>
     <div class="col-span-1">
         {% if log.event == 'start' %}
