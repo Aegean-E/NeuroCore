@@ -1,3 +1,4 @@
+import asyncio
 import importlib
 import sys
 import types
@@ -61,11 +62,58 @@ class FlowRunner:
             for member in component:
                 groups[member] = component
         return groups
+    
+    def _get_bridge_order(self, node_id):
+        """Get bridge chain nodes in execution order (upstream to downstream)."""
+        if node_id not in self.bridge_groups:
+            return []
+        
+        # Build bridge direction map
+        bridge_dir = {}
+        for b in self.bridges:
+            from_node = b['from']
+            to_node = b['to']
+            # from_node runs BEFORE to_node
+            if from_node not in bridge_dir:
+                bridge_dir[from_node] = []
+            bridge_dir[from_node].append(to_node)
+        
+        # Find all nodes in chain starting from furthest upstream
+        group = self.bridge_groups[node_id]
+        ordered = []
+        visited = set()
+        
+        def visit(nid):
+            if nid in visited:
+                return
+            visited.add(nid)
+            # Visit dependencies first
+            for b in self.bridges:
+                if b['to'] == nid and b['from'] in group:
+                    visit(b['from'])
+            ordered.append(nid)
+        
+        for nid in group:
+            visit(nid)
+        
+        return ordered
 
     def _compute_execution_order(self):
         """Performs a topological sort (Kahn's algorithm) to find the execution order."""
         adj = {node_id: [] for node_id in self.nodes}
         in_degree = {node_id: 0 for node_id in self.nodes}
+
+        # First, add bridge dependencies to the graph
+        # Bridges create implicit connections between all bridged nodes
+        for b in self.bridges:
+            from_node = b['from']
+            to_node = b['to']
+            if from_node not in self.nodes or to_node not in self.nodes:
+                continue
+            # Add bridge edge: from_node -> to_node (from runs before to)
+            if to_node not in adj[from_node]:
+                adj[from_node].append(to_node)
+                in_degree[to_node] += 1
 
         for conn in self.connections:
             source = conn['from']
@@ -313,6 +361,43 @@ class FlowRunner:
                 # 1. Determine Input Data (DAG Logic)
                 incoming_edges = [c for c in self.connections if c['to'] == node_id]
                 
+                # Check if this node has upstream bridge dependencies that haven't run yet
+                if node_id in self.bridge_groups and node_id not in explicit_start_nodes:
+                    bridge_chain = self._get_bridge_order(node_id)
+                    bridge_input = {k: v for k, v in initial_input.items() if k != "_input_source"} if isinstance(initial_input, dict) else initial_input
+                    
+                    for bridge_node_id in bridge_chain:
+                        if bridge_node_id != node_id and bridge_node_id not in node_outputs:
+                            bridge_meta = self.nodes[bridge_node_id]
+                            bridge_module_id = bridge_meta['moduleId']
+                            bridge_type_id = bridge_meta['nodeTypeId']
+                            
+                            bridge_cache_key = f"{bridge_module_id}.{bridge_type_id}"
+                            if bridge_cache_key not in self._executor_cache:
+                                node_dispatcher = importlib.import_module(f"modules.{bridge_module_id}.node")
+                                if isinstance(node_dispatcher, types.ModuleType) and node_dispatcher.__name__ in sys.modules:
+                                    importlib.reload(node_dispatcher)
+                                bridge_executor_class = await node_dispatcher.get_executor_class(bridge_type_id)
+                                self._executor_cache[bridge_cache_key] = bridge_executor_class
+                            else:
+                                bridge_executor_class = self._executor_cache[bridge_cache_key]
+                            
+                            if bridge_executor_class:
+                                bridge_executor = bridge_executor_class()
+                                bridge_config = (bridge_meta.get('config') or {}).copy()
+                                bridge_config['_flow_id'] = self.flow_id
+                                bridge_config['_node_id'] = bridge_node_id
+                                
+                                bridge_processed = await bridge_executor.receive(bridge_input, config=bridge_config)
+                                if bridge_processed is None:
+                                    break
+                                bridge_output = await bridge_executor.send(bridge_processed)
+                                node_outputs[bridge_node_id] = bridge_output
+                                # Pass output as input to next bridge node
+                                if isinstance(bridge_output, dict):
+                                    bridge_input = bridge_input.copy()
+                                    bridge_input.update(bridge_output)
+                
                 if node_id in explicit_start_nodes:
                     # Explicit start node receives the initial input directly
                     if isinstance(initial_input, dict):
@@ -337,10 +422,15 @@ class FlowRunner:
                     relevant_edges = list(incoming_edges)
                     if node_id in self.bridge_groups:
                         peers = self.bridge_groups[node_id]
+                        # Include outputs from bridge peer nodes that have already run
                         for peer_id in peers:
-                            if peer_id != node_id:
-                                peer_edges = [c for c in self.connections if c['to'] == peer_id]
-                                relevant_edges.extend(peer_edges)
+                            if peer_id != node_id and peer_id in node_outputs:
+                                peer_output = node_outputs.get(peer_id)
+                                if peer_output is not None:
+                                    parent_outputs.append(peer_output)
+                            # Also get edges to peers
+                            peer_edges = [c for c in self.connections if c['to'] == peer_id]
+                            relevant_edges.extend(peer_edges)
                     
                     for edge in relevant_edges:
                         if edge['from'] in node_outputs:
@@ -424,15 +514,8 @@ class FlowRunner:
                     # This enables loops: A -> B -> A
                     downstream_nodes = [c['to'] for c in self.connections if c['from'] == node_id]
                     
-                    # Handle Bridges: Propagate execution to bridged peers
-                    if node_id in self.bridge_groups:
-                        for peer_id in self.bridge_groups[node_id]:
-                            if peer_id != node_id:
-                                # Share output with peer so its children can access it
-                                node_outputs[peer_id] = output
-                                # Add peer's children to downstream nodes
-                                peer_downstream = [c['to'] for c in self.connections if c['from'] == peer_id]
-                                downstream_nodes.extend(peer_downstream)
+                    # Note: Bridge handling is now done in _compute_execution_order via topological sort.
+                    # No need to re-add bridge peers at runtime.
 
                     for child_id in downstream_nodes:
                         # If routing is active, check if child is allowed
