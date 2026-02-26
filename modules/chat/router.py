@@ -138,11 +138,16 @@ async def send_message(
                 # The final output of the flow is expected to be the AI response content,
                 # typically processed by a "Chat Output" node.
                 ai_response = flow_result.get("content", "Flow finished but produced no valid response content.")
+                
+                # If the response indicates a failure, don't add it to history
+                if "produced no valid response" in ai_response or "Error:" in ai_response:
+                    ai_response = None  # Mark as failed so we don't add to history
         except Exception as e:
             ai_response = f"Critical Error running AI Flow: {e}"
 
-    # Add AI response to history
-    session_manager.add_message(session_id, "assistant", ai_response)
+    # Add AI response to history only if it's valid
+    if ai_response:
+        session_manager.add_message(session_id, "assistant", ai_response)
 
     # Reload session to ensure we have the absolute latest state for auto-renaming
     active_session = session_manager.get_session(session_id)
@@ -185,7 +190,7 @@ async def send_message(
         "chat_message_pair.html", 
         {
             "user_message": user_content,
-            "ai_response": ai_response
+            "ai_response": ai_response or "Flow failed to produce a response. Please check the flow configuration."
         },
         headers={"HX-Trigger": "sessionsChanged"}
     )
