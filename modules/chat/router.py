@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Request, Form, Depends, Query, UploadFile, File
 from fastapi.responses import HTMLResponse, Response
 import base64
+import time
 from core.settings import settings
 from core.dependencies import get_llm_bridge
 from core.llm import LLMBridge
@@ -123,7 +124,9 @@ async def send_message(
 
     if not active_flow:
         ai_response = "Error: No active AI Flow is set. Please go to the AI Flow page to create and activate a flow."
+        elapsed_time = 0
     else:
+        start_time = time.time()
         try:
             runner = FlowRunner(flow_id=active_flow['id'])
             
@@ -131,6 +134,8 @@ async def send_message(
             initial_data = {"messages": active_session["history"]}
             
             flow_result = await runner.run(initial_data)
+            
+            elapsed_time = round(time.time() - start_time, 1)
             
             if "error" in flow_result:
                 ai_response = f"Flow Execution Error: {flow_result['error']}"
@@ -144,6 +149,7 @@ async def send_message(
                     ai_response = None  # Mark as failed so we don't add to history
         except Exception as e:
             ai_response = f"Critical Error running AI Flow: {e}"
+            elapsed_time = round(time.time() - start_time, 1) if 'start_time' in locals() else 0
 
     # Add AI response to history only if it's valid
     if ai_response:
@@ -190,7 +196,8 @@ async def send_message(
         "chat_message_pair.html", 
         {
             "user_message": user_content,
-            "ai_response": ai_response or "Flow failed to produce a response. Please check the flow configuration."
+            "ai_response": ai_response or "Flow failed to produce a response. Please check the flow configuration.",
+            "elapsed_time": elapsed_time
         },
         headers={"HX-Trigger": "sessionsChanged"}
     )

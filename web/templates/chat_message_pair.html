@@ -15,4 +15,13 @@
 </div>
 <div class="bg-slate-800 p-4 rounded-2xl rounded-tl-none max-w-[80%] shadow-lg border border-slate-700/50">
     <div class="text-sm prose prose-invert">{{ ai_response }}</div>
+    {% if elapsed_time %}
+    <div class="text-xs text-slate-500 mt-2">
+        {% if elapsed_time < 1 %}
+            Response time: &lt;1s
+        {% else %}
+            Response time: {{ elapsed_time }}s
+        {% endif %}
+    </div>
+    {% endif %}
 </div>

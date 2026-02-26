@@ -3,6 +3,7 @@ import os
 import asyncio
 import threading
 import base64
+import time
 from .bridge import TelegramBridge
 from .node import ConfigLoader
 from modules.chat.sessions import session_manager
@@ -195,12 +196,15 @@ class TelegramService:
             return
 
         active_flow_id = active_flow_ids[0]
+        start_time = time.time()
         try:
             runner = FlowRunner(flow_id=active_flow_id)
             session = session_manager.get_session(sess_id)
             initial_data = {"messages": session["history"]}
             
             result = await runner.run(initial_data)
+            
+            elapsed_time = round(time.time() - start_time, 1)
             
             response_text = ""
             if "error" in result:
@@ -212,7 +216,11 @@ class TelegramService:
                     response_text = result["choices"][0]["message"]["content"]
                  except: response_text = "Empty response."
             else:
-                response_text = "Flow finished with no output."
+                 response_text = "Flow finished with no output."
+
+            # Add response time to the message
+            time_str = f" (<1s)" if elapsed_time < 1 else f" ({elapsed_time}s)"
+            response_text += time_str
 
             # 5. Add Assistant Message & Reply
             session_manager.add_message(sess_id, "assistant", response_text)
