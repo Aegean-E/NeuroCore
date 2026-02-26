@@ -252,19 +252,42 @@ class FlowRunner:
     async def run(self, initial_input: dict, start_node_id: str = None):
         """Executes the flow in order, passing data between nodes."""
         if settings.get("debug_mode"):
-            debug_logger.log(self.flow_id, "SYSTEM", "FlowRunner", "flow_start", {"start_node": start_node_id})
+            debug_logger.log(self.flow_id, "SYSTEM", "FlowRunner", "flow_start", {"start_node": start_node_id, "input_source": initial_input.get("_input_source") if isinstance(initial_input, dict) else None})
         
         try:
             node_outputs = {}
             
-            # Use a queue for execution to support cycles (re-execution of nodes)
+            # Determine start nodes based on input source
+            input_source = initial_input.get("_input_source") if isinstance(initial_input, dict) else None
+            explicit_start_nodes = set()
+            
             if start_node_id:
+                # Explicit start node specified
                 if start_node_id not in self.nodes:
                     raise ValueError(f"Start node {start_node_id} not found in flow.")
-                
-                # Start execution FROM this node (so it runs and triggers its logic)
                 execution_queue = deque([start_node_id])
+                explicit_start_nodes.add(start_node_id)
+            elif input_source:
+                # Auto-detect which input node to start from based on source
+                input_node_map = {
+                    "chat": "chat_input",
+                    "telegram": "telegram_input"
+                }
+                target_node_type = input_node_map.get(input_source)
+                if target_node_type:
+                    # Find all nodes of this type
+                    start_nodes = [nid for nid, n in self.nodes.items() if n.get("nodeTypeId") == target_node_type]
+                    if start_nodes:
+                        execution_queue = deque(start_nodes)
+                        explicit_start_nodes.update(start_nodes)
+                    else:
+                        # Fallback: find nodes with no incoming edges
+                        execution_queue = deque([nid for nid in self.nodes if not any(c['to'] == nid for c in self.connections)])
+                        explicit_start_nodes.update(execution_queue)
+                else:
+                    execution_queue = deque(self.execution_order)
             else:
+                # No source specified, use topological order
                 execution_queue = deque(self.execution_order)
             
             # Track how many times a node has run to prevent infinite loops
@@ -290,16 +313,20 @@ class FlowRunner:
                 # 1. Determine Input Data (DAG Logic)
                 incoming_edges = [c for c in self.connections if c['to'] == node_id]
                 
-                if node_id == start_node_id:
-                    # Forced start node receives the initial input directly
+                if node_id in explicit_start_nodes:
+                    # Explicit start node receives the initial input directly
                     if isinstance(initial_input, dict):
-                        node_input = initial_input.copy()
+                        node_input = {k: v for k, v in initial_input.items() if k != "_input_source"}
                     else:
                         node_input = initial_input
                 elif not incoming_edges:
-                    # Source node: receives global initial input
+                    # Source node: receives global initial input (only if no explicit start nodes defined)
+                    if explicit_start_nodes:
+                        # Skip - we're in selective mode and this isn't a chosen start node
+                        node_outputs[node_id] = None
+                        continue
                     if isinstance(initial_input, dict):
-                        node_input = initial_input.copy()
+                        node_input = {k: v for k, v in initial_input.items() if k != "_input_source"}
                     else:
                         node_input = initial_input
                 else:

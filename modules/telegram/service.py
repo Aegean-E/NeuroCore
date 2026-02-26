@@ -200,7 +200,7 @@ class TelegramService:
         try:
             runner = FlowRunner(flow_id=active_flow_id)
             session = session_manager.get_session(sess_id)
-            initial_data = {"messages": session["history"]}
+            initial_data = {"messages": session["history"], "_input_source": "telegram"}
             
             result = await runner.run(initial_data)
             

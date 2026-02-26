@@ -131,7 +131,7 @@ async def send_message(
             runner = FlowRunner(flow_id=active_flow['id'])
             
             # The initial input to the flow will be the full chat history.
-            initial_data = {"messages": active_session["history"]}
+            initial_data = {"messages": active_session["history"], "_input_source": "chat"}
             
             flow_result = await runner.run(initial_data)
             
