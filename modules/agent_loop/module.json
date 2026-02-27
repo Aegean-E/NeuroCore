@@ -1,0 +1,28 @@
+{
+    "name": "Agent Loop",
+    "description": "Autonomous agent that loops between LLM and tools until task completion.",
+    "enabled": true,
+    "id": "agent_loop",
+    "icon": "M4 4v5h.5m.5 5h11a2 2 0 002-2v-4.5m-9 9h5a2 2 0 012 2h-5a2 2 0 01-2-2v-5m0 0V7a2 2 0 002 2h5m-5-5H4m5 5h5a2 2 0 012 2h-5",
+    "is_flow_node": false,
+    "order": 1,
+    "config": {
+        "max_iterations": 10,
+        "max_tokens": 2048,
+        "temperature": 0.7,
+        "include_plan_in_context": true,
+        "include_memory_context": true,
+        "include_knowledge_context": true,
+        "include_reasoning_context": true
+    },
+    "provides_nodes": [
+        {
+            "id": "agent_loop",
+            "name": "Agent Loop",
+            "description": "Autonomous agent that loops between LLM and tools until no more tool calls.",
+            "singleton": false,
+            "configurable": true
+        }
+    ],
+    "load_error": null
+}

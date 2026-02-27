@@ -1,0 +1,23 @@
+{
+    "name": "Reflection",
+    "description": "Evaluates whether the agent's response satisfies the user's request.",
+    "enabled": true,
+    "id": "reflection",
+    "icon": "M9 12l2 2 4-4m6 2A9 9 0 018 9 2 0 00-2 2 6 9 9 0 011 6 2 0 00 2-4 0 9 9 0 018-9 0 011 6 2 0 00-2-4 0 9 9 0",
+    "is_flow_node": false,
+    "order": 4,
+    "config": {
+        "max_retries": 2,
+        "default_reflection_prompt": "You are a reflection agent. Evaluate if the assistant's response satisfies the user's request.\n\nEvaluate:\n- Is the request fully answered?\n- Are all tasks completed?\n- Is more work needed?\n\nRespond with JSON: {\"satisfied\": true/false, \"reason\": \"explanation\", \"needs_improvement\": \"what could be better or null\"}"
+    },
+    "provides_nodes": [
+        {
+            "id": "reflection",
+            "name": "Reflection",
+            "description": "Evaluates if the response satisfies the user's request. Outputs satisfied=true/false.",
+            "singleton": false,
+            "configurable": true
+        }
+    ],
+    "load_error": null
+}
