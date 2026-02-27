@@ -15,6 +15,9 @@ jinja2
 numpy
 faiss-cpu
 
+# Storage
+sqlite3 (built-in)
+
 # Testing
 pytest<9
 pytest-cov

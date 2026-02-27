@@ -82,8 +82,13 @@ class SystemPromptExecutor:
         # Reasoning context (from reasoning_load node)
         reasoning_context = input_data.get("reasoning_context")
         
+        # Plan context (from planner node)
+        plan_context = input_data.get("plan_context")
+        
         # Build context sections
         context_parts = []
+        if plan_context:
+            context_parts.append(plan_context)
         if reasoning_context:
             context_parts.append(f"## Previous Reasoning\n{reasoning_context}")
         if knowledge_context:

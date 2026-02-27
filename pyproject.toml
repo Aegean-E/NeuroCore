@@ -1,0 +1,55 @@
+[project]
+name = "neurocore"
+version = "0.1.0"
+description = "A powerful, modular AI agent framework with visual flow editor, persistent memory, and autonomous agent capabilities."
+readme = "README.md"
+requires-python = ">=3.12"
+license = {text = "Apache-2.0"}
+authors = [
+    {name = "Aegean-E", email = "In the Future"}
+]
+keywords = ["ai", "agent", "llm", "autonomous", "memory", "rag", "faiss"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+]
+
+dependencies = [
+    "fastapi",
+    "uvicorn",
+    "python-multipart",
+    "httpx",
+    "jinja2",
+    "numpy",
+    "faiss-cpu",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest<9",
+    "pytest-cov",
+    "pytest-httpx",
+    "pytest-asyncio",
+]
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W"]
+ignore = ["E501"]

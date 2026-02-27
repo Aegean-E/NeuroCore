@@ -20,7 +20,7 @@ class LLMBridge:
         base = self.embedding_base_url if use_embedding_url else self.base_url
         return f"{base}/{path.lstrip('/')}"
 
-    async def chat_completion(self, messages, model: str = None, temperature: float = None, max_tokens: int = None, tools: list = None, tool_choice: str = None):
+    async def chat_completion(self, messages, model: str = None, temperature: float = None, max_tokens: int = None, tools: list = None, tool_choice: str = None, response_format: dict = None):
         """Sends a chat completion request to the LLM API."""
         url = self._get_url("/chat/completions")
         
@@ -45,6 +45,8 @@ class LLMBridge:
             payload["tools"] = tools
         if tool_choice:
             payload["tool_choice"] = tool_choice
+        if response_format:
+            payload["response_format"] = response_format
         
         try:
             if self.client:

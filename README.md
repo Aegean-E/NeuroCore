@@ -89,18 +89,21 @@ A clean, modern chat interface for direct interaction with your configured AI fl
 - **Auto-Renaming** — Sessions automatically titled based on conversation context
 
 ### 📚 Long-Term Memory
-Integrated vector database (FAISS + SQLite) for persistent AI memory.
+**FAISS + SQLite with LLM-powered filtering — not your average RAG.**
+
+Most AI assistants use naive vector retrieval. NeuroCore's memory system is built different:
 
 <p align="center">
   <img src="screenshots/memory_browser.png" alt="Memory Browser" width="100%" style="border-radius: 8px; border: 1px solid #334155;">
 </p>
 
-- **Automatic Storage** — Background processing saves interactions
-- **Smart Extraction** — Uses an Arbiter model to extract facts and preferences
-- **Semantic Consolidation** — Intelligent merging of redundant memories
-- **Memory Browser** — Dedicated UI to search, filter, edit, merge, and delete memories
-- **Conflict Detection** — LLM-powered detection of contradictory memories
-- **Meta-Memory Logging** — Full audit trail of all memory operations
+- **FAISS + SQLite** — Fast vector search backed by persistent storage
+- **Arbiter Model** — LLM-powered gate that filters what gets saved (configurable confidence threshold)
+- **Semantic Consolidation** — Auto-merges similar/redundant memories to prevent bloat
+- **Smart Extraction** — Extracts structured facts (FACT, BELIEF, PREFERENCE, IDENTITY) from conversations
+- **Conflict Detection** — LLM identifies contradictory memories
+- **TTL & Access Weight** — Old memories fade, frequently accessed ones persist longer
+- **Memory Browser** — UI to search, filter, edit, merge, and delete memories
 
 ### 🧠 Knowledge Base (RAG)
 Retrieval-Augmented Generation support for working with documents.
