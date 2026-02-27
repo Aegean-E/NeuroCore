@@ -110,7 +110,7 @@ class RepeaterExecutor:
 class ConditionalRouterExecutor:
     async def receive(self, input_data: dict, config: dict = None) -> dict:
         """
-        Routes data flow based on tool existence.
+        Routes data flow based on tool existence or other conditions.
         Returns the input_data if tool exists, None otherwise.
         
         Config options:
@@ -118,6 +118,7 @@ class ConditionalRouterExecutor:
           - "tool_calls" - check if LLM returned tool calls
           - "requires_continuation" - check if more tools need to run (from tool dispatcher)
           - "max_tools_per_turn" - limit tools per turn, route to false when exceeded
+          - "satisfied" - check if reflection/agent was satisfied (from reflection node)
         """
         if input_data is None:
             return None
@@ -136,6 +137,10 @@ class ConditionalRouterExecutor:
             elif check_field == "max_tools_per_turn":
                 tool_count = input_data.get("_tool_count", 0)
                 condition_met = tool_count < max_tools
+            # Check satisfied (from reflection node)
+            elif check_field == "satisfied":
+                condition_met = input_data.get("satisfied", False)
+            # Check if field exists and is truthy
             elif input_data.get(check_field):
                 condition_met = True
             

@@ -357,6 +357,57 @@
             <div id="tools-checklist" class="space-y-2 max-h-60 overflow-y-auto custom-scrollbar bg-slate-950 border border-slate-700 rounded-xl p-4"></div>
             <p class="text-xs text-slate-500 mt-2">Select which tools this dispatcher is allowed to execute. Leave all unchecked to allow all.</p>
         </div>
+        <!-- Agent Loop Node Editor -->
+        <div id="config-agent-loop" class="hidden">
+            <div class="space-y-4">
+                <div>
+                    <label class="block text-sm font-medium text-slate-400 mb-2">Max Iterations</label>
+                    <input type="number" id="agent-loop-max-iterations" min="1" max="50" value="10" class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all">
+                    <p class="text-xs text-slate-500 mt-2">Maximum number of LLM ↔ Tool loops.</p>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-slate-400 mb-2">Temperature</label>
+                    <input type="number" id="agent-loop-temperature" min="0" max="2" step="0.1" value="0.7" class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all">
+                    <p class="text-xs text-slate-500 mt-2">LLM temperature (0-2).</p>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-slate-400 mb-2">Max Tokens</label>
+                    <input type="number" id="agent-loop-max-tokens" min="100" max="32000" step="100" value="2048" class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all">
+                    <p class="text-xs text-slate-500 mt-2">Maximum tokens in LLM response.</p>
+                </div>
+                <div class="border-t border-slate-800 pt-4">
+                    <p class="text-sm text-slate-300 font-semibold mb-3">Include in Context</p>
+                    <div class="space-y-2">
+                        <label class="flex items-center space-x-3">
+                            <input type="checkbox" id="agent-loop-include-plan" checked class="w-4 h-4 rounded border-slate-700 bg-slate-950 text-blue-600 focus:ring-blue-500">
+                            <span class="text-sm text-slate-300">Execution Plan (from Planner)</span>
+                        </label>
+                        <label class="flex items-center space-x-3">
+                            <input type="checkbox" id="agent-loop-include-memory" checked class="w-4 h-4 rounded border-slate-700 bg-slate-950 text-blue-600 focus:ring-blue-500">
+                            <span class="text-sm text-slate-300">Memory Context</span>
+                        </label>
+                        <label class="flex items-center space-x-3">
+                            <input type="checkbox" id="agent-loop-include-knowledge" checked class="w-4 h-4 rounded border-slate-700 bg-slate-950 text-blue-600 focus:ring-blue-500">
+                            <span class="text-sm text-slate-300">Knowledge Context</span>
+                        </label>
+                        <label class="flex items-center space-x-3">
+                            <input type="checkbox" id="agent-loop-include-reasoning" checked class="w-4 h-4 rounded border-slate-700 bg-slate-950 text-blue-600 focus:ring-blue-500">
+                            <span class="text-sm text-slate-300">Reasoning Context</span>
+                        </label>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <!-- Planner Node Editor -->
+        <div id="config-planner" class="hidden">
+            <div class="space-y-4">
+                <div>
+                    <label class="block text-sm font-medium text-slate-400 mb-2">Max Steps</label>
+                    <input type="number" id="planner-max-steps" min="1" max="20" value="10" class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all">
+                    <p class="text-xs text-slate-500 mt-2">Maximum number of steps in a plan.</p>
+                </div>
+            </div>
+        </div>
         <!-- Conditional Router Editor -->
         <div id="config-conditional-router" class="hidden">
             <div class="space-y-4">
@@ -364,19 +415,25 @@
                     <p class="text-sm text-slate-300 font-semibold mb-1">Check Field Options</p>
                     <p class="text-xs text-slate-500 mb-2">• tool_calls - check if LLM returned tool calls</p>
                     <p class="text-xs text-slate-500 mb-2">• requires_continuation - check if tool dispatcher has more tools pending</p>
-                    <p class="text-xs text-slate-500">• max_tools_per_turn - limit tools per turn with max_tools_per_turn value</p>
+                    <p class="text-xs text-slate-500 mb-2">• max_tools_per_turn - limit tools per turn with max_tools_per_turn value</p>
+                    <p class="text-xs text-slate-500">• satisfied - check if reflection/agent was satisfied (from reflection node)</p>
                 </div>
                 
                 <div>
                     <label class="block text-sm font-medium text-slate-400 mb-2">Field to Check</label>
-                    <input type="text" id="router-check-field" class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" placeholder="tool_calls">
+                    <select id="router-check-field" onchange="toggleMaxToolsField()" class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all">
+                        <option value="tool_calls">tool_calls - check if LLM returned tool calls</option>
+                        <option value="requires_continuation">requires_continuation - check if tool dispatcher has more tools pending</option>
+                        <option value="max_tools_per_turn">max_tools_per_turn - limit tools per turn</option>
+                        <option value="satisfied">satisfied - check if reflection/agent was satisfied</option>
+                    </select>
                     <p class="text-xs text-slate-500 mt-2">The field name to check for existence in the data.</p>
                 </div>
 
-                <div>
+                <div id="router-max-tools-container" class="hidden">
                     <label class="block text-sm font-medium text-slate-400 mb-2">Max Tools Per Turn</label>
                     <input type="number" id="router-max-tools" class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" placeholder="5" min="1" max="20">
-                    <p class="text-xs text-slate-500 mt-2">Max tools to allow per turn. Only used when Field to Check is "max_tools_per_turn".</p>
+                    <p class="text-xs text-slate-500 mt-2">Max tools to allow per turn.</p>
                 </div>
                 
                 <div class="border-t border-slate-800 pt-4 mt-4">
@@ -508,6 +565,18 @@
         canvas.addEventListener('drop', onDrop);
 
         // --- Core Canvas and Interaction Functions ---
+
+        function toggleMaxToolsField() {
+            const checkField = document.getElementById('router-check-field');
+            const maxToolsContainer = document.getElementById('router-max-tools-container');
+            if (checkField && maxToolsContainer) {
+                if (checkField.value === 'max_tools_per_turn') {
+                    maxToolsContainer.classList.remove('hidden');
+                } else {
+                    maxToolsContainer.classList.add('hidden');
+                }
+            }
+        }
 
         function updateCanvasTransform() {
             nodeAndSvgContainer.style.transform = `translate(${panX}px, ${panY}px) scale(${zoom})`;
@@ -1871,6 +1940,8 @@
             document.getElementById('config-reasoning-load').classList.add('hidden');
             document.getElementById('config-conditional-router').classList.add('hidden');
             document.getElementById('config-schedule-start').classList.add('hidden');
+            document.getElementById('config-agent-loop').classList.add('hidden');
+            document.getElementById('config-planner').classList.add('hidden');
 
             if (node.nodeTypeId === 'delay_node') {
                 document.getElementById('config-delay').classList.remove('hidden');
@@ -1920,6 +1991,18 @@
             } else if (node.nodeTypeId === 'reasoning_load') {
                 document.getElementById('config-reasoning-load').classList.remove('hidden');
                 document.getElementById('reasoning-load-n-input').value = node.config.last_n || 5;
+            } else if (node.nodeTypeId === 'agent_loop') {
+                document.getElementById('config-agent-loop').classList.remove('hidden');
+                document.getElementById('agent-loop-max-iterations').value = node.config.max_iterations || 10;
+                document.getElementById('agent-loop-temperature').value = node.config.temperature || 0.7;
+                document.getElementById('agent-loop-max-tokens').value = node.config.max_tokens || 2048;
+                document.getElementById('agent-loop-include-plan').checked = node.config.include_plan_in_context !== false;
+                document.getElementById('agent-loop-include-memory').checked = node.config.include_memory_context !== false;
+                document.getElementById('agent-loop-include-knowledge').checked = node.config.include_knowledge_context !== false;
+                document.getElementById('agent-loop-include-reasoning').checked = node.config.include_reasoning_context !== false;
+            } else if (node.nodeTypeId === 'planner') {
+                document.getElementById('config-planner').classList.remove('hidden');
+                document.getElementById('planner-max-steps').value = node.config.max_steps || 10;
             } else if (node.nodeTypeId === 'tool_dispatcher') {
                 document.getElementById('config-tools').classList.remove('hidden');
                 const checklist = document.getElementById('tools-checklist');
@@ -1943,6 +2026,7 @@
             } else if (node.nodeTypeId === 'conditional_router') {
                 document.getElementById('config-conditional-router').classList.remove('hidden');
                 document.getElementById('router-check-field').value = node.config.check_field || 'tool_calls';
+                toggleMaxToolsField();
                 document.getElementById('router-max-tools').value = node.config.max_tools_per_turn || '';
                 
                 // Load connected nodes and restore saved selections
@@ -2030,6 +2114,22 @@
                 } else if (node.nodeTypeId === 'reasoning_load') {
                     const n = parseInt(document.getElementById('reasoning-load-n-input').value);
                     newConfig = { last_n: (isNaN(n) || n < 1) ? 5 : n };
+                } else if (node.nodeTypeId === 'agent_loop') {
+                    const maxIterations = parseInt(document.getElementById('agent-loop-max-iterations').value) || 10;
+                    const temperature = parseFloat(document.getElementById('agent-loop-temperature').value) || 0.7;
+                    const maxTokens = parseInt(document.getElementById('agent-loop-max-tokens').value) || 2048;
+                    newConfig = {
+                        max_iterations: maxIterations,
+                        temperature: temperature,
+                        max_tokens: maxTokens,
+                        include_plan_in_context: document.getElementById('agent-loop-include-plan').checked,
+                        include_memory_context: document.getElementById('agent-loop-include-memory').checked,
+                        include_knowledge_context: document.getElementById('agent-loop-include-knowledge').checked,
+                        include_reasoning_context: document.getElementById('agent-loop-include-reasoning').checked
+                    };
+                } else if (node.nodeTypeId === 'planner') {
+                    const maxSteps = parseInt(document.getElementById('planner-max-steps').value) || 10;
+                    newConfig = { max_steps: maxSteps };
                 } else if (node.nodeTypeId === 'tool_dispatcher') {
                     const checkboxes = document.querySelectorAll('#tools-checklist input:checked');
                     const allowed = Array.from(checkboxes).map(cb => cb.value);

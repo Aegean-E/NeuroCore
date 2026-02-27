@@ -38,7 +38,7 @@
         {
             "id": "conditional_router",
             "name": "Conditional Router",
-            "description": "Routes data based on conditional logic. Checks if a specific field (e.g., tool_calls) exists in the data stream. If the condition is met, the flow continues normally. If not, the flow can branch to alternate paths. Configure which nodes to connect for true/false branches.",
+            "description": "Routes data based on conditional logic. Checks if a specific field (e.g., tool_calls, satisfied) exists in the data stream. If the condition is met, the flow continues normally. If not, the flow can branch to alternate paths. Configure which nodes to connect for true/false branches.",
             "singleton": false,
             "configurable": true
         },
