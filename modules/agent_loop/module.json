@@ -12,8 +12,6 @@
         "temperature": 0.7,
         "max_llm_retries": 3,
         "retry_delay": 1.0,
-        "enable_reflection_retry": false,
-        "max_reflection_retries": 2,
         "tool_error_strategy": "continue",
         "timeout": 120,
         "include_plan_in_context": true,

@@ -153,35 +153,6 @@ class AgentLoopExecutor:
             "error": f"LLM failed after {max_retries + 1} attempt(s): {last_error}"
         }
 
-    async def _run_reflection(
-        self,
-        input_data: dict,
-        reflection_config: dict = None
-    ) -> dict:
-        """
-        Run inline reflection to evaluate if the response satisfies the request.
-
-        Imports and uses ReflectionExecutor directly to avoid circular dependencies.
-
-        Returns input_data enriched with:
-        - reflection: {satisfied, reason, needs_improvement}
-        - satisfied: bool (top-level for easy routing)
-        """
-        try:
-            from modules.reflection.node import ReflectionExecutor
-            reflector = ReflectionExecutor()
-            return await reflector.receive(input_data, reflection_config or {})
-        except Exception as e:
-            # On reflection failure, assume satisfied to avoid infinite loops
-            result = input_data.copy()
-            result["reflection"] = {
-                "satisfied": True,
-                "reason": f"Reflection unavailable: {str(e)}",
-                "needs_improvement": None
-            }
-            result["satisfied"] = True
-            return result
-
     async def _run_agent_loop(
         self,
         llm_messages: list,
@@ -307,11 +278,6 @@ class AgentLoopExecutor:
                 Number of retries on LLM failure (exponential backoff).
             - retry_delay (float, default 1.0):
                 Base delay in seconds for exponential backoff between retries.
-            - enable_reflection_retry (bool, default False):
-                After the agent loop, run reflection to evaluate the response.
-                If not satisfied, inject improvement feedback and retry the loop.
-            - max_reflection_retries (int, default 2):
-                Maximum number of reflection-driven retries.
             - tool_error_strategy (str, default "continue"):
                 "continue" — skip failed tools and keep looping.
                 "stop"     — abort the loop on the first tool error.
@@ -327,10 +293,11 @@ class AgentLoopExecutor:
             - response (dict):          Raw final LLM response.
             - content (str):            Extracted text content from final response.
             - iterations (int):         Total number of LLM ↔ Tool loops executed.
-            - agent_loop_trace (list):  Per-iteration details (tool_calls, errors, reflection).
-            - reflection (dict):        Reflection result (if enable_reflection_retry=True).
-            - satisfied (bool):         Whether reflection was satisfied (if enabled).
+            - agent_loop_trace (list):  Per-iteration details (tool_calls, errors).
             - agent_loop_error (str):   Error message if the loop failed or timed out.
+
+        Reflection-driven retry is handled externally by wiring:
+            [Agent Loop] → [Reflection] → [Conditional Router (satisfied)] → [Agent Loop]
         """
         if input_data is None:
             input_data = {}
@@ -343,8 +310,6 @@ class AgentLoopExecutor:
         temperature = float(config.get("temperature", 0.7))
         max_llm_retries = int(config.get("max_llm_retries", 3))
         retry_delay = float(config.get("retry_delay", 1.0))
-        enable_reflection_retry = bool(config.get("enable_reflection_retry", False))
-        max_reflection_retries = int(config.get("max_reflection_retries", 2))
         tool_error_strategy = str(config.get("tool_error_strategy", "continue"))
         timeout = float(config.get("timeout", 120))
 
@@ -388,72 +353,29 @@ class AgentLoopExecutor:
                 else:
                     llm_messages.insert(0, {"role": "system", "content": system_prompt})
 
-            total_iterations = 0
-            final_response = None
-            current_messages = llm_messages
-            reflection_retries = 0
+            final_response, iterations, _ = await self._run_agent_loop(
+                llm_messages=llm_messages,
+                tools_list=tools_list,
+                tool_library=tool_library,
+                model=model,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                max_iterations=max_iterations,
+                max_llm_retries=max_llm_retries,
+                retry_delay=retry_delay,
+                tool_error_strategy=tool_error_strategy,
+                trace=agent_loop_trace
+            )
 
-            # Outer reflection-driven retry loop
-            while True:
-                final_response, iterations, _ = await self._run_agent_loop(
-                    llm_messages=current_messages,
-                    tools_list=tools_list,
-                    tool_library=tool_library,
-                    model=model,
-                    temperature=temperature,
-                    max_tokens=max_tokens,
-                    max_iterations=max_iterations,
-                    max_llm_retries=max_llm_retries,
-                    retry_delay=retry_delay,
-                    tool_error_strategy=tool_error_strategy,
-                    trace=agent_loop_trace
-                )
-                total_iterations += iterations
+            result = input_data.copy()
+            result["messages"] = llm_messages
+            result["response"] = final_response
+            result["iterations"] = iterations
 
-                # Build intermediate result for reflection / final return
-                intermediate_result = input_data.copy()
-                intermediate_result["messages"] = current_messages
-                intermediate_result["response"] = final_response
-                intermediate_result["iterations"] = total_iterations
+            if final_response and "choices" in final_response:
+                result["content"] = final_response["choices"][0]["message"].get("content", "")
 
-                if final_response and "choices" in final_response:
-                    content = final_response["choices"][0]["message"].get("content", "")
-                    intermediate_result["content"] = content
-
-                # --- Reflection-driven retry ---
-                if enable_reflection_retry and reflection_retries < max_reflection_retries:
-                    reflected = await self._run_reflection(intermediate_result)
-                    reflection_result = reflected.get("reflection", {})
-                    satisfied = reflection_result.get("satisfied", True)
-                    needs_improvement = reflection_result.get("needs_improvement")
-
-                    # Record reflection outcome in the last trace entry
-                    if agent_loop_trace:
-                        agent_loop_trace[-1]["reflection"] = reflection_result
-
-                    if not satisfied and needs_improvement:
-                        reflection_retries += 1
-                        # Inject improvement feedback as a new user message and retry
-                        improvement_msg = {
-                            "role": "user",
-                            "content": (
-                                f"Your previous response needs improvement: {needs_improvement}\n"
-                                "Please try again."
-                            )
-                        }
-                        current_messages = current_messages + [improvement_msg]
-                        continue
-
-                    # Satisfied (or no improvement hint) — attach reflection and finish
-                    intermediate_result["reflection"] = reflection_result
-                    intermediate_result["satisfied"] = satisfied
-                    break
-
-                else:
-                    # Reflection disabled or retries exhausted — finish
-                    break
-
-            return intermediate_result
+            return result
 
         # --- Execute with optional timeout ---
         try:

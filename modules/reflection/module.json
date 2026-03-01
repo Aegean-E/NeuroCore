@@ -1,20 +1,20 @@
 {
     "name": "Reflection",
-    "description": "Evaluates whether the agent's response satisfies the user's request.",
+    "description": "Evaluates whether the agent's response satisfies the user's request. Use after Agent Loop to enable reflection-driven retry via Conditional Router.",
     "enabled": true,
     "id": "reflection",
-    "icon": "M9 12l2 2 4-4m6 2A9 9 0 018 9 2 0 00-2 2 6 9 9 0 011 6 2 0 00 2-4 0 9 9 0 018-9 0 011 6 2 0 00-2-4 0 9 9 0",
-    "is_flow_node": false,
+    "icon": "M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z",
+    "is_flow_node": true,
     "order": 4,
     "config": {
-        "max_retries": 2,
+        "inject_improvement": true,
         "default_reflection_prompt": "You are a reflection agent. Evaluate if the assistant's response satisfies the user's request.\n\nEvaluate:\n- Is the request fully answered?\n- Are all tasks completed?\n- Is more work needed?\n\nRespond with JSON: {\"satisfied\": true/false, \"reason\": \"explanation\", \"needs_improvement\": \"what could be better or null\"}"
     },
     "provides_nodes": [
         {
             "id": "reflection",
             "name": "Reflection",
-            "description": "Evaluates if the response satisfies the user's request. Outputs satisfied=true/false.",
+            "description": "Evaluates if the agent response satisfies the user request. Outputs satisfied=true/false for Conditional Router routing. When not satisfied, injects improvement feedback into messages for agent_loop retry.",
             "singleton": false,
             "configurable": true
         }
