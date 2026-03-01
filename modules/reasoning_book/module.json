@@ -9,16 +9,23 @@
         {
             "id": "reasoning_save",
             "name": "Reasoning Save",
-            "description": "Saves the input text as a thought in the Reasoning Book.",
+            "description": "Saves the agent's response as a thought in the Reasoning Book. Reads 'content' by default (agent_loop output). Override with source_field config.",
             "singleton": false,
-            "configurable": true
+            "configurable": true,
+            "config": {
+                "source_field": "content",
+                "source": "Flow Node"
+            }
         },
         {
             "id": "reasoning_load",
             "name": "Reasoning Load",
-            "description": "Loads the last N thoughts from the Reasoning Book into the flow.",
+            "description": "Loads the last N thoughts from the Reasoning Book into the flow as reasoning_context (injected into agent_loop system prompt).",
             "singleton": false,
-            "configurable": true
+            "configurable": true,
+            "config": {
+                "last_n": 5
+            }
         }
     ],
     "load_error": null
