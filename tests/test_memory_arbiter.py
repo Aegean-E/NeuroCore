@@ -92,14 +92,18 @@ async def test_arbiter_consider_batch(mock_store):
 @pytest.mark.asyncio
 async def test_arbiter_passes_embedding(mock_store):
     """Test that embedding is passed to the store."""
-    f = Future()
-    f.set_result(123)
-    mock_store.executor.submit.return_value = f
+    # Fix: Setup two futures - one for find_similar (empty list), one for add_entry (123)
+    f_similar = Future()
+    f_similar.set_result([])  # No similar memories found
+    f_save = Future()
+    f_save.set_result(123)  # Memory saved successfully
+    mock_store.executor.submit.side_effect = [f_similar, f_save]
 
     arbiter = MemoryArbiter(mock_store)
     embedding = [0.1, 0.2, 0.3]
     mid = await arbiter.consider(text="Embedded", mem_type="FACT", confidence=1.0, embedding=embedding)
     
     assert mid == 123
+    # Check the second call (add_entry) has the embedding
     args, _ = mock_store.executor.submit.call_args
     assert args[0].keywords["embedding"] == embedding

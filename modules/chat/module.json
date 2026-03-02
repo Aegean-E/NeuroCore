@@ -7,7 +7,9 @@
     "is_flow_node": false,
     "order": 12,
     "config": {
-        "auto_rename_turns": 3
+        "auto_rename_turns": 3,
+        "auto_compact_tokens": 0,
+        "compact_keep_last": 10
     },
     "provides_nodes": [
         {

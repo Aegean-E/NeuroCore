@@ -5,7 +5,7 @@ import time
 from core.settings import settings
 from core.dependencies import get_llm_bridge
 from core.llm import LLMBridge
-from modules.chat.sessions import session_manager
+from modules.chat.sessions import session_manager, _estimate_tokens
 from fastapi.templating import Jinja2Templates
 from core.flow_runner import FlowRunner
 from core.flow_manager import flow_manager
@@ -40,7 +40,12 @@ async def chat_gui(request: Request, session_id: str = Query(None)):
         if sessions:
             active_session = sessions[0]
 
-    return templates.TemplateResponse(request, "chat_gui.html", {"session": active_session})
+    estimated_tokens = _estimate_tokens(active_session["history"]) if active_session else 0
+
+    return templates.TemplateResponse(request, "chat_gui.html", {
+        "session": active_session,
+        "estimated_tokens": estimated_tokens
+    })
 
 @router.get("/sessions", response_class=HTMLResponse)
 async def get_chat_sessions(request: Request):
@@ -55,6 +60,30 @@ async def create_new_session():
         "newSessionCreated": {"id": new_session['id']}
     }
     return HTMLResponse(content="", headers={"HX-Trigger": json.dumps(trigger_data)})
+
+@router.post("/sessions/{session_id}/compact")
+async def compact_session_route(
+    request: Request,
+    session_id: str,
+    llm: LLMBridge = Depends(get_llm_bridge)
+):
+    """Manual compact: summarize old messages, keep last N verbatim."""
+    module_manager = request.app.state.module_manager
+    chat_module = module_manager.modules.get("chat")
+    config = chat_module.get("config", {}) if chat_module else {}
+    keep_last = int(config.get("compact_keep_last", 10))
+
+    compacted, tokens_before = await session_manager.compact_session(session_id, llm, keep_last=keep_last)
+
+    response = await chat_gui(request, session_id=session_id)
+
+    if compacted:
+        msg = f"Session compacted — was ~{tokens_before:,} tokens"
+        response.headers["HX-Trigger"] = json.dumps({"showMessage": {"level": "success", "message": msg}})
+    else:
+        response.headers["HX-Trigger"] = json.dumps({"showMessage": {"level": "info", "message": "Nothing to compact — session is short enough"}})
+
+    return response
 
 @router.post("/sessions/{session_id}/delete")
 async def delete_session(request: Request, session_id: str):
@@ -74,7 +103,12 @@ async def rename_session(session_id: str, name: str = Form(...)):
     return HTMLResponse(content="", headers={"HX-Trigger": "sessionsChanged"})
 
 @router.post("/settings/save")
-async def save_chat_settings(request: Request, auto_rename_turns: int = Form(...)):
+async def save_chat_settings(
+    request: Request,
+    auto_rename_turns: int = Form(...),
+    auto_compact_tokens: int = Form(0),
+    compact_keep_last: int = Form(10)
+):
     module_manager = request.app.state.module_manager
     chat_module = module_manager.modules.get("chat")
     if not chat_module:
@@ -82,6 +116,8 @@ async def save_chat_settings(request: Request, auto_rename_turns: int = Form(...
         
     config = chat_module.get("config", {}).copy()
     config["auto_rename_turns"] = auto_rename_turns
+    config["auto_compact_tokens"] = auto_compact_tokens
+    config["compact_keep_last"] = compact_keep_last
     
     module_manager.update_module_config("chat", config)
     
@@ -118,7 +154,23 @@ async def send_message(
     # Add user message to history
     session_manager.add_message(session_id, "user", user_content)
     active_session = session_manager.get_session(session_id)
-    
+
+    # Get module config early — used for both auto-compact and auto-rename below
+    module_manager = request.app.state.module_manager
+    chat_module = module_manager.modules.get("chat")
+    config = chat_module.get("config", {}) if chat_module else {}
+
+    # Auto-compact if estimated token count exceeds the configured threshold
+    auto_compact_tokens = int(config.get("auto_compact_tokens", 0))
+    compact_keep_last = int(config.get("compact_keep_last", 10))
+    if auto_compact_tokens > 0:
+        estimated = _estimate_tokens(active_session["history"])
+        if estimated > auto_compact_tokens:
+            compacted, _ = await session_manager.compact_session(session_id, llm, keep_last=compact_keep_last)
+            if compacted:
+                active_session = session_manager.get_session(session_id)
+                print(f"[Chat] Auto-compacted session {session_id} (was ~{estimated:,} tokens)")
+
     active_flow_ids = settings.get("active_ai_flows", [])
     active_flow = flow_manager.get_flow(active_flow_ids[0]) if active_flow_ids else None
 
@@ -159,10 +211,6 @@ async def send_message(
     active_session = session_manager.get_session(session_id)
 
     # --- Auto-Renaming Logic ---
-    # Get config for auto-rename turns
-    module_manager = request.app.state.module_manager
-    chat_module = module_manager.modules.get("chat")
-    config = chat_module.get("config", {}) if chat_module else {}
     auto_rename_turns = int(config.get("auto_rename_turns", 3))
 
     if len(active_session["history"]) >= auto_rename_turns * 2 and active_session["name"].startswith("Session "):

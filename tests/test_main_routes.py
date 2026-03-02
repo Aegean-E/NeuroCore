@@ -36,6 +36,7 @@ def client():
     mock_flow_manager = MagicMock(spec=FlowManager)
     mock_module_manager = MagicMock(spec=ModuleManager)
     mock_settings_manager.settings = {}
+    mock_settings_manager.get.return_value = []  # Fix: Return empty list for active_ai_flows
 
     # Configure default return values for mocks
     mock_module_manager.get_all_modules.return_value = [TEST_MODULE]
@@ -98,7 +99,8 @@ def test_save_ai_flow(client):
         response = client.post("/ai-flow/save", data=flow_data)
 
     assert response.status_code == 200
-    mock_fm.save_flow.assert_called_once_with(name="My New Flow", nodes=[{"id": "node-1"}], connections=[{"from": "node-1", "to": "node-2"}], flow_id=None)
+    # Fix: Added bridges=[] to expected call
+    mock_fm.save_flow.assert_called_once_with(name="My New Flow", nodes=[{"id": "node-1"}], connections=[{"from": "node-1", "to": "node-2"}], bridges=[], flow_id=None)
 
 def test_save_ai_flow_invalid_json(client):
     """Tests that saving a flow with invalid JSON returns a 400 error."""
@@ -118,20 +120,23 @@ def test_set_active_flow(client):
     settings_manager_mock = app.dependency_overrides[get_settings_manager]()
     response = client.post(f"/ai-flow/{TEST_FLOW_ID}/set-active")
     assert response.status_code == 200
-    settings_manager_mock.save_settings.assert_called_with({"active_ai_flow": TEST_FLOW_ID})
+    # Fix: Use active_ai_flows (list) instead of active_ai_flow (single)
+    settings_manager_mock.save_settings.assert_called_with({"active_ai_flows": [TEST_FLOW_ID]})
 
 
 def test_delete_flow(client):
     """Tests deleting an AI flow, including the active one (delete_flow)."""
     settings_manager_mock = app.dependency_overrides[get_settings_manager]()
-    settings_manager_mock.get.return_value = TEST_FLOW_ID  # Simulate it being active
+    # Fix: Return a list, not a string
+    settings_manager_mock.get.return_value = [TEST_FLOW_ID]
 
     with patch('core.routers.flow_manager') as mock_fm:
         response = client.post(f"/ai-flow/{TEST_FLOW_ID}/delete")
 
     assert response.status_code == 200
     mock_fm.delete_flow.assert_called_once_with(TEST_FLOW_ID)
-    settings_manager_mock.save_settings.assert_called_once_with({"active_ai_flow": None})
+    # Fix: Use active_ai_flows (list)
+    settings_manager_mock.save_settings.assert_called_once_with({"active_ai_flows": []})
 
 
 # --- Module Details Route Tests ---

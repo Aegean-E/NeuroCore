@@ -13,4 +13,6 @@ def test_read_root(client):
     response = client.get("/")
     assert response.status_code == 200
     assert "NeuroCore" in response.text
-    assert 'hx-get="/modules/list"' in response.text
+    # Root route uses hide_module_list=True so module list is not rendered
+    # But dashboard is loaded via HTMX
+    assert 'hx-get="/dashboard/gui"' in response.text

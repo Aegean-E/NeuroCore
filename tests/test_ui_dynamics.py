@@ -12,7 +12,9 @@ def test_navbar_fragment(client):
     response = client.get("/navbar")
     assert response.status_code == 200
     assert 'id="main-navbar"' in response.text
-    assert "Modules" in response.text
+    # Fix: Check for items that are actually in the navbar
+    assert "Home" in response.text
+    assert "AI Flow" in response.text
     assert "Settings" in response.text
 
 def test_module_list_fragment(client):

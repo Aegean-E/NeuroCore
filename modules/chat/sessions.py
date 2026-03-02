@@ -7,6 +7,26 @@ import threading
 
 SESSIONS_FILE = "chat_sessions.json"
 
+
+def _estimate_tokens(messages: list) -> int:
+    """
+    Rough token estimate using the ~4 chars/token approximation.
+    Works for any LLM provider without extra dependencies.
+    Images are counted as ~500 tokens each.
+    """
+    total = 0
+    for m in messages:
+        content = m.get("content", "")
+        if isinstance(content, list):
+            for part in content:
+                if part.get("type") == "text":
+                    total += len(part.get("text", "")) // 4
+                else:
+                    total += 500  # rough estimate for images/media
+        else:
+            total += len(str(content)) // 4
+    return total
+
 class SessionManager:
     def __init__(self, storage_file=SESSIONS_FILE):
         self.storage_file = storage_file
@@ -75,5 +95,82 @@ class SessionManager:
                 self._save_sessions()
                 return True
             return False
+
+    async def compact_session(self, session_id: str, llm_bridge, keep_last: int = 10):
+        """
+        Summarize old messages and replace them with a compact summary system message.
+
+        The LLM call is made outside the lock to avoid blocking other operations.
+        History is only updated (under lock) after a successful summarization.
+
+        Returns:
+            (compacted: bool, tokens_before: int)
+        """
+        session = self.get_session(session_id)
+        if not session:
+            return False, 0
+
+        history = session["history"]
+        tokens_before = _estimate_tokens(history)
+
+        # Need at least keep_last + 2 messages to be worth compacting
+        if len(history) <= keep_last + 2:
+            return False, tokens_before
+
+        old_messages = history[:-keep_last]
+        recent_messages = history[-keep_last:]
+
+        # Build a readable transcript of the old messages for the LLM to summarize
+        conversation_lines = []
+        for m in old_messages:
+            role = m["role"].upper()
+            content = m["content"]
+            if isinstance(content, list):
+                # Multimodal — extract text parts only
+                text_parts = [p.get("text", "") for p in content if p.get("type") == "text"]
+                content = " ".join(text_parts) or "[Image/Media]"
+            # Truncate very long individual messages to keep the prompt manageable
+            conversation_lines.append(f"{role}: {str(content)[:800]}")
+
+        summary_prompt = [
+            {
+                "role": "user",
+                "content": (
+                    "Summarize the following conversation history concisely in 3-5 sentences. "
+                    "Capture the key topics, decisions, facts, and context that would be "
+                    "important for continuing the conversation:\n\n"
+                    + "\n".join(conversation_lines)
+                )
+            }
+        ]
+
+        try:
+            result = await llm_bridge.chat_completion(
+                messages=summary_prompt,
+                max_tokens=400,
+                temperature=0.3
+            )
+            summary_text = result["choices"][0]["message"]["content"].strip()
+        except Exception as e:
+            print(f"[Compact] LLM summarization failed: {e}")
+            return False, tokens_before
+
+        # Replace history: one summary system message + the most recent messages verbatim
+        new_history = [
+            {
+                "role": "system",
+                "content": f"[Conversation Summary — earlier messages compacted]: {summary_text}"
+            }
+        ] + recent_messages
+
+        with self.lock:
+            if session_id in self.sessions:
+                self.sessions[session_id]["history"] = new_history
+                self.sessions[session_id]["updated_at"] = datetime.now().isoformat()
+                self._save_sessions()
+                return True, tokens_before
+
+        return False, tokens_before
+
 
 session_manager = SessionManager()

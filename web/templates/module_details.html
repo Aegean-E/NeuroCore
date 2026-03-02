@@ -140,13 +140,33 @@
               hx-swap="none"
               hx-on::after-request="const btn = this.querySelector('button[type=submit]'); const orig = btn.innerText; btn.innerText = 'Saved!'; btn.classList.remove('bg-blue-600', 'hover:bg-blue-500'); btn.classList.add('bg-emerald-600', 'hover:bg-emerald-500'); setTimeout(() => { btn.innerText = orig; btn.classList.add('bg-blue-600', 'hover:bg-blue-500'); btn.classList.remove('bg-emerald-600', 'hover:bg-emerald-500'); }, 2000);">
             
-            <div>
-                <label class="block text-sm font-medium text-slate-400 mb-2">Auto-Rename Turns</label>
-                <input type="number" name="auto_rename_turns" value="{{ module.config.auto_rename_turns }}" min="1" max="20"
-                       class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all">
-                <p class="text-xs text-slate-500 mt-2">Number of conversation turns (User + AI) before automatically generating a session title.</p>
+            <div class="space-y-6">
+                <div>
+                    <label class="block text-sm font-medium text-slate-400 mb-2">Auto-Rename Turns</label>
+                    <input type="number" name="auto_rename_turns" value="{{ module.config.auto_rename_turns }}" min="1" max="20"
+                           class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all">
+                    <p class="text-xs text-slate-500 mt-2">Number of conversation turns (User + AI) before automatically generating a session title.</p>
+                </div>
+
+                <div class="border-t border-slate-800 pt-6">
+                    <h4 class="text-sm font-semibold text-slate-300 mb-4 uppercase tracking-wider">Context Compaction</h4>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div>
+                            <label class="block text-sm font-medium text-slate-400 mb-2">Auto-Compact Threshold (tokens)</label>
+                            <input type="number" name="auto_compact_tokens" value="{{ module.config.auto_compact_tokens }}" min="0" step="1000"
+                                   class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all">
+                            <p class="text-xs text-slate-500 mt-2">Automatically compact the session when estimated token count exceeds this value. Set to <code>0</code> to disable. Suggested: <code>80000</code> for 128k-context models.</p>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-slate-400 mb-2">Keep Last N Messages</label>
+                            <input type="number" name="compact_keep_last" value="{{ module.config.compact_keep_last }}" min="2" max="50"
+                                   class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all">
+                            <p class="text-xs text-slate-500 mt-2">Number of recent messages to keep verbatim after compaction. Older messages are replaced with an LLM-generated summary. Default: <code>10</code>.</p>
+                        </div>
+                    </div>
+                </div>
             </div>
-            <div class="mt-4 flex justify-end">
+            <div class="mt-6 flex justify-end">
                 <button type="submit" class="bg-blue-600 hover:bg-blue-500 text-white px-6 py-2 rounded-lg text-sm font-semibold transition-colors">Save Chat Settings</button>
             </div>
         </form>
