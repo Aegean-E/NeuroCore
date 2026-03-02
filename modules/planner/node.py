@@ -10,6 +10,18 @@ class PlannerExecutor:
             base_url=settings.get("llm_api_url"),
             api_key=settings.get("llm_api_key")
         )
+        # Lazy import to avoid circular dependencies
+        self._reasoning_service = None
+    
+    def _get_reasoning_service(self):
+        """Lazy load ReasoningBookService to avoid circular imports."""
+        if self._reasoning_service is None:
+            try:
+                from modules.reasoning_book.service import service as reasoning_service
+                self._reasoning_service = reasoning_service
+            except ImportError:
+                self._reasoning_service = None
+        return self._reasoning_service
 
     def _extract_user_message(self, input_data: dict) -> str:
         """Extract the latest user message from input data."""
@@ -72,6 +84,12 @@ class PlannerExecutor:
                 "Request: {request}\n\n"
                 "Respond with JSON array only."
             )
+        
+        # Include reasoning context if enabled and available
+        if config.get("include_reasoning_context", False):
+            reasoning_context = input_data.get("reasoning_context", "")
+            if reasoning_context:
+                planner_prompt += f"\n\nPrevious reasoning context:\n{reasoning_context}\n\nConsider this context when creating your plan."
         
         max_steps = int(config.get("max_steps", 10))
         planner_prompt = planner_prompt.replace("{request}", user_request)
@@ -141,6 +159,17 @@ class PlannerExecutor:
                 ])
                 result["plan_context"] = f"## Execution Plan\n{plan_text}"
             
+            # Log plan to Reasoning Book if enabled
+            if config.get("log_to_reasoning_book", False):
+                reasoning_service = self._get_reasoning_service()
+                if reasoning_service:
+                    plan_summary = f"Created {len(plan)}-step plan for: {user_request[:100]}..."
+                    if plan:
+                        plan_summary += f"\nSteps: {', '.join([p['action'] for p in plan[:3]])}"
+                        if len(plan) > 3:
+                            plan_summary += f" and {len(plan) - 3} more"
+                    reasoning_service.log_thought(plan_summary, source="Planner")
+            
             return result
             
         except Exception as e:
@@ -150,6 +179,13 @@ class PlannerExecutor:
             result["original_request"] = user_request
             result["plan_needed"] = False
             result["planning_error"] = str(e)
+            
+            # Log error to Reasoning Book if enabled
+            if config.get("log_to_reasoning_book", False):
+                reasoning_service = self._get_reasoning_service()
+                if reasoning_service:
+                    reasoning_service.log_thought(f"Planning failed for: {user_request[:100]}... Error: {str(e)}", source="Planner")
+            
             return result
 
     async def send(self, processed_data: dict) -> dict:

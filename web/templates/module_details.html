@@ -244,7 +244,37 @@
                         </div>
                     </div>
                 </div>
+
+                <div class="bg-slate-950/50 rounded-xl border border-slate-800 p-6">
+                    <h4 class="text-sm font-semibold text-slate-300 mb-4 uppercase tracking-wider">Reasoning Book Integration</h4>
+                    <p class="text-xs text-slate-500 mb-4">Configure how the Planner interacts with the Reasoning Book module</p>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div class="flex items-center space-x-3">
+                            <input type="checkbox" name="log_to_reasoning_book" value="true" {% if module.config.log_to_reasoning_book %}checked{% endif %}
+                                   class="w-5 h-5 rounded border-slate-700 bg-slate-950 text-blue-600 focus:ring-blue-500 focus:ring-offset-slate-900"
+                                   id="log_to_reasoning_book">
+                            <div>
+                                <label for="log_to_reasoning_book" class="text-sm text-slate-300 cursor-pointer">
+                                    Log plans to Reasoning Book
+                                </label>
+                                <p class="text-xs text-slate-500">Records created plans for future reference</p>
+                            </div>
+                        </div>
+                        <div class="flex items-center space-x-3">
+                            <input type="checkbox" name="include_reasoning_context" value="true" {% if module.config.include_reasoning_context %}checked{% endif %}
+                                   class="w-5 h-5 rounded border-slate-700 bg-slate-950 text-blue-600 focus:ring-blue-500 focus:ring-offset-slate-900"
+                                   id="include_reasoning_context">
+                            <div>
+                                <label for="include_reasoning_context" class="text-sm text-slate-300 cursor-pointer">
+                                    Include reasoning context
+                                </label>
+                                <p class="text-xs text-slate-500">Uses previous reasoning when creating plans</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
             </div>
+
 
             <div class="mt-6 flex justify-end">
                 <button type="submit" class="bg-blue-600 hover:bg-blue-500 text-white px-6 py-2 rounded-lg text-sm font-semibold transition-colors">Save Planner Settings</button>
