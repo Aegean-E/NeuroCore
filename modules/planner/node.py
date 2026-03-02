@@ -68,13 +68,14 @@ class PlannerExecutor:
                 "- If the request is simple (one question, greeting, or single action), return an empty JSON array: []\n"
                 "- If the request requires multiple steps, return a JSON array with each step: [{\"action\": \"step description\", \"target\": \"what it applies to\"}]\n"
                 "- Keep plans simple and actionable\n"
-                "- Maximum 10 steps\n\n"
+                "- Maximum {max_steps} steps\n\n"
                 "Request: {request}\n\n"
                 "Respond with JSON array only."
             )
         
         max_steps = int(config.get("max_steps", 10))
         planner_prompt = planner_prompt.replace("{request}", user_request)
+        planner_prompt = planner_prompt.replace("{max_steps}", str(max_steps))
         
         planning_messages = [
             {"role": "system", "content": planner_prompt},
