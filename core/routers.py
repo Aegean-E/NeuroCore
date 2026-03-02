@@ -331,7 +331,69 @@ async def save_module_config(request: Request, module_id: str, module_manager: M
             
             # Update enabled setting
             new_config['enabled'] = form_data.get("enabled") == "true"
+            
+            # Update reasoning book integration settings
+            new_config['log_to_reasoning_book'] = form_data.get("log_to_reasoning_book") == "true"
+            new_config['include_reasoning_context'] = form_data.get("include_reasoning_context") == "true"
+        
+        # Handle agent_loop module with individual form fields
+        elif module_id == "agent_loop":
+            new_config = {}
+            current_module = module_manager.modules.get(module_id)
+            current_config = current_module.get('config', {}) if current_module else {}
+            
+            # Copy existing config to preserve defaults
+            new_config.update(current_config)
+            
+            # Update loop control settings
+            if "max_iterations" in form_data:
+                try:
+                    new_config['max_iterations'] = int(form_data["max_iterations"])
+                except ValueError:
+                    pass
+            
+            if "max_tokens" in form_data:
+                try:
+                    new_config['max_tokens'] = int(form_data["max_tokens"])
+                except ValueError:
+                    pass
+            
+            if "temperature" in form_data:
+                try:
+                    new_config['temperature'] = float(form_data["temperature"])
+                except ValueError:
+                    pass
+            
+            # Update retry & timeout settings
+            if "max_llm_retries" in form_data:
+                try:
+                    new_config['max_llm_retries'] = int(form_data["max_llm_retries"])
+                except ValueError:
+                    pass
+            
+            if "retry_delay" in form_data:
+                try:
+                    new_config['retry_delay'] = float(form_data["retry_delay"])
+                except ValueError:
+                    pass
+            
+            if "timeout" in form_data:
+                try:
+                    new_config['timeout'] = int(form_data["timeout"])
+                except ValueError:
+                    pass
+            
+            # Update context inclusion settings (checkboxes)
+            new_config['include_plan_in_context'] = form_data.get("include_plan_in_context") == "true"
+            new_config['include_memory_context'] = form_data.get("include_memory_context") == "true"
+            new_config['include_knowledge_context'] = form_data.get("include_knowledge_context") == "true"
+            new_config['include_reasoning_context'] = form_data.get("include_reasoning_context") == "true"
+            
+            # Update tool error strategy
+            if "tool_error_strategy" in form_data:
+                new_config['tool_error_strategy'] = form_data["tool_error_strategy"]
         else:
+
             # Standard JSON config
             if "config_json" not in form_data:
                 return Response(status_code=400, headers={"HX-Trigger": json.dumps({"showMessage": {"level": "error", "message": "Missing config_json field"}})})
@@ -721,3 +783,12 @@ async def get_debug_events(request: Request, since: float = 0):
 async def clear_debug_logs(request: Request):
     debug_logger.clear()
     return templates.TemplateResponse(request, "debug_logs.html", {"logs": []})
+
+# --- Goals ---
+
+@router.get("/goals", response_class=HTMLResponse)
+async def goals_page(request: Request, module_manager: ModuleManager = Depends(get_module_manager), settings_man: SettingsManager = Depends(get_settings_manager)):
+    return templates.TemplateResponse(request, "goals.html", {
+        "modules": module_manager.get_all_modules(),
+        "settings": settings_man.settings
+    })
