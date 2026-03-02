@@ -39,8 +39,9 @@
 Built on the principles of **Speed**, **Simplicity**, and **Modularity**, NeuroCore delivers a solid foundation for building custom AI-powered applications with a fast, modern web stack and a powerful visual workflow editor.
 
 <p align="center">
-  <b>70+ Python files &nbsp;•&nbsp; 40+ HTML templates &nbsp;•&nbsp; 50+ tests &nbsp;•&nbsp; 15 modules &nbsp;•&nbsp; 12 built-in tools &nbsp;•&nbsp; 30+ API routes</b>
+  <b>70+ Python files &nbsp;•&nbsp; 40+ HTML templates &nbsp;•&nbsp; 50+ tests &nbsp;•&nbsp; 15 modules &nbsp;•&nbsp; 16 built-in tools &nbsp;•&nbsp; 30+ API routes</b>
 </p>
+
 
 ---
 
@@ -256,27 +257,40 @@ Define and manage custom Python functions that the LLM can execute.
 - **Per-Node Control** — `allowed_tools` config restricts which tools each dispatcher can use
 - **Rate Limiting** — `max_tools_per_turn` (default: 5) prevents runaway tool loops
 
-#### Built-in Tools
+#### Built-in Tools (16 Total)
 
+**🧮 Calculations & Conversions**
 | Tool | Description |
 |------|-------------|
 | **Calculator** | Evaluates mathematical expressions |
 | **ConversionCalculator** | Converts units (temperature, length, weight, volume) |
 | **CurrencyConverter** | Real-time currency conversion (Frankfurter API) |
 | **TimeZoneConverter** | Timezone conversions (IANA format) |
-| **Weather** | Current weather for any location |
 | **SystemTime** | Current date and time |
+
+**🌐 Web & Search**
+| Tool | Description |
+|------|-------------|
+| **Weather** | Current weather for any location |
 | **FetchURL** | Extracts text content from URLs |
-| **SendEmail** | Sends emails via SMTP |
-| **SaveReminder** | Saves calendar events/reminders |
-| **CheckCalendar** | Retrieves upcoming events |
-| **YouTubeTranscript** | Fetches YouTube video transcripts |
 | **WikipediaLookup** | Searches Wikipedia articles |
 | **ArXivSearch** | Searches academic papers |
+| **YouTubeTranscript** | Fetches YouTube video transcripts |
+
+**📅 Calendar & Goals**
+| Tool | Description |
+|------|-------------|
+| **SaveReminder** | Saves calendar events/reminders |
+| **CheckCalendar** | Retrieves upcoming events |
 | **SetGoal** | Creates a new goal for autonomous agents |
 | **MarkGoalComplete** | Marks a goal as completed |
 | **DeleteGoal** | Deletes a goal |
-| **Check Goal** | Flow node to inject goal into context |
+
+**📧 Communication**
+| Tool | Description |
+|------|-------------|
+| **SendEmail** | Sends emails via SMTP |
+
 
 ### 📱 Telegram Integration
 Connect your AI flow to Telegram for remote access.
@@ -595,4 +609,21 @@ python tests/run_tests.py --coverage
 | **Tools** | `test_tools_library.py` |
 | **LLM** | `test_core_llm.py`, `test_llm_node.py` |
 | **Robustness** | `test_core_concurrency.py`, `test_core_robustness.py`, `test_core_improvements.py` |
-| **Integrations** | `test_telegram_module.py`, `test_calendar.py`, `test_reasoning_book.py`
+| **Integrations** | `test_telegram_module.py`, `test_calendar.py`, `test_reasoning_book.py` |
+
+---
+
+## 🤝 Contributing
+
+We welcome contributions! Please see our [Module Development Guide](modules/MODULE_GUIDE.md) for creating custom modules and the [Tool Guide](modules/TOOL_GUIDE.md) for adding new tools.
+
+## 📄 License
+
+NeuroCore is licensed under the [Apache 2.0 License](LICENSE).
+
+---
+
+<p align="center">
+  <b>Built with ❤️ for the AI community</b><br>
+  <a href="https://github.com/Aegean-E/NeuroCore">⭐ Star us on GitHub</a>
+</p>
