@@ -258,7 +258,9 @@ async def get_module_details(request: Request, module_id: str, module_manager: M
 
 @router.get("/modules/{module_id}/default-prompt")
 async def get_default_prompt(module_id: str, module_manager: ModuleManager = Depends(get_module_manager)):
-    """Returns the default prompt for reflection or planner modules."""
+    """Returns the default prompt for reflection or planner modules as plain text."""
+    from fastapi import Response
+    
     module = module_manager.modules.get(module_id)
     if not module:
         raise HTTPException(status_code=404, detail="Module not found")
@@ -267,12 +269,14 @@ async def get_default_prompt(module_id: str, module_manager: ModuleManager = Dep
     
     if module_id == 'reflection':
         default_prompt = config.get('default_reflection_prompt', '')
-        return default_prompt
     elif module_id == 'planner':
         default_prompt = config.get('default_planner_prompt', '')
-        return default_prompt
     else:
         raise HTTPException(status_code=400, detail="Module does not support default prompts")
+    
+    # Return as plain text to preserve actual newlines (not escaped \n)
+    return Response(content=default_prompt, media_type="text/plain")
+
 
 @router.post("/modules/{module_id}/config")
 async def save_module_config(request: Request, module_id: str, module_manager: ModuleManager = Depends(get_module_manager)):
