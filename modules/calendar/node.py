@@ -21,19 +21,25 @@ class CalendarWatcherExecutor:
 
         now = datetime.now()
         triggered_events = []
-        
+
         for event in events:
             try:
-                # Expected format: "date": "YYYY-MM-DD", "time": "HH:MM"
-                if "date" not in event or "time" not in event:
+                # Bug fix: EventManager stores events with a single "start_time" key
+                # (ISO format "YYYY-MM-DD HH:MM"), not separate "date" and "time" keys.
+                # Support both formats for backwards compatibility.
+                if "start_time" in event:
+                    event_dt = datetime.strptime(event["start_time"][:16], "%Y-%m-%d %H:%M")
+                elif "date" in event and "time" in event:
+                    event_dt = datetime.strptime(f"{event['date']} {event['time']}", "%Y-%m-%d %H:%M")
+                else:
                     continue
-                    
-                event_dt_str = f"{event['date']} {event['time']}"
-                event_dt = datetime.strptime(event_dt_str, "%Y-%m-%d %H:%M")
-                
+
                 # Check if the event is within the current minute
-                # We compare minutes to avoid second-level precision issues and double firing
-                if event_dt.date() == now.date() and event_dt.hour == now.hour and event_dt.minute == now.minute:
+                # We compare year/month/day/hour/minute to avoid second-level precision
+                # issues and double firing.
+                if (event_dt.year == now.year and event_dt.month == now.month and
+                        event_dt.day == now.day and event_dt.hour == now.hour and
+                        event_dt.minute == now.minute):
                     triggered_events.append(event)
             except ValueError:
                 continue

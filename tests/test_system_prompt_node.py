@@ -154,3 +154,92 @@ async def test_system_prompt_no_tools_in_result_when_empty():
     # Should not have tools in result when none are enabled
     assert "tools" not in result
     assert "available_tools" not in result
+
+
+# ---------------------------------------------------------------------------
+# Context injection tests
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_memory_context_injected_into_system_prompt():
+    """_memory_context field should be appended to the system message."""
+    executor = SystemPromptExecutor()
+    input_data = {
+        "messages": [{"role": "user", "content": "Hi"}],
+        "_memory_context": "User likes Python",
+    }
+    result = await executor.receive(input_data, config={"system_prompt": "You are helpful."})
+    system_content = result["messages"][0]["content"]
+    assert "User likes Python" in system_content
+
+
+@pytest.mark.asyncio
+async def test_knowledge_context_injected_into_system_prompt():
+    """knowledge_context field should be appended to the system message."""
+    executor = SystemPromptExecutor()
+    input_data = {
+        "messages": [{"role": "user", "content": "Hi"}],
+        "knowledge_context": "Python was created by Guido.",
+    }
+    result = await executor.receive(input_data, config={"system_prompt": "You are helpful."})
+    system_content = result["messages"][0]["content"]
+    assert "Python was created by Guido." in system_content
+
+
+@pytest.mark.asyncio
+async def test_plan_context_injected_into_system_prompt():
+    """plan_context field should be appended to the system message."""
+    executor = SystemPromptExecutor()
+    input_data = {
+        "messages": [{"role": "user", "content": "Hi"}],
+        "plan_context": "## Plan\n1. Do step one",
+    }
+    result = await executor.receive(input_data, config={"system_prompt": "You are helpful."})
+    system_content = result["messages"][0]["content"]
+    assert "Do step one" in system_content
+
+
+@pytest.mark.asyncio
+async def test_reasoning_context_injected_into_system_prompt():
+    """reasoning_context field should be appended to the system message."""
+    executor = SystemPromptExecutor()
+    input_data = {
+        "messages": [{"role": "user", "content": "Hi"}],
+        "reasoning_context": "Previous reasoning: The user wants X.",
+    }
+    result = await executor.receive(input_data, config={"system_prompt": "You are helpful."})
+    system_content = result["messages"][0]["content"]
+    assert "Previous reasoning" in system_content
+
+
+@pytest.mark.asyncio
+async def test_combined_contexts_all_injected():
+    """All context fields present simultaneously should all appear in system message."""
+    executor = SystemPromptExecutor()
+    input_data = {
+        "messages": [{"role": "user", "content": "Hi"}],
+        "_memory_context": "Memory: user likes cats",
+        "knowledge_context": "Knowledge: cats are mammals",
+        "plan_context": "## Plan\n1. Talk about cats",
+    }
+    result = await executor.receive(input_data, config={"system_prompt": "You are helpful."})
+    system_content = result["messages"][0]["content"]
+    assert "user likes cats" in system_content
+    assert "cats are mammals" in system_content
+    assert "Talk about cats" in system_content
+
+
+@pytest.mark.asyncio
+async def test_get_executor_class_dispatcher():
+    """get_executor_class('system_prompt') should return SystemPromptExecutor."""
+    from modules.system_prompt.node import get_executor_class
+    cls = await get_executor_class("system_prompt")
+    assert cls is SystemPromptExecutor
+
+
+@pytest.mark.asyncio
+async def test_get_executor_class_unknown():
+    """get_executor_class with unknown id should return None."""
+    from modules.system_prompt.node import get_executor_class
+    cls = await get_executor_class("unknown")
+    assert cls is None

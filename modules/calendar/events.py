@@ -45,10 +45,16 @@ class EventManager:
 
     def get_upcoming(self, limit=10):
         events = self._load_events()
-        # Simple string sort for ISO dates works roughly well enough for now
-        sorted_events = sorted(events, key=lambda x: x.get("start_time", ""))
-        now = datetime.now().strftime("%Y-%m-%d %H:%M")
-        upcoming = [e for e in sorted_events if e.get("start_time", "") >= now]
+        now = datetime.now().replace(second=0, microsecond=0)
+
+        def _parse_dt(e):
+            try:
+                return datetime.strptime(e.get("start_time", "")[:16], "%Y-%m-%d %H:%M")
+            except (ValueError, TypeError):
+                return datetime.max
+
+        upcoming = [e for e in events if _parse_dt(e) >= now]
+        upcoming.sort(key=_parse_dt)
         return upcoming[:limit]
 
     def get_event_by_id(self, event_id):
@@ -56,6 +62,19 @@ class EventManager:
         for e in events:
             if e.get("id") == event_id:
                 return e
+        return None
+
+    def update_event(self, event_id, title=None, start_time=None):
+        """Update an existing event's title and/or start_time. Returns the updated event or None."""
+        events = self._load_events()
+        for event in events:
+            if event.get("id") == event_id:
+                if title is not None:
+                    event["title"] = title
+                if start_time is not None:
+                    event["start_time"] = start_time
+                self._save_events(events)
+                return event
         return None
 
     def delete_event(self, event_id):

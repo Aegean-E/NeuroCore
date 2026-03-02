@@ -64,15 +64,19 @@ async def test_repeater_executor_trigger():
     executor = RepeaterExecutor()
     input_data = {"test": "data"}
     config = {"delay": 0.01, "max_repeats": 1, "_flow_id": "test-flow"}
-    
-    with patch("core.flow_runner.FlowRunner") as MockRunner:
+
+    # FlowRunner is imported inside trigger_next(), so patch at its source module.
+    # settings must return the flow as active for both the outer check and the inner check.
+    with patch("modules.logic.node.settings") as mock_settings, \
+         patch("core.flow_runner.FlowRunner") as MockRunner:
+        mock_settings.get.return_value = ["test-flow"]
         runner_instance = MockRunner.return_value
         runner_instance.run = AsyncMock()
-        
+
         await executor.receive(input_data, config=config)
         # Give the background task a moment to run
         await asyncio.sleep(0.05)
-        
+
         MockRunner.assert_called_with("test-flow")
         runner_instance.run.assert_called_once()
         # Check that repeat count was incremented in the next run's data
@@ -185,3 +189,126 @@ async def test_schedule_start_executor_none_input():
     result = await executor.receive(None, config={"schedule_time": "12:00"})
     
     assert result is None
+
+
+@pytest.mark.asyncio
+async def test_schedule_start_executor_end_of_month():
+    """ScheduleStartExecutor should not crash at end of month (timedelta fix)."""
+    executor = ScheduleStartExecutor()
+
+    # Simulate "now" being the last day of January at 23:59.
+    # A past schedule_time on that day should roll to the next day via timedelta(days=1)
+    # rather than replace(day=32) which would raise ValueError.
+    from datetime import datetime as real_datetime
+
+    fake_now = real_datetime(2024, 1, 31, 23, 59)
+
+    with patch("asyncio.sleep", new_callable=AsyncMock), \
+         patch("datetime.datetime") as mock_dt:
+        mock_dt.now.return_value = fake_now
+        mock_dt.strptime.side_effect = real_datetime.strptime
+
+        result = await executor.receive({"data": "test"}, config={"schedule_time": "23:58"})
+
+    assert result == {"data": "test"}
+
+
+@pytest.mark.asyncio
+async def test_conditional_router_invert_flag():
+    """invert=True should flip the routing condition."""
+    executor = ConditionalRouterExecutor()
+
+    # tool_calls present → normally condition_met=True → with invert → False
+    input_with_tools = {"tool_calls": [{"name": "Weather"}]}
+    result = await executor.receive(input_with_tools, config={"check_field": "tool_calls", "invert": True})
+    # invert=True means condition_met=False → false_branches used (empty by default)
+    assert result["_route_targets"] == []
+
+    # No tool_calls → normally condition_met=False → with invert → True
+    input_no_tools = {"messages": []}
+    result2 = await executor.receive(input_no_tools, config={"check_field": "tool_calls", "invert": True})
+    # invert=True means condition_met=True → true_branches used (empty by default)
+    assert result2["_route_targets"] == []
+
+
+@pytest.mark.asyncio
+async def test_conditional_router_satisfied_field_true():
+    """check_field='satisfied' with satisfied=True should route to true_branches."""
+    executor = ConditionalRouterExecutor()
+    result = await executor.receive(
+        {"satisfied": True, "response": "Done"},
+        config={"check_field": "satisfied", "true_branches": ["output_node"]},
+    )
+    assert result["_route_targets"] == ["output_node"]
+
+
+@pytest.mark.asyncio
+async def test_conditional_router_satisfied_field_false():
+    """check_field='satisfied' with satisfied=False should route to false_branches."""
+    executor = ConditionalRouterExecutor()
+    result = await executor.receive(
+        {"satisfied": False},
+        config={"check_field": "satisfied", "false_branches": ["retry_node"]},
+    )
+    assert result["_route_targets"] == ["retry_node"]
+
+
+@pytest.mark.asyncio
+async def test_conditional_router_requires_continuation():
+    """check_field='requires_continuation' should route based on that flag."""
+    executor = ConditionalRouterExecutor()
+
+    result_true = await executor.receive(
+        {"requires_continuation": True},
+        config={"check_field": "requires_continuation", "true_branches": ["tools_node"]},
+    )
+    assert result_true["_route_targets"] == ["tools_node"]
+
+    result_false = await executor.receive(
+        {"requires_continuation": False},
+        config={"check_field": "requires_continuation", "false_branches": ["end_node"]},
+    )
+    assert result_false["_route_targets"] == ["end_node"]
+
+
+@pytest.mark.asyncio
+async def test_script_executor_non_dict_input():
+    """ScriptExecutor should handle non-dict input without crashing."""
+    executor = ScriptExecutor()
+    result = await executor.receive("plain string input", config={"code": "result['added'] = True"})
+    # Non-dict input: result starts as {} so script can add keys
+    assert isinstance(result, dict)
+
+
+@pytest.mark.asyncio
+async def test_script_executor_none_input_returns_none():
+    """ScriptExecutor should return None for None input."""
+    executor = ScriptExecutor()
+    result = await executor.receive(None, config={"code": "result = {}"})
+    assert result is None
+
+
+@pytest.mark.asyncio
+async def test_script_executor_empty_code_passthrough():
+    """ScriptExecutor with empty code should return input unchanged."""
+    executor = ScriptExecutor()
+    input_data = {"key": "value"}
+    result = await executor.receive(input_data, config={"code": ""})
+    assert result == input_data
+
+
+@pytest.mark.asyncio
+async def test_get_executor_class_all_types():
+    """get_executor_class should return correct class for all known node types."""
+    from modules.logic.node import (
+        DelayExecutor, ScriptExecutor, RepeaterExecutor,
+        ConditionalRouterExecutor, TriggerExecutor, ScheduleStartExecutor,
+        get_executor_class,
+    )
+    assert await get_executor_class("delay_node") is DelayExecutor
+    assert await get_executor_class("script_node") is ScriptExecutor
+    assert await get_executor_class("repeater_node") is RepeaterExecutor
+    assert await get_executor_class("conditional_router") is ConditionalRouterExecutor
+    assert await get_executor_class("trigger_node") is TriggerExecutor
+    assert await get_executor_class("schedule_start_node") is ScheduleStartExecutor
+    assert await get_executor_class("unknown") is None

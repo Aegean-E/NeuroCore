@@ -1,3 +1,4 @@
+import copy
 import json
 import os
 import uuid
@@ -43,7 +44,8 @@ class SessionManager:
 
     def get_session(self, session_id):
         with self.lock:
-            return self.sessions.get(session_id)
+            session = self.sessions.get(session_id)
+            return copy.deepcopy(session) if session is not None else None
 
     def delete_session(self, session_id):
         with self.lock:

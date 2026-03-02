@@ -29,6 +29,13 @@ class ConfigLoader:
 class MemoryRecallExecutor:
     def __init__(self):
         self.config = ConfigLoader.get_config()
+        # Cache LLMBridge to avoid recreating it on every receive() call
+        self._llm_bridge = LLMBridge(
+            base_url=settings.get("llm_api_url"),
+            api_key=settings.get("llm_api_key"),
+            embedding_base_url=settings.get("embedding_api_url"),
+            embedding_model=settings.get("embedding_model")
+        )
 
     async def receive(self, input_data: dict, config: dict = None) -> dict:
         config = config or {}
@@ -50,15 +57,8 @@ class MemoryRecallExecutor:
             # Extract text from multimodal content
             query_text = " ".join([part.get("text", "") for part in query_text if part.get("type") == "text"])
 
-        
-        # Generate embedding
-        llm_bridge = LLMBridge(
-            base_url=settings.get("llm_api_url"), 
-            api_key=settings.get("llm_api_key"),
-            embedding_base_url=settings.get("embedding_api_url"),
-            embedding_model=settings.get("embedding_model")
-        )
-        embedding = await llm_bridge.get_embedding(query_text)
+        # Generate embedding using cached bridge
+        embedding = await self._llm_bridge.get_embedding(query_text)
         
         if not embedding:
             return input_data
@@ -118,9 +118,9 @@ class MemorySaveExecutor:
         self.config = ConfigLoader.get_config()
         self.arbiter = MemoryArbiter(memory_store, config=self.config)
 
-    async def _save_background(self, text: str, subject: str = "User", source: str = "chat", confidence: float = 1.0, mem_type: str = "BELIEF", verified: bool = False, expires_at: int = None):
+    async def _save_background(self, text: str, subject: str = "User", source: str = "chat", confidence: float = 1.0, mem_type: str = "BELIEF", verified: bool = False, expires_at: int = None, save_delay: float = 3.0):
         """Handles embedding generation and saving in the background."""
-        await asyncio.sleep(3)
+        await asyncio.sleep(save_delay)
         try:
             llm_bridge = LLMBridge(
                 base_url=settings.get("llm_api_url"), 
@@ -272,17 +272,22 @@ class MemorySaveExecutor:
         expires_at = config.get("expires_at")
 
         if text_to_save and len(text_to_save.strip()) > 2:
-            # Fire and forget: Don't block the flow for embedding generation
-            asyncio.create_task(self._save_background(
+            # Make the initial save delay configurable (default: 3s)
+            save_delay = float(config.get("save_delay", self.config.get("save_delay", 3.0)))
+
+            # Fire and forget: Don't block the flow for embedding generation.
+            # Store task reference to prevent GC before it runs.
+            self._save_task = asyncio.create_task(self._save_background(
                 text_to_save,
                 subject=subject,
                 source=source,
                 confidence=confidence,
                 mem_type=mem_type,
                 verified=verified,
-                expires_at=expires_at
+                expires_at=expires_at,
+                save_delay=save_delay,
             ))
-            
+
             # Auto-Consolidation Check
             try:
                 auto_hours_val = self.config.get("auto_consolidation_hours", 24)
@@ -291,7 +296,9 @@ class MemorySaveExecutor:
                     if time.time() - memory_store.last_consolidation_ts > (auto_hours * 3600):
                         print("⏳ Triggering Auto-Consolidation...")
                         memory_store.last_consolidation_ts = time.time()
-                        asyncio.create_task(MemoryConsolidator(config=self.config).run())
+                        self._consolidation_task = asyncio.create_task(
+                            MemoryConsolidator(config=self.config).run()
+                        )
             except Exception as e:
                 print(f"Auto-consolidation check failed: {e}")
 

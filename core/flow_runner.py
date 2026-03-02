@@ -375,7 +375,9 @@ class FlowRunner:
                             bridge_cache_key = f"{bridge_module_id}.{bridge_type_id}"
                             if bridge_cache_key not in self._executor_cache:
                                 node_dispatcher = importlib.import_module(f"modules.{bridge_module_id}.node")
-                                if isinstance(node_dispatcher, types.ModuleType) and node_dispatcher.__name__ in sys.modules:
+                                # Only reload in debug mode to pick up hot-code changes;
+                                # in production this is wasteful and can cause state issues.
+                                if settings.get("debug_mode") and isinstance(node_dispatcher, types.ModuleType) and node_dispatcher.__name__ in sys.modules:
                                     importlib.reload(node_dispatcher)
                                 bridge_executor_class = await node_dispatcher.get_executor_class(bridge_type_id)
                                 self._executor_cache[bridge_cache_key] = bridge_executor_class
@@ -494,9 +496,10 @@ class FlowRunner:
                     if cache_key not in self._executor_cache:
                         # Dynamically import the module's node logic dispatcher
                         node_dispatcher = importlib.import_module(f"modules.{module_id}.node")
-                        # Only reload if it's a real module (not a mock during testing)
-                        if isinstance(node_dispatcher, types.ModuleType) and node_dispatcher.__name__ in sys.modules:
-                            importlib.reload(node_dispatcher) # Ensure we have the latest code
+                        # Only reload in debug mode to pick up hot-code changes;
+                        # in production this is wasteful and can cause state issues.
+                        if settings.get("debug_mode") and isinstance(node_dispatcher, types.ModuleType) and node_dispatcher.__name__ in sys.modules:
+                            importlib.reload(node_dispatcher)
                         # Get the specific executor class for this node type
                         executor_class = await node_dispatcher.get_executor_class(node_type_id)
                         self._executor_cache[cache_key] = executor_class

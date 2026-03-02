@@ -2,17 +2,24 @@ import json
 import os
 
 class SystemPromptExecutor:
+    # Class-level cache: avoids re-reading tools.json on every receive() call
+    _tools_cache = {"mtime": 0.0, "data": {}}
+    _tools_path = os.path.join(os.path.dirname(__file__), "..", "tools", "tools.json")
+
     def _load_available_tools(self):
-        """Load available tools from the tools module."""
-        tools_file = os.path.join(os.path.dirname(__file__), "..", "tools", "tools.json")
-        if os.path.exists(tools_file):
-            try:
-                with open(tools_file, "r") as f:
-                    return json.load(f)
-            except:
-                return {}
+        """Load available tools from the tools module (cached by mtime)."""
+        try:
+            if os.path.exists(self._tools_path):
+                mtime = os.path.getmtime(self._tools_path)
+                if mtime > self.__class__._tools_cache["mtime"]:
+                    with open(self._tools_path, "r") as f:
+                        self.__class__._tools_cache["data"] = json.load(f)
+                    self.__class__._tools_cache["mtime"] = mtime
+                return self.__class__._tools_cache["data"]
+        except Exception:
+            pass
         return {}
-    
+
     def _format_tools_section(self, enabled_tool_names: list) -> str:
         """Format available tools into a readable section for the system prompt."""
         all_tools = self._load_available_tools()
@@ -67,14 +74,6 @@ class SystemPromptExecutor:
         
         # Memory context (injected as _memory_context by memory_recall)
         memory_context = input_data.get("_memory_context")
-        if not memory_context:
-            messages = input_data.get("messages", [])
-            for msg in messages:
-                if isinstance(msg, dict) and msg.get("role") == "system":
-                    content = msg.get("content", "")
-                    if "Relevant memories retrieved" in content:
-                        memory_context = content
-                        break
         
         # Knowledge context (from query_knowledge node)
         knowledge_context = input_data.get("knowledge_context")

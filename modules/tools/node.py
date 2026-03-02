@@ -22,32 +22,49 @@ class ToolDispatcherExecutor:
         if not tool_calls:
             return input_data
 
+        # Bug fix #3: guard config against None
+        config = config or {}
+
         library = self._load_tools()
-        allowed_tools = config.get("allowed_tools", []) # From node config
-        max_tools_per_turn = config.get("max_tools_per_turn", 5) # Default 5 tools per turn
+        allowed_tools = config.get("allowed_tools", [])  # From node config
+        max_tools_per_turn = config.get("max_tools_per_turn", 5)  # Default 5 tools per turn
         results = []
-        
+
         # Track tool count in context if available
         tool_count = input_data.get("_tool_count", 0)
 
         # Limit tool calls to max_tools_per_turn
         tool_calls_to_run = tool_calls[:max_tools_per_turn]
         remaining_tools = tool_calls[max_tools_per_turn:]
-        
+
         # Store remaining tools for next turn
         if remaining_tools:
             input_data["_remaining_tool_calls"] = remaining_tools
-        
+
         # Track tool count
         input_data["_tool_count"] = tool_count + len(tool_calls_to_run)
-        
-        # Check if we've hit the limit
-        should_continue = len(tool_calls_to_run) < len(tool_calls)
+
+        # Bug fix #1: requires_continuation was inverted.
+        # has_remaining is True when we truncated the list (remaining tools exist).
+        # requires_continuation must be True in that case so the ConditionalRouter
+        # loops back to run the remaining tools.
+        has_remaining = len(remaining_tools) > 0
 
         for tool_call in tool_calls_to_run:
             func_name = tool_call["function"]["name"]
-            args = json.loads(tool_call["function"]["arguments"])
-            
+
+            # Bug fix #2: guard json.loads against malformed LLM arguments
+            try:
+                args = json.loads(tool_call["function"]["arguments"])
+            except (json.JSONDecodeError, TypeError) as e:
+                results.append({
+                    "tool_call_id": tool_call.get("id", "unknown"),
+                    "role": "tool",
+                    "name": func_name,
+                    "content": f"Error: Could not parse tool arguments: {str(e)}"
+                })
+                continue
+
             # Check if tool is allowed by this specific dispatcher instance
             if allowed_tools and func_name not in allowed_tools:
                 output = f"Error: Tool {func_name} is not enabled for this dispatcher."
@@ -61,7 +78,6 @@ class ToolDispatcherExecutor:
                 # Execute custom tool logic
                 local_scope = {"args": args, "result": None, "json": json, "httpx": httpx}
                 try:
-                    # We run this in a thread if it's heavy, but for now simple exec
                     exec(code, local_scope)
                     output = local_scope.get("result", "Success (no result returned)")
                 except Exception as e:
@@ -87,7 +103,7 @@ class ToolDispatcherExecutor:
             "tool_results": results,
             "assistant_message": message,
             "messages": messages,
-            "requires_continuation": not should_continue
+            "requires_continuation": has_remaining,
         }
 
     async def send(self, processed_data: dict) -> dict:

@@ -100,7 +100,11 @@ class RepeaterExecutor:
                     print(f"Repeater failed to trigger next run: {e}")
                     debug_logger.log(fid, "repeater_node", "Repeater", "error", f"Loop failed: {str(e)}")
             
-            asyncio.create_task(trigger_next(flow_id, input_data, current_repeat, node_id))
+            # Store the task reference to prevent it from being garbage-collected
+            # before it has a chance to run.
+            self._pending_task = asyncio.create_task(
+                trigger_next(flow_id, input_data, current_repeat, node_id)
+            )
             
         return input_data
 
@@ -190,14 +194,17 @@ class ScheduleStartExecutor:
             return input_data
         
         try:
+            from datetime import timedelta
             now = datetime.now()
-            
+
             if schedule_date:
                 target_dt = datetime.strptime(f"{schedule_date} {schedule_time}", "%Y-%m-%d %H:%M")
             else:
                 target_dt = datetime.strptime(f"{now.strftime('%Y-%m-%d')} {schedule_time}", "%Y-%m-%d %H:%M")
                 if target_dt < now:
-                    target_dt = target_dt.replace(day=now.day + 1)
+                    # Bug fix: replace(day=now.day+1) raises ValueError at end of month.
+                    # Use timedelta(days=1) instead.
+                    target_dt = target_dt + timedelta(days=1)
             
             wait_seconds = (target_dt - now).total_seconds()
             

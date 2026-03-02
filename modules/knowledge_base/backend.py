@@ -277,39 +277,43 @@ class FaissDocumentStore:
         """Rebuild FAISS index from SQLite chunks."""
         # Reset index first
         with self.index_lock:
-            self.faiss_index = None 
+            self.faiss_index = None
 
+        batch_size = 1000
+        total_processed = 0
+
+        logging.info(f"🔄 Rebuilding index (batch size: {batch_size})...")
+
+        # Bug fix: fetch ALL rows inside the connection context manager so the
+        # connection is still open when we read the data.  Previously the cursor
+        # was assigned inside `with self._connect()` but fetchmany() was called
+        # outside it, after the connection had already been closed.
         with self._connect() as con:
             cur = con.execute("SELECT id, text, embedding FROM chunks ORDER BY id")
-        
-            batch_size = 1000
-            total_processed = 0
 
-            logging.info(f"🔄 Rebuilding index (batch size: {batch_size})...")
-            
             while True:
                 rows = cur.fetchmany(batch_size)
                 if not rows:
                     break
-                
+
                 batch_embeddings = []
                 batch_ids = []
 
                 for r in rows:
                     chunk_id = r[0]
                     emb_json = r[2]
-                    
+
                     emb = None
                     if emb_json:
                         try:
                             emb = np.array(json.loads(emb_json), dtype='float32')
                         except Exception:
                             pass
-                    
+
                     if emb is not None:
                         batch_embeddings.append(emb)
                         batch_ids.append(chunk_id)
-                
+
                 # Initialize index on first batch if needed
                 with self.index_lock:
                     if self.faiss_index is None and batch_embeddings:
@@ -321,18 +325,15 @@ class FaissDocumentStore:
                     self._add_embeddings_to_faiss(batch_embeddings, batch_ids, save_index=False)
 
                 total_processed += len(rows)
-            
-            # Ensure index exists even if DB was empty
-            with self.index_lock:
-                if self.faiss_index is None:
-                    pass
-            if not self.faiss_index:
-                self._create_empty_index()
-            
-            # Save once at the end
-            self._save_faiss_index()
-            
-            logging.info(f"✅ FAISS index rebuilt successfully ({total_processed} chunks).")
+
+        # Ensure index exists even if DB was empty
+        if not self.faiss_index:
+            self._create_empty_index()
+
+        # Save once at the end
+        self._save_faiss_index()
+
+        logging.info(f"✅ FAISS index rebuilt successfully ({total_processed} chunks).")
 
     # --------------------------
     # Document Management

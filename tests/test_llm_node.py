@@ -1,6 +1,6 @@
 import pytest
 from unittest.mock import patch, AsyncMock
-from modules.llm_module.node import LLMExecutor, ConfigLoader
+from modules.llm_module.node import LLMExecutor, ConfigLoader, get_executor_class
 
 @pytest.mark.asyncio
 async def test_llm_executor_receive():
@@ -144,3 +144,44 @@ async def test_llm_executor_config_override_tools():
         call_kwargs = mock_bridge_instance.chat_completion.call_args.kwargs
         # Config tools should override input_data tools
         assert call_kwargs["tools"][0]["function"]["name"] == "Calculator"
+
+
+@pytest.mark.asyncio
+async def test_llm_executor_none_input_guard():
+    """LLMExecutor should handle None input without crashing."""
+    with patch("modules.llm_module.node.LLMBridge") as MockBridge:
+        executor = LLMExecutor()
+        mock_bridge_instance = MockBridge.return_value
+        mock_bridge_instance.chat_completion = AsyncMock(return_value={})
+
+        result = await executor.receive(None)
+
+        # Should return empty dict or error, not raise
+        assert result is not None
+
+
+@pytest.mark.asyncio
+async def test_llm_executor_empty_messages():
+    """LLMExecutor should handle empty messages list without crashing."""
+    with patch("modules.llm_module.node.LLMBridge") as MockBridge:
+        executor = LLMExecutor()
+        mock_bridge_instance = MockBridge.return_value
+        mock_bridge_instance.chat_completion = AsyncMock(return_value={})
+
+        result = await executor.receive({"messages": []})
+        assert result is not None
+        mock_bridge_instance.chat_completion.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_get_executor_class_llm():
+    """get_executor_class('llm_module') should return LLMExecutor."""
+    cls = await get_executor_class("llm_module")
+    assert cls.__name__ == LLMExecutor.__name__
+
+
+@pytest.mark.asyncio
+async def test_get_executor_class_unknown():
+    """get_executor_class with unknown id should return None."""
+    cls = await get_executor_class("unknown")
+    assert cls is None

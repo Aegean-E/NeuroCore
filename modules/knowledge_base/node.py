@@ -13,7 +13,10 @@ class KnowledgeQueryExecutor:
 
     async def receive(self, input_data: dict, config: dict = None) -> dict:
         if input_data is None: return None
-        
+
+        # Bug fix: guard config against None
+        config = config or {}
+
         query = ""
         if isinstance(input_data, dict):
             if "messages" in input_data and input_data["messages"]:
