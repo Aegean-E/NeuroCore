@@ -192,7 +192,53 @@ class PlannerExecutor:
         return processed_data
 
 
+class PlanStepTracker:
+    """
+    Tracks progress through a plan by incrementing current_step.
+    
+    Input:
+        - plan: array of plan steps
+        - current_step: current step index (default 0)
+        
+    Output:
+        - current_step: incremented step index
+        - step_completed: the step that was just completed
+        - plan_complete: True if all steps are done
+    """
+    
+    async def receive(self, data: dict, config: dict = None) -> dict:
+        if not isinstance(data, dict):
+            return data
+            
+        plan = data.get("plan", [])
+        current = data.get("current_step", 0)
+        
+        # Only track if there's a plan
+        if not plan:
+            return data
+            
+        result = data.copy()
+        
+        # Mark current step as completed
+        if current < len(plan):
+            result["step_completed"] = plan[current]
+            result["current_step"] = current + 1
+            
+        # Check if plan is complete
+        if result["current_step"] >= len(plan):
+            result["plan_complete"] = True
+        else:
+            result["plan_complete"] = False
+            
+        return result
+
+    async def send(self, processed_data: dict) -> dict:
+        return processed_data
+
+
 async def get_executor_class(node_type_id: str):
     if node_type_id == "planner":
         return PlannerExecutor
+    if node_type_id == "plan_step_tracker":
+        return PlanStepTracker
     return None

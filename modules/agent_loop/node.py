@@ -295,6 +295,9 @@ class AgentLoopExecutor:
             - iterations (int):         Total number of LLM ↔ Tool loops executed.
             - agent_loop_trace (list):  Per-iteration details (tool_calls, errors).
             - agent_loop_error (str):   Error message if the loop failed or timed out.
+            - replan_needed (bool):     True if execution failed and re-planning is recommended.
+            - replan_reason (str):      Explanation of why re-planning is needed.
+            - suggested_approach (str): Suggestion for how to re-plan.
 
         Reflection-driven retry is handled externally by wiring:
             [Agent Loop] → [Reflection] → [Conditional Router (satisfied)] → [Agent Loop]
@@ -353,7 +356,7 @@ class AgentLoopExecutor:
                 else:
                     llm_messages.insert(0, {"role": "system", "content": system_prompt})
 
-            final_response, iterations, _ = await self._run_agent_loop(
+            final_response, iterations, had_tool_error = await self._run_agent_loop(
                 llm_messages=llm_messages,
                 tools_list=tools_list,
                 tool_library=tool_library,
@@ -375,6 +378,33 @@ class AgentLoopExecutor:
             if final_response and "choices" in final_response:
                 result["content"] = final_response["choices"][0]["message"].get("content", "")
 
+            # --- Re-planning detection ---
+            plan = input_data.get("plan", [])
+            current_step = input_data.get("current_step", 0)
+            
+            # Check if re-planning is needed
+            if had_tool_error or iterations >= max_iterations:
+                result["replan_needed"] = True
+                if had_tool_error:
+                    result["replan_reason"] = "Tool execution errors occurred during plan execution"
+                else:
+                    result["replan_reason"] = f"Max iterations ({max_iterations}) reached - plan may be too complex"
+                
+                # Suggest simpler approach if plan has multiple steps
+                if plan and len(plan) > 1:
+                    result["suggested_approach"] = (
+                        f"Current plan has {len(plan)} steps. "
+                        f"Consider breaking into smaller sub-tasks or simplifying step {current_step + 1}."
+                    )
+                elif plan:
+                    result["suggested_approach"] = (
+                        "Single-step plan failed. Consider using different tools or approach."
+                    )
+                else:
+                    result["suggested_approach"] = "No plan exists. Consider creating a step-by-step plan."
+            else:
+                result["replan_needed"] = False
+
             return result
 
         # --- Execute with optional timeout ---
@@ -389,6 +419,19 @@ class AgentLoopExecutor:
             result["agent_loop_error"] = f"Agent loop timed out after {timeout}s"
             result["iterations"] = 0
             result["agent_loop_trace"] = agent_loop_trace
+            
+            # Re-planning needed due to timeout
+            plan = input_data.get("plan", [])
+            result["replan_needed"] = True
+            result["replan_reason"] = f"Execution timed out after {timeout} seconds"
+            if plan and len(plan) > 1:
+                result["suggested_approach"] = (
+                    f"Plan with {len(plan)} steps took too long. "
+                    "Consider breaking into smaller chunks with shorter timeout."
+                )
+            else:
+                result["suggested_approach"] = "Execution timed out. Consider simplifying the approach."
+            
             return result
 
         except Exception as e:
@@ -396,6 +439,13 @@ class AgentLoopExecutor:
             result["agent_loop_error"] = str(e)
             result["iterations"] = 0
             result["agent_loop_trace"] = agent_loop_trace
+            
+            # Re-planning needed due to error
+            plan = input_data.get("plan", [])
+            result["replan_needed"] = True
+            result["replan_reason"] = f"Unexpected error: {str(e)}"
+            result["suggested_approach"] = "Review plan and try alternative approach."
+            
             return result
 
         # Attach trace to final result

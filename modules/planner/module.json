@@ -19,6 +19,13 @@
             "description": "Analyzes user request and creates a step-by-step execution plan.",
             "singleton": false,
             "configurable": true
+        },
+        {
+            "id": "plan_step_tracker",
+            "name": "Plan Step Tracker",
+            "description": "Tracks progress through a plan by incrementing current_step and marking steps as completed.",
+            "singleton": false,
+            "configurable": false
         }
     ],
     "load_error": null
