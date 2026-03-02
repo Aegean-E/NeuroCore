@@ -58,9 +58,20 @@ class PlannerExecutor:
         if not user_request:
             return input_data
         
-        # Get planning prompt
-        planner_prompt = config.get("default_planner_prompt", 
-            "Create a plan for: {request}\nRespond with JSON array only.")
+        # Get planning prompt - check for custom prompt first, then default
+        planner_prompt = config.get("planner_prompt")  # Custom user-defined prompt
+        if not planner_prompt:
+            planner_prompt = config.get(
+                "default_planner_prompt",
+                "You are a task planner. Analyze the user's request and create a step-by-step execution plan if needed.\n\n"
+                "Rules:\n"
+                "- If the request is simple (one question, greeting, or single action), return an empty JSON array: []\n"
+                "- If the request requires multiple steps, return a JSON array with each step: [{\"action\": \"step description\", \"target\": \"what it applies to\"}]\n"
+                "- Keep plans simple and actionable\n"
+                "- Maximum 10 steps\n\n"
+                "Request: {request}\n\n"
+                "Respond with JSON array only."
+            )
         
         max_steps = int(config.get("max_steps", 10))
         planner_prompt = planner_prompt.replace("{request}", user_request)

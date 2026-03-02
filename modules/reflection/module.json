@@ -8,7 +8,8 @@
     "order": 4,
     "config": {
         "inject_improvement": true,
-        "default_reflection_prompt": "You are a reflection agent. Evaluate if the assistant's response satisfies the user's request.\n\nEvaluate:\n- Is the request fully answered?\n- Are all tasks completed?\n- Is more work needed?\n\nRespond with JSON: {\"satisfied\": true/false, \"reason\": \"explanation\", \"needs_improvement\": \"what could be better or null\"}"
+        "default_reflection_prompt": "You are a reflection agent. Evaluate if the assistant's response satisfies the user's request.\n\nEvaluate:\n- Is the request fully answered?\n- Are all tasks completed?\n- Is more work needed?\n\nRespond with JSON: {\"satisfied\": true/false, \"reason\": \"explanation\", \"needs_improvement\": \"what could be better or null\"}",
+        "reflection_prompt": "Custom test prompt for reflection"
     },
     "provides_nodes": [
         {

@@ -256,6 +256,24 @@ async def get_module_details(request: Request, module_id: str, module_manager: M
         "settings": settings_man.settings
     })
 
+@router.get("/modules/{module_id}/default-prompt")
+async def get_default_prompt(module_id: str, module_manager: ModuleManager = Depends(get_module_manager)):
+    """Returns the default prompt for reflection or planner modules."""
+    module = module_manager.modules.get(module_id)
+    if not module:
+        raise HTTPException(status_code=404, detail="Module not found")
+    
+    config = module.get('config', {})
+    
+    if module_id == 'reflection':
+        default_prompt = config.get('default_reflection_prompt', '')
+        return default_prompt
+    elif module_id == 'planner':
+        default_prompt = config.get('default_planner_prompt', '')
+        return default_prompt
+    else:
+        raise HTTPException(status_code=400, detail="Module does not support default prompts")
+
 @router.post("/modules/{module_id}/config")
 async def save_module_config(request: Request, module_id: str, module_manager: ModuleManager = Depends(get_module_manager)):
     try:
@@ -271,6 +289,44 @@ async def save_module_config(request: Request, module_id: str, module_manager: M
                     new_config["enabled_tools"] = json.loads(form_data["enabled_tools"])
                 except json.JSONDecodeError:
                     new_config["enabled_tools"] = []
+        # Handle reflection module with custom prompt
+        elif module_id == "reflection":
+            new_config = {}
+            current_module = module_manager.modules.get(module_id)
+            current_config = current_module.get('config', {}) if current_module else {}
+            
+            # Copy existing config to preserve defaults
+            new_config.update(current_config)
+            
+            # Update reflection_prompt (custom prompt)
+            if "reflection_prompt" in form_data:
+                new_config['reflection_prompt'] = form_data["reflection_prompt"]
+            
+            # Update inject_improvement setting
+            new_config['inject_improvement'] = form_data.get("inject_improvement") == "true"
+            
+        # Handle planner module with custom prompt
+        elif module_id == "planner":
+            new_config = {}
+            current_module = module_manager.modules.get(module_id)
+            current_config = current_module.get('config', {}) if current_module else {}
+            
+            # Copy existing config to preserve defaults
+            new_config.update(current_config)
+            
+            # Update planner_prompt (custom prompt)
+            if "planner_prompt" in form_data:
+                new_config['planner_prompt'] = form_data["planner_prompt"]
+            
+            # Update max_steps
+            if "max_steps" in form_data:
+                try:
+                    new_config['max_steps'] = int(form_data["max_steps"])
+                except ValueError:
+                    pass
+            
+            # Update enabled setting
+            new_config['enabled'] = form_data.get("enabled") == "true"
         else:
             # Standard JSON config
             if "config_json" not in form_data:
@@ -294,6 +350,7 @@ async def save_module_config(request: Request, module_id: str, module_manager: M
         return Response(status_code=400, headers={"HX-Trigger": json.dumps({"showMessage": {"level": "error", "message": "Invalid JSON format"}})})
     except Exception as e:
         return Response(status_code=500, headers={"HX-Trigger": json.dumps({"showMessage": {"level": "error", "message": str(e)}})})
+
 
 @router.post("/modules/reorder")
 async def reorder_modules(request: Request, order: str = Form(...), module_manager: ModuleManager = Depends(get_module_manager)):

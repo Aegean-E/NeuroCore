@@ -143,7 +143,115 @@
     </div>
     {% endif %}
 
-    {% if module.config and has_visible_config and module.id != 'agent_loop' %}
+    {% if module.id == 'reflection' and module.enabled %}
+    <div class="bg-slate-900 rounded-xl border border-slate-800 p-6 mt-6">
+        <h3 class="font-semibold text-lg mb-4">Reflection Settings</h3>
+        <form hx-post="/modules/{{ module.id }}/config" 
+              hx-swap="none"
+              hx-on::after-request="const btn = this.querySelector('button[type=submit]'); const orig = btn.innerText; btn.innerText = 'Saved!'; btn.classList.remove('bg-blue-600', 'hover:bg-blue-500'); btn.classList.add('bg-emerald-600', 'hover:bg-emerald-500'); setTimeout(() => { btn.innerText = orig; btn.classList.add('bg-blue-600', 'hover:bg-blue-500'); btn.classList.remove('bg-emerald-600', 'hover:bg-emerald-500'); }, 2000);">
+            
+            <div class="space-y-6">
+                <div class="bg-slate-950/50 rounded-xl border border-slate-800 p-6">
+                    <div class="flex items-center justify-between mb-4">
+                        <h4 class="text-sm font-semibold text-slate-300 uppercase tracking-wider">Reflection Prompt</h4>
+                        <button type="button" 
+                                hx-get="/modules/{{ module.id }}/default-prompt"
+                                hx-target="#reflection-prompt"
+                                hx-swap="innerHTML"
+                                class="text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 px-3 py-1.5 rounded-lg transition-colors border border-slate-700">
+                            ↺ Load Default Prompt
+                        </button>
+                    </div>
+                    <textarea id="reflection-prompt" name="reflection_prompt" rows="12" 
+                              class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all custom-scrollbar">{{ module.config.reflection_prompt or module.config.default_reflection_prompt }}</textarea>
+                    <p class="text-xs text-slate-500 mt-3">
+                        This prompt guides the reflection agent on how to evaluate responses. 
+                        The agent checks if the assistant's response satisfies the user's request.
+                        <span class="text-amber-400">⚠️ Modifying this may affect reflection accuracy.</span>
+                    </p>
+                </div>
+
+                <div class="bg-slate-950/50 rounded-xl border border-slate-800 p-6">
+                    <h4 class="text-sm font-semibold text-slate-300 mb-4 uppercase tracking-wider">Behavior Settings</h4>
+                    <div class="flex items-center space-x-3">
+                        <input type="checkbox" name="inject_improvement" value="true" {% if module.config.inject_improvement %}checked{% endif %}
+                               class="w-5 h-5 rounded border-slate-700 bg-slate-950 text-blue-600 focus:ring-blue-500 focus:ring-offset-slate-900"
+                               id="inject_improvement">
+                        <label for="inject_improvement" class="text-sm text-slate-300 cursor-pointer">
+                            Inject improvement feedback into conversation
+                        </label>
+                    </div>
+                    <p class="text-xs text-slate-500 mt-2 ml-8">
+                        When enabled, the reflection agent will add feedback messages to the conversation 
+                        when a response needs improvement, allowing the agent to retry with better results.
+                    </p>
+                </div>
+            </div>
+
+            <div class="mt-6 flex justify-end">
+                <button type="submit" class="bg-blue-600 hover:bg-blue-500 text-white px-6 py-2 rounded-lg text-sm font-semibold transition-colors">Save Reflection Settings</button>
+            </div>
+        </form>
+    </div>
+    {% endif %}
+
+    {% if module.id == 'planner' and module.enabled %}
+    <div class="bg-slate-900 rounded-xl border border-slate-800 p-6 mt-6">
+        <h3 class="font-semibold text-lg mb-4">Task Planner Settings</h3>
+        <form hx-post="/modules/{{ module.id }}/config" 
+              hx-swap="none"
+              hx-on::after-request="const btn = this.querySelector('button[type=submit]'); const orig = btn.innerText; btn.innerText = 'Saved!'; btn.classList.remove('bg-blue-600', 'hover:bg-blue-500'); btn.classList.add('bg-emerald-600', 'hover:bg-emerald-500'); setTimeout(() => { btn.innerText = orig; btn.classList.add('bg-blue-600', 'hover:bg-blue-500'); btn.classList.remove('bg-emerald-600', 'hover:bg-emerald-500'); }, 2000);">
+            
+            <div class="space-y-6">
+                <div class="bg-slate-950/50 rounded-xl border border-slate-800 p-6">
+                    <div class="flex items-center justify-between mb-4">
+                        <h4 class="text-sm font-semibold text-slate-300 uppercase tracking-wider">Planner Prompt</h4>
+                        <button type="button" 
+                                hx-get="/modules/{{ module.id }}/default-prompt"
+                                hx-target="#planner-prompt"
+                                hx-swap="innerHTML"
+                                class="text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 px-3 py-1.5 rounded-lg transition-colors border border-slate-700">
+                            ↺ Load Default Prompt
+                        </button>
+                    </div>
+                    <textarea id="planner-prompt" name="planner_prompt" rows="12" 
+                              class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all custom-scrollbar">{{ module.config.planner_prompt or module.config.default_planner_prompt }}</textarea>
+                    <p class="text-xs text-slate-500 mt-3">
+                        This prompt guides the planner on how to break down complex requests into steps.
+                        Use <code class="text-blue-400">{request}</code> as a placeholder for the user's request.
+                        <span class="text-amber-400">⚠️ Modifying this may affect planning quality.</span>
+                    </p>
+                </div>
+
+                <div class="bg-slate-950/50 rounded-xl border border-slate-800 p-6">
+                    <h4 class="text-sm font-semibold text-slate-300 mb-4 uppercase tracking-wider">Planning Limits</h4>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-sm font-medium text-slate-400 mb-2">Maximum Steps</label>
+                            <input type="number" name="max_steps" value="{{ module.config.max_steps }}" min="1" max="50"
+                                   class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all">
+                            <p class="text-xs text-slate-500 mt-2">Maximum number of steps in a plan. Higher values allow more complex tasks. Default: 10</p>
+                        </div>
+                        <div class="flex items-center space-x-3 pt-8">
+                            <input type="checkbox" name="enabled" value="true" {% if module.config.enabled %}checked{% endif %}
+                                   class="w-5 h-5 rounded border-slate-700 bg-slate-950 text-blue-600 focus:ring-blue-500 focus:ring-offset-slate-900"
+                                   id="planner_enabled">
+                            <label for="planner_enabled" class="text-sm text-slate-300 cursor-pointer">
+                                Enable task planning
+                            </label>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="mt-6 flex justify-end">
+                <button type="submit" class="bg-blue-600 hover:bg-blue-500 text-white px-6 py-2 rounded-lg text-sm font-semibold transition-colors">Save Planner Settings</button>
+            </div>
+        </form>
+    </div>
+    {% endif %}
+
+    {% if module.config and has_visible_config and module.id != 'agent_loop' and module.id != 'reflection' and module.id != 'planner' %}
     <div class="bg-slate-900 rounded-xl border border-slate-800 p-6 mt-6">
         <h3 class="font-semibold text-lg mb-4">Configuration</h3>
         <form hx-post="/modules/{{ module.id }}/config" hx-swap="none"
@@ -155,6 +263,7 @@
         </form>
     </div>
     {% endif %}
+
 
     {% if module.id == 'llm_module' and module.enabled %}
 

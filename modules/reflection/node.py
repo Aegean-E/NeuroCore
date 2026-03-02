@@ -101,18 +101,20 @@ class ReflectionExecutor:
             result["satisfied"] = True
             return result
 
-        # Build reflection prompt
-        reflection_prompt = config.get(
-            "default_reflection_prompt",
-            "You are a reflection agent. Evaluate if the assistant's response satisfies the user's request.\n\n"
-            "Evaluate:\n"
-            "- Is the request fully answered?\n"
-            "- Are all tasks completed?\n"
-            "- Is more work needed?\n\n"
-            "Respond with JSON: "
-            "{\"satisfied\": true/false, \"reason\": \"explanation\", "
-            "\"needs_improvement\": \"what could be better or null\"}"
-        )
+        # Build reflection prompt - check for custom prompt first, then default
+        reflection_prompt = config.get("reflection_prompt")  # Custom user-defined prompt
+        if not reflection_prompt:
+            reflection_prompt = config.get(
+                "default_reflection_prompt",
+                "You are a reflection agent. Evaluate if the assistant's response satisfies the user's request.\n\n"
+                "Evaluate:\n"
+                "- Is the request fully answered?\n"
+                "- Are all tasks completed?\n"
+                "- Is more work needed?\n\n"
+                "Respond with JSON: "
+                "{\"satisfied\": true/false, \"reason\": \"explanation\", "
+                "\"needs_improvement\": \"what could be better or null\"}"
+            )
 
         reflection_messages = [
             {"role": "system", "content": reflection_prompt},
