@@ -50,6 +50,39 @@ class SystemPromptExecutor:
         
         return tools_list
 
+    def _load_skills_content(self, enabled_skills: list) -> str:
+        """Load content from enabled skills."""
+        if not enabled_skills:
+            return ""
+        
+        skills_content = []
+        storage_path = "modules/skills/data"
+        metadata_file = os.path.join(storage_path, "skills_metadata.json")
+        
+        # Load metadata to get skill names
+        metadata = {}
+        try:
+            if os.path.exists(metadata_file):
+                with open(metadata_file, "r", encoding="utf-8") as f:
+                    metadata = json.load(f)
+        except Exception:
+            pass
+        
+        for skill_id in enabled_skills:
+            skill_path = os.path.join(storage_path, f"{skill_id}.md")
+            if os.path.exists(skill_path):
+                try:
+                    with open(skill_path, "r", encoding="utf-8") as f:
+                        content = f.read()
+                        skill_name = metadata.get(skill_id, {}).get("name", skill_id)
+                        skills_content.append(f"### {skill_name}\n{content}")
+                except Exception:
+                    continue
+        
+        if skills_content:
+            return "## Skills and Guidelines\n\n" + "\n\n".join(skills_content)
+        return ""
+
     async def receive(self, input_data: dict, config: dict = None) -> dict:
         """
         Receives the current conversation state and prepends a system message with available tools.
@@ -84,10 +117,16 @@ class SystemPromptExecutor:
         # Plan context (from planner node)
         plan_context = input_data.get("plan_context")
         
+        # Skills context (from enabled_skills config)
+        enabled_skills = config.get("enabled_skills", [])
+        skills_context = self._load_skills_content(enabled_skills)
+        
         # Build context sections
         context_parts = []
         if plan_context:
             context_parts.append(plan_context)
+        if skills_context:
+            context_parts.append(skills_context)
         if reasoning_context:
             context_parts.append(f"## Previous Reasoning\n{reasoning_context}")
         if knowledge_context:

@@ -1,0 +1,226 @@
+"""
+Service layer for Skills module - business logic for skill management.
+"""
+
+import json
+import re
+import httpx
+from typing import List, Dict, Any, Optional
+from .backend import SkillBackend
+
+
+class SkillService:
+    """Business logic for skill management."""
+    
+    def __init__(self, storage_path: str = "modules/skills/data"):
+        self.backend = SkillBackend(storage_path)
+    
+    def list_skills(self, category: Optional[str] = None, 
+                    tag: Optional[str] = None) -> List[Dict[str, Any]]:
+        """List all skills with optional filtering."""
+        skills = self.backend.list_skills()
+        
+        if category:
+            skills = [s for s in skills if s.get("category") == category]
+        
+        if tag:
+            skills = [s for s in skills if tag in s.get("tags", [])]
+        
+        return skills
+    
+    def get_skill(self, skill_id: str) -> Optional[Dict[str, Any]]:
+        """Get a skill by ID."""
+        return self.backend.get_skill(skill_id)
+    
+    def create_skill(self, name: str, description: str, content: str,
+                     category: str = "general", tags: List[str] = None) -> Dict[str, Any]:
+        """Create a new skill."""
+        # Validate content format
+        if not self._validate_skill_content(content):
+            raise ValueError("Invalid skill content format")
+        
+        return self.backend.create_skill(name, description, content, category, tags)
+    
+    def update_skill(self, skill_id: str, **kwargs) -> Optional[Dict[str, Any]]:
+        """Update an existing skill."""
+        if "content" in kwargs and not self._validate_skill_content(kwargs["content"]):
+            raise ValueError("Invalid skill content format")
+        
+        return self.backend.update_skill(skill_id, **kwargs)
+    
+    def delete_skill(self, skill_id: str) -> bool:
+        """Delete a skill."""
+        return self.backend.delete_skill(skill_id)
+    
+    def import_from_file(self, file_content: str, file_name: str = "imported_skill.md") -> Dict[str, Any]:
+        """Import a skill from file content."""
+        # Try to parse metadata from the file
+        metadata = self._extract_metadata_from_content(file_content, file_name)
+        
+        # Generate skill ID from name
+        skill_id = self._generate_import_id(metadata["name"])
+        
+        return self.backend.import_skill(
+            skill_id=skill_id,
+            name=metadata["name"],
+            description=metadata["description"],
+            content=file_content,
+            category=metadata.get("category", "general"),
+            tags=metadata.get("tags", [])
+        )
+    
+    def import_from_url(self, url: str) -> Dict[str, Any]:
+        """Import a skill from a URL."""
+        try:
+            response = httpx.get(url, timeout=30.0)
+            response.raise_for_status()
+            content = response.text
+            
+            # Try to extract name from URL or content
+            file_name = url.split("/")[-1] or "imported_skill.md"
+            
+            return self.import_from_file(content, file_name)
+        except httpx.HTTPError as e:
+            raise ValueError(f"Failed to fetch skill from URL: {str(e)}")
+    
+    def export_skill(self, skill_id: str) -> Optional[Dict[str, Any]]:
+        """Export a skill for download."""
+        skill = self.backend.get_skill(skill_id)
+        if not skill:
+            return None
+        
+        # Create export package
+        export_data = {
+            "metadata": {
+                "name": skill["name"],
+                "description": skill["description"],
+                "category": skill.get("category", "general"),
+                "tags": skill.get("tags", []),
+                "exported_at": skill.get("updated_at", skill.get("created_at"))
+            },
+            "content": skill["content"]
+        }
+        
+        return {
+            "skill": skill,
+            "export_json": json.dumps(export_data, indent=2, ensure_ascii=False),
+            "export_markdown": self._create_export_markdown(skill)
+        }
+    
+    def get_categories(self) -> List[str]:
+        """Get all unique categories."""
+        skills = self.backend.list_skills()
+        categories = set(s.get("category", "general") for s in skills)
+        return sorted(list(categories))
+    
+    def get_all_tags(self) -> List[str]:
+        """Get all unique tags across all skills."""
+        skills = self.backend.list_skills()
+        tags = set()
+        for skill in skills:
+            tags.update(skill.get("tags", []))
+        return sorted(list(tags))
+    
+    def get_enabled_skills_content(self, skill_ids: List[str]) -> Dict[str, str]:
+        """Get content for enabled skills (for system prompt injection)."""
+        contents = {}
+        for skill_id in skill_ids:
+            content = self.backend.get_skill_content_only(skill_id)
+            if content:
+                contents[skill_id] = content
+        return contents
+    
+    def _validate_skill_content(self, content: str) -> bool:
+        """Validate that skill content is properly formatted."""
+        # Basic validation - content should not be empty and should be markdown
+        if not content or not content.strip():
+            return False
+        
+        # Check for common markdown patterns
+        # Skills should have some structure (headers, lists, etc.)
+        has_structure = bool(re.search(r'^#{1,6}\s+', content, re.MULTILINE)) or \
+                       bool(re.search(r'^[\-\*]\s+', content, re.MULTILINE)) or \
+                       bool(re.search(r'^\d+\.\s+', content, re.MULTILINE))
+        
+        # Skills should be substantial (at least 100 characters)
+        is_substantial = len(content.strip()) >= 100
+        
+        return has_structure and is_substantial
+    
+    def _extract_metadata_from_content(self, content: str, file_name: str) -> Dict[str, Any]:
+        """Try to extract metadata from skill content."""
+        metadata = {
+            "name": self._extract_title(content) or self._clean_file_name(file_name),
+            "description": self._extract_description(content),
+            "category": "general",
+            "tags": []
+        }
+        
+        # Try to extract category from content
+        category_match = re.search(r'(?i)category:\s*(.+)', content)
+        if category_match:
+            metadata["category"] = category_match.group(1).strip()
+        
+        # Try to extract tags from content
+        tags_match = re.search(r'(?i)tags:\s*(.+)', content)
+        if tags_match:
+            tags_str = tags_match.group(1)
+            metadata["tags"] = [t.strip() for t in tags_str.split(",")]
+        
+        return metadata
+    
+    def _extract_title(self, content: str) -> Optional[str]:
+        """Extract title from markdown content (first H1)."""
+        match = re.search(r'^#\\s+(.+)$', content, re.MULTILINE)
+        return match.group(1).strip() if match else None
+    
+    def _extract_description(self, content: str) -> str:
+        """Extract description from content (first paragraph after title)."""
+        # Remove title
+        content_without_title = re.sub(r'^#\\s+.+$', '', content, count=1, flags=re.MULTILINE)
+        
+        # Find first substantial paragraph
+        paragraphs = content_without_title.strip().split('\\n\\n')
+        for para in paragraphs:
+            para = para.strip()
+            if para and len(para) > 20 and not para.startswith('#'):
+                return para[:200]  # Limit to 200 chars
+        
+        return "Imported skill"
+    
+    def _clean_file_name(self, file_name: str) -> str:
+        """Clean file name to use as skill name."""
+        # Remove extension
+        name = re.sub(r'\\.md$', '', file_name, flags=re.IGNORECASE)
+        # Replace underscores and hyphens with spaces
+        name = name.replace('_', ' ').replace('-', ' ')
+        # Capitalize words
+        return name.title()
+    
+    def _generate_import_id(self, name: str) -> str:
+        """Generate a unique ID for imported skill."""
+        import re
+        from datetime import datetime
+        
+        # Clean name
+        base_id = re.sub(r'[^a-zA-Z0-9\\s]', '', name.lower())
+        base_id = re.sub(r'\\s+', '_', base_id)
+        
+        # Add timestamp to ensure uniqueness
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        return f"{base_id}_{timestamp}"
+    
+    def _create_export_markdown(self, skill: Dict[str, Any]) -> str:
+        """Create a formatted markdown export of a skill."""
+        lines = [
+            f"# {skill['name']}",
+            "",
+            f"**Description:** {skill['description']}",
+            "",
+            f"**Category:** {skill.get('category', 'general')}",
+            f"**Tags:** {', '.join(skill.get('tags', []))}",
+            "---",
+            "",
+            skill['content']
+        ]
+        return "\\n".join(lines)

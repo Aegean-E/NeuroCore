@@ -10,6 +10,7 @@
     "configurable": true,
     "config": {
         "system_prompt": "You are NeuroCore, a helpful and intelligent AI assistant.",
-        "enabled_tools": []
+        "enabled_tools": [],
+        "enabled_skills": []
     }
 }

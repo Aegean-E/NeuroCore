@@ -1,0 +1,15 @@
+{
+  "example_python_skill": {
+    "name": "Python Best Practices",
+    "description": "Guidelines for writing clean, maintainable, and Pythonic code following PEP 8 and community standards",
+    "category": "coding",
+    "tags": [
+      "python",
+      "pep8",
+      "clean-code",
+      "guidelines"
+    ],
+    "created_at": "2025-01-01T00:00:00",
+    "updated_at": "2025-01-01T00:00:00"
+  }
+}
