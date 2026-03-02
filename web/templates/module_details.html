@@ -29,7 +29,121 @@
     
     <p class="text-slate-400 mb-8">{{ module.description }}</p>
 
-    {% if module.config and has_visible_config %}
+    {% if module.id == 'agent_loop' and module.enabled %}
+    <div class="bg-slate-900 rounded-xl border border-slate-800 p-6 mt-6">
+        <h3 class="font-semibold text-lg mb-4">Agent Loop Settings</h3>
+        <form hx-post="/modules/{{ module.id }}/config" 
+              hx-swap="none"
+              hx-on::after-request="const btn = this.querySelector('button[type=submit]'); const orig = btn.innerText; btn.innerText = 'Saved!'; btn.classList.remove('bg-blue-600', 'hover:bg-blue-500'); btn.classList.add('bg-emerald-600', 'hover:bg-emerald-500'); setTimeout(() => { btn.innerText = orig; btn.classList.add('bg-blue-600', 'hover:bg-blue-500'); btn.classList.remove('bg-emerald-600', 'hover:bg-emerald-500'); }, 2000);">
+            
+            <div class="space-y-6">
+                <div class="bg-slate-950/50 rounded-xl border border-slate-800 p-6">
+                    <h4 class="text-sm font-semibold text-slate-300 mb-4 uppercase tracking-wider">Loop Control</h4>
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <div>
+                            <label class="block text-sm font-medium text-slate-400 mb-2">Max Iterations</label>
+                            <input type="number" name="max_iterations" value="{{ module.config.max_iterations }}" min="1" max="100"
+                                   class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all">
+                            <p class="text-xs text-slate-500 mt-2">Maximum number of LLM ↔ Tool loops per run. Higher values allow more complex tasks but may take longer. Default: 10</p>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-slate-400 mb-2">Max Tokens</label>
+                            <input type="number" name="max_tokens" value="{{ module.config.max_tokens }}" min="100" max="16000" step="100"
+                                   class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all">
+                            <p class="text-xs text-slate-500 mt-2">Maximum tokens per LLM response. Limits response length. Default: 2048</p>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-slate-400 mb-2">Temperature</label>
+                            <input type="number" name="temperature" value="{{ module.config.temperature }}" step="0.1" min="0.0" max="2.0"
+                                   class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all">
+                            <p class="text-xs text-slate-500 mt-2">Controls creativity (0.0 to 2.0). Lower = focused, higher = creative. Default: 0.7</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="bg-slate-950/50 rounded-xl border border-slate-800 p-6">
+                    <h4 class="text-sm font-semibold text-slate-300 mb-4 uppercase tracking-wider">Retry & Timeout</h4>
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <div>
+                            <label class="block text-sm font-medium text-slate-400 mb-2">Max LLM Retries</label>
+                            <input type="number" name="max_llm_retries" value="{{ module.config.max_llm_retries }}" min="0" max="10"
+                                   class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all">
+                            <p class="text-xs text-slate-500 mt-2">Retries on LLM failure with exponential backoff. Default: 3</p>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-slate-400 mb-2">Retry Delay (seconds)</label>
+                            <input type="number" name="retry_delay" value="{{ module.config.retry_delay }}" step="0.5" min="0.5" max="10.0"
+                                   class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all">
+                            <p class="text-xs text-slate-500 mt-2">Base delay between retries. Doubles with each attempt. Default: 1.0</p>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-slate-400 mb-2">Timeout (seconds)</label>
+                            <input type="number" name="timeout" value="{{ module.config.timeout }}" min="0" max="600" step="10"
+                                   class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all">
+                            <p class="text-xs text-slate-500 mt-2">Total timeout for the entire agent loop. Set to 0 to disable. Default: 120</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="bg-slate-950/50 rounded-xl border border-slate-800 p-6">
+                    <h4 class="text-sm font-semibold text-slate-300 mb-4 uppercase tracking-wider">Context Inclusion</h4>
+                    <p class="text-xs text-slate-500 mb-4">Select which context sources to include in the agent's system prompt</p>
+                    <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+                        <label class="flex items-center space-x-3 cursor-pointer group">
+                            <input type="checkbox" name="include_plan_in_context" value="true" {% if module.config.include_plan_in_context %}checked{% endif %}
+                                   class="w-5 h-5 rounded border-slate-700 bg-slate-950 text-blue-600 focus:ring-blue-500 focus:ring-offset-slate-900">
+                            <span class="text-sm text-slate-300 group-hover:text-slate-200 transition-colors">Plan Context</span>
+                        </label>
+                        <label class="flex items-center space-x-3 cursor-pointer group">
+                            <input type="checkbox" name="include_memory_context" value="true" {% if module.config.include_memory_context %}checked{% endif %}
+                                   class="w-5 h-5 rounded border-slate-700 bg-slate-950 text-blue-600 focus:ring-blue-500 focus:ring-offset-slate-900">
+                            <span class="text-sm text-slate-300 group-hover:text-slate-200 transition-colors">Memory Context</span>
+                        </label>
+                        <label class="flex items-center space-x-3 cursor-pointer group">
+                            <input type="checkbox" name="include_knowledge_context" value="true" {% if module.config.include_knowledge_context %}checked{% endif %}
+                                   class="w-5 h-5 rounded border-slate-700 bg-slate-950 text-blue-600 focus:ring-blue-500 focus:ring-offset-slate-900">
+                            <span class="text-sm text-slate-300 group-hover:text-slate-200 transition-colors">Knowledge Context</span>
+                        </label>
+                        <label class="flex items-center space-x-3 cursor-pointer group">
+                            <input type="checkbox" name="include_reasoning_context" value="true" {% if module.config.include_reasoning_context %}checked{% endif %}
+                                   class="w-5 h-5 rounded border-slate-700 bg-slate-950 text-blue-600 focus:ring-blue-500 focus:ring-offset-slate-900">
+                            <span class="text-sm text-slate-300 group-hover:text-slate-200 transition-colors">Reasoning Context</span>
+                        </label>
+                    </div>
+                </div>
+
+                <div class="bg-slate-950/50 rounded-xl border border-slate-800 p-6">
+                    <h4 class="text-sm font-semibold text-slate-300 mb-4 uppercase tracking-wider">Tool Error Strategy</h4>
+                    <p class="text-xs text-slate-500 mb-4">How to handle errors when tool execution fails</p>
+                    <div class="flex flex-col sm:flex-row gap-4">
+                        <label class="flex items-center space-x-3 cursor-pointer group p-3 rounded-lg border border-slate-800 hover:border-slate-700 transition-colors {% if module.config.tool_error_strategy == 'continue' %}bg-blue-900/20 border-blue-500/30{% endif %}">
+                            <input type="radio" name="tool_error_strategy" value="continue" {% if module.config.tool_error_strategy == 'continue' %}checked{% endif %}
+                                   class="w-5 h-5 border-slate-700 bg-slate-950 text-blue-600 focus:ring-blue-500 focus:ring-offset-slate-900">
+                            <div>
+                                <span class="text-sm font-medium text-slate-300 group-hover:text-slate-200 transition-colors">Continue</span>
+                                <p class="text-xs text-slate-500">Skip failed tools and keep looping</p>
+                            </div>
+                        </label>
+                        <label class="flex items-center space-x-3 cursor-pointer group p-3 rounded-lg border border-slate-800 hover:border-slate-700 transition-colors {% if module.config.tool_error_strategy == 'stop' %}bg-blue-900/20 border-blue-500/30{% endif %}">
+                            <input type="radio" name="tool_error_strategy" value="stop" {% if module.config.tool_error_strategy == 'stop' %}checked{% endif %}
+                                   class="w-5 h-5 border-slate-700 bg-slate-950 text-blue-600 focus:ring-blue-500 focus:ring-offset-slate-900">
+                            <div>
+                                <span class="text-sm font-medium text-slate-300 group-hover:text-slate-200 transition-colors">Stop</span>
+                                <p class="text-xs text-slate-500">Abort the loop on first tool error</p>
+                            </div>
+                        </label>
+                    </div>
+                </div>
+            </div>
+
+            <div class="mt-6 flex justify-end">
+                <button type="submit" class="bg-blue-600 hover:bg-blue-500 text-white px-6 py-2 rounded-lg text-sm font-semibold transition-colors">Save Agent Loop Settings</button>
+            </div>
+        </form>
+    </div>
+    {% endif %}
+
+    {% if module.config and has_visible_config and module.id != 'agent_loop' %}
     <div class="bg-slate-900 rounded-xl border border-slate-800 p-6 mt-6">
         <h3 class="font-semibold text-lg mb-4">Configuration</h3>
         <form hx-post="/modules/{{ module.id }}/config" hx-swap="none"
@@ -43,6 +157,7 @@
     {% endif %}
 
     {% if module.id == 'llm_module' and module.enabled %}
+
     <div class="bg-slate-900 rounded-xl border border-slate-800 p-6 mt-6">
         <h3 class="font-semibold text-lg mb-4">Connection Settings</h3>
         <form hx-post="/settings/save" 
