@@ -14,12 +14,14 @@ def make_executor():
     return executor
 
 
-def make_input(messages=None, plan=None, current_step=0):
+def make_input(messages=None, plan=None, current_step=0, replan_count=0):
     """Create input data with optional plan."""
     data = {"messages": messages or [{"role": "user", "content": "Test"}]}
     if plan is not None:
         data["plan"] = plan
         data["current_step"] = current_step
+    if replan_count > 0:
+        data["replan_count"] = replan_count
     return data
 
 
@@ -52,6 +54,8 @@ async def test_replan_needed_on_max_iterations():
     assert result["replan_needed"] is True
     assert "Max iterations" in result["replan_reason"]
     assert "suggested_approach" in result
+    # Verify replan_count is incremented
+    assert result["replan_count"] == 1
 
 
 
@@ -81,6 +85,8 @@ async def test_replan_needed_on_tool_error():
     
     assert result["replan_needed"] is True
     assert "Tool execution errors" in result["replan_reason"]
+    # Verify replan_count is incremented
+    assert result["replan_count"] == 1
 
 
 @pytest.mark.asyncio
@@ -101,6 +107,8 @@ async def test_no_replan_when_successful():
     
     assert result["replan_needed"] is False
     assert result.get("replan_reason") is None
+    # Verify replan_count is preserved (not incremented)
+    assert result["replan_count"] == 0
 
 
 @pytest.mark.asyncio
@@ -202,6 +210,8 @@ async def test_replan_on_timeout():
     
     assert result["replan_needed"] is True
     assert "timed out" in result["replan_reason"].lower()
+    # Verify replan_count is incremented
+    assert result["replan_count"] == 1
 
 
 @pytest.mark.asyncio
@@ -219,6 +229,8 @@ async def test_replan_on_exception():
     
     assert result["replan_needed"] is True
     assert "Unexpected error" in result["replan_reason"]
+    # Verify replan_count is incremented
+    assert result["replan_count"] == 1
 
 
 
@@ -256,6 +268,118 @@ async def test_replan_preserves_input_data():
     assert result["plan"] == input_data["plan"]
     # Messages will be modified by agent loop (appended to), which is expected behavior
     assert len(result["messages"]) >= len(input_data["messages"])
+
+
+# ============ NEW TESTS FOR MAX_REPLAN_DEPTH ============
+
+@pytest.mark.asyncio
+async def test_max_replan_depth_enforced():
+    """Should hard-stop when replan_count >= max_replan_depth."""
+    executor = make_executor()
+    
+    # Set replan_count to max_replan_depth (default is 3)
+    input_data = make_input(replan_count=3)
+    
+    # Mock LLM - it shouldn't even be called due to hard-stop
+    executor.llm.chat_completion = AsyncMock(return_value={
+        "choices": [{"message": {"content": "Should not be called"}}]
+    })
+    
+    result = await executor.receive(input_data, config={"max_replan_depth": 3})
+    
+    # Should hard-stop with error
+    assert result["replan_needed"] is False
+    assert result["replan_depth_exceeded"] is True
+    assert "Max re-planning depth (3) exceeded" in result["agent_loop_error"]
+    assert "[Error: Task failed after 3 re-planning attempts" in result["content"]
+    assert result["iterations"] == 0
+
+
+@pytest.mark.asyncio
+async def test_replan_count_increments_each_failure():
+    """Should increment replan_count with each re-planning cycle."""
+    executor = make_executor()
+    
+    # Start with replan_count=1
+    plan = [{"step": 1, "action": "Task"}]
+    input_data = make_input(plan=plan, current_step=0, replan_count=1)
+    
+    # Force tool error
+    executor.llm.chat_completion = AsyncMock(return_value={
+        "choices": [{
+            "message": {
+                "content": "Using tool",
+                "tool_calls": [{"id": "1", "function": {"name": "TestTool", "arguments": "{}"}}]
+            }
+        }]
+    })
+    
+    with patch.object(executor, '_load_tool_library', return_value={
+        "TestTool": "result = 'Error: Tool failed'"
+    }):
+        result = await executor.receive(input_data, config={"max_replan_depth": 5})
+    
+    # replan_count should increment from 1 to 2
+    assert result["replan_count"] == 2
+    assert result["replan_needed"] is True
+
+
+@pytest.mark.asyncio
+async def test_replan_count_preserved_on_success():
+    """Should preserve replan_count when execution succeeds."""
+    executor = make_executor()
+    
+    # Start with replan_count=2 from previous attempts
+    plan = [{"step": 1, "action": "Task"}]
+    input_data = make_input(plan=plan, current_step=0, replan_count=2)
+    
+    # Successful execution (no tool calls)
+    executor.llm.chat_completion = AsyncMock(return_value={
+        "choices": [{"message": {"content": "Success!"}}]
+    })
+    
+    with patch.object(executor, '_load_tool_library', return_value={}):
+        result = await executor.receive(input_data, config={"max_replan_depth": 5})
+    
+    # replan_count should be preserved at 2
+    assert result["replan_count"] == 2
+    assert result["replan_needed"] is False
+
+
+@pytest.mark.asyncio
+async def test_custom_max_replan_depth():
+    """Should respect custom max_replan_depth configuration."""
+    executor = make_executor()
+    
+    # Set replan_count to custom max
+    input_data = make_input(replan_count=5)
+    
+    result = await executor.receive(input_data, config={"max_replan_depth": 5})
+    
+    # Should hard-stop at custom depth
+    assert result["replan_depth_exceeded"] is True
+    assert "Max re-planning depth (5) exceeded" in result["agent_loop_error"]
+
+
+@pytest.mark.asyncio
+async def test_replan_depth_zero_disables_check():
+    """Should allow unlimited re-planning when max_replan_depth=0."""
+    executor = make_executor()
+    
+    # High replan_count with max_replan_depth=0 should not trigger hard-stop
+    input_data = make_input(replan_count=100)
+    
+    # Successful execution
+    executor.llm.chat_completion = AsyncMock(return_value={
+        "choices": [{"message": {"content": "Success!"}}]
+    })
+    
+    with patch.object(executor, '_load_tool_library', return_value={}):
+        result = await executor.receive(input_data, config={"max_replan_depth": 0})
+    
+    # Should NOT hard-stop when max_replan_depth=0
+    assert result.get("replan_depth_exceeded") is not True
+    assert result["replan_needed"] is False
 
 
 

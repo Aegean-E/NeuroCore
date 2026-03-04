@@ -283,6 +283,8 @@ class AgentLoopExecutor:
                 "stop"     — abort the loop on the first tool error.
             - timeout (float, default 120):
                 Total timeout in seconds for the entire agent loop (0 = disabled).
+            - max_replan_depth (int, default 3):
+                Maximum number of re-planning cycles allowed before hard-stopping.
             - include_plan_in_context (bool, default True)
             - include_memory_context (bool, default True)
             - include_knowledge_context (bool, default True)
@@ -298,9 +300,15 @@ class AgentLoopExecutor:
             - replan_needed (bool):     True if execution failed and re-planning is recommended.
             - replan_reason (str):      Explanation of why re-planning is needed.
             - suggested_approach (str): Suggestion for how to re-plan.
+            - replan_count (int):        Current re-planning depth counter (increments each re-plan).
 
         Reflection-driven retry is handled externally by wiring:
             [Agent Loop] → [Reflection] → [Conditional Router (satisfied)] → [Agent Loop]
+        
+        Re-planning depth protection:
+            - Tracks replan_count across iterations
+            - Hard-stops when replan_count >= max_replan_depth
+            - Surfaces degraded result with error rather than infinite looping
         """
         if input_data is None:
             input_data = {}
@@ -315,6 +323,21 @@ class AgentLoopExecutor:
         retry_delay = float(config.get("retry_delay", 1.0))
         tool_error_strategy = str(config.get("tool_error_strategy", "continue"))
         timeout = float(config.get("timeout", 120))
+        max_replan_depth = int(config.get("max_replan_depth", 3))
+        
+        # --- Re-planning depth tracking ---
+        replan_count = int(input_data.get("replan_count", 0))
+        
+        # Check if we've exceeded max re-planning depth
+        if replan_count >= max_replan_depth:
+            result = input_data.copy()
+            result["replan_needed"] = False
+            result["replan_depth_exceeded"] = True
+            result["agent_loop_error"] = f"Max re-planning depth ({max_replan_depth}) exceeded. Unable to complete task."
+            result["content"] = f"[Error: Task failed after {replan_count} re-planning attempts. Unable to find viable execution path.]"
+            result["iterations"] = 0
+            result["agent_loop_trace"] = []
+            return result
 
         # Guard: no messages → return input unchanged
         messages = input_data.get("messages", [])
@@ -385,6 +408,9 @@ class AgentLoopExecutor:
             # Check if re-planning is needed
             if had_tool_error or iterations >= max_iterations:
                 result["replan_needed"] = True
+                # Increment replan count for depth tracking
+                result["replan_count"] = replan_count + 1
+                
                 if had_tool_error:
                     result["replan_reason"] = "Tool execution errors occurred during plan execution"
                 else:
@@ -404,6 +430,8 @@ class AgentLoopExecutor:
                     result["suggested_approach"] = "No plan exists. Consider creating a step-by-step plan."
             else:
                 result["replan_needed"] = False
+                # Preserve replan count for tracking across successful executions
+                result["replan_count"] = replan_count
 
             return result
 
@@ -423,6 +451,7 @@ class AgentLoopExecutor:
             # Re-planning needed due to timeout
             plan = input_data.get("plan", [])
             result["replan_needed"] = True
+            result["replan_count"] = replan_count + 1
             result["replan_reason"] = f"Execution timed out after {timeout} seconds"
             if plan and len(plan) > 1:
                 result["suggested_approach"] = (
@@ -443,6 +472,7 @@ class AgentLoopExecutor:
             # Re-planning needed due to error
             plan = input_data.get("plan", [])
             result["replan_needed"] = True
+            result["replan_count"] = replan_count + 1
             result["replan_reason"] = f"Unexpected error: {str(e)}"
             result["suggested_approach"] = "Review plan and try alternative approach."
             

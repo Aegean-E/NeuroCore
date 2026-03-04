@@ -20,8 +20,17 @@ from contextlib import contextmanager
 import json
 from multiprocessing import Process, Queue
 import logging
+import tracemalloc
 
 logger = logging.getLogger(__name__)
+
+# Memory limit enforcement - platform specific
+try:
+    import resource
+    HAS_RESOURCE_MODULE = True
+except ImportError:
+    HAS_RESOURCE_MODULE = False
+
 
 
 
@@ -250,20 +259,45 @@ class SafeHttpxClient:
 def _execute_in_process(code: str, local_vars: Dict[str, Any], result_queue: Queue, 
                         allowed_file_dirs: List[str], read_only_files: bool,
                         allowed_domains: Optional[Set[str]], timeout: float,
-                        max_output_size: int):
+                        max_output_size: int, max_memory_mb: int):
     """Execute code in a separate process with restricted environment."""
     try:
+        # Enforce memory limit using resource module (Unix only)
+        if HAS_RESOURCE_MODULE and max_memory_mb > 0:
+            max_bytes = max_memory_mb * 1024 * 1024
+            try:
+                resource.setrlimit(resource.RLIMIT_AS, (max_bytes, max_bytes))
+            except (ValueError, OSError) as e:
+                logger.warning(f"Failed to set memory limit: {e}")
+        
+        # Start tracemalloc for memory monitoring (cross-platform)
+        if max_memory_mb > 0:
+            tracemalloc.start()
+        
         # Rebuild sandbox environment in child process
         sandbox = ToolSandbox(
             timeout=timeout,
             allowed_file_dirs=allowed_file_dirs,
             allowed_domains=allowed_domains,
             read_only_files=read_only_files,
-            max_output_size=max_output_size
+            max_output_size=max_output_size,
+            max_memory_mb=max_memory_mb
         )
 
         result = sandbox._execute_internal(code, local_vars)
+        
+        # Check memory usage after execution
+        if max_memory_mb > 0:
+            current, peak = tracemalloc.get_traced_memory()
+            tracemalloc.stop()
+            peak_mb = peak / (1024 * 1024)
+            if peak_mb > max_memory_mb:
+                raise ResourceLimitError(
+                    f"Memory limit exceeded: {peak_mb:.1f}MB used, limit was {max_memory_mb}MB"
+                )
+        
         result_queue.put({'success': True, 'result': result.get('result')})
+
     except SecurityError as e:
         result_queue.put({'success': False, 'error_type': 'SecurityError', 'error_msg': str(e)})
     except ResourceLimitError as e:
@@ -289,15 +323,18 @@ class ToolSandbox:
                  max_output_size: Optional[int] = None,
                  allowed_file_dirs: Optional[List[str]] = None,
                  allowed_domains: Optional[Set[str]] = None,
-                 read_only_files: bool = True):
+                 read_only_files: bool = True,
+                 max_memory_mb: Optional[int] = None):
         self.timeout = timeout or self.DEFAULT_TIMEOUT
         self.max_output_size = max_output_size or self.DEFAULT_MAX_OUTPUT_SIZE
+        self.max_memory_mb = max_memory_mb or self.DEFAULT_MAX_MEMORY_MB
         self.allowed_file_dirs = allowed_file_dirs or []
         self.allowed_domains = allowed_domains
         self.read_only_files = read_only_files
         
         # Build restricted globals
         self._globals = self._build_restricted_globals()
+
 
     
     def _build_restricted_globals(self) -> Dict[str, Any]:
@@ -430,8 +467,9 @@ class ToolSandbox:
             args=(code, local_vars or {}, result_queue, 
                   self.allowed_file_dirs, self.read_only_files,
                   self.allowed_domains, self.timeout,
-                  self.max_output_size)
+                  self.max_output_size, self.max_memory_mb)
         )
+
 
         p.start()
         p.join(timeout=self.timeout)
