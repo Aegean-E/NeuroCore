@@ -30,9 +30,7 @@
   <img src="https://img.shields.io/badge/🔌_Hot--Swap_Modules-gray?style=flat&color=red" alt="Hot-Swap">
   <img src="https://img.shields.io/badge/📊_DAG_Execution-gray?style=flat&color=teal" alt="DAG">
   <img src="https://img.shields.io/badge/🔍_Hybrid_Search-gray?style=flat&color=darkgreen" alt="Hybrid Search">
-  <img src="https://img.shields.io/badge/🔒_Secure_Sandbox-gray?style=flat&color=gold" alt="Secure Sandbox">
 </p>
-
 
 ---
 
@@ -67,64 +65,19 @@ Built on the principles of **Speed**, **Simplicity**, and **Modularity**, NeuroC
 
 - **🔍 Hybrid Search** — Combines FAISS vector search + SQLite FTS5 keyword search with Reciprocal Rank Fusion (RRF) for best-in-class document retrieval.
 
-- **🔒 Secure Tool Sandbox** — All custom Python tools execute in a restricted environment with blocked dangerous imports, network whitelisting, resource limits, and SSRF protection.
-
-
 ---
 
 ## 🏗️ Architecture
 
-NeuroCore is organized into **4 clean, decoupled layers** that work together to deliver a seamless AI experience:
-
-### System Overview
-
-At its heart, NeuroCore is a **flow-based execution engine** that treats AI workflows as directed graphs. Each node represents a discrete operation—whether that's calling an LLM, querying a database, or executing custom code. The engine orchestrates these nodes in the correct order, handling data flow, error recovery, and parallel execution automatically.
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                     User Interaction Layer                       │
-│  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────────┐ │
-│  │   Chat UI   │  │  Telegram   │  │    Visual Flow Editor     │ │
-│  │  (Browser)  │  │    Bot      │  │      (Canvas-based)       │ │
-│  └──────┬──────┘  └──────┬──────┘  └───────────┬───────────────┘ │
-└─────────┼────────────────┼─────────────────────┼────────────────┘
-          │                │                     │
-          └────────────────┴─────────────────────┘
-                            │
-                            ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                     Flow Execution Engine                       │
-│                                                                 │
-│   ┌──────────────┐    ┌──────────────┐    ┌──────────────┐      │
-│   │  FlowRunner  │───▶│  DAG Builder │───▶│  Kahn's Sort │      │
-│   │  (Orchestrator)   │  (Topology)  │    │  (Ordering)  │      │
-│   └──────────────┘    └──────────────┘    └──────────────┘      │
-│          │                                                      │
-│          ▼                                                      │
-│   ┌──────────────┐    ┌──────────────┐    ┌──────────────┐      │
-│   │ Node Executor│◀──▶│ Bridge Groups│◀──▶│ Conditional  │      │
-│   │  (Async)     │    │  (Parallel)  │    │   Routing    │      │
-│   └──────────────┘    └──────────────┘    └──────────────┘      │
-│                                                                 │
-└─────────────────────────────────────────────────────────────────┘
-                            │
-          ┌─────────────────┼─────────────────┐
-          │                 │                 │
-          ▼                 ▼                 ▼
-┌──────────────┐  ┌──────────────┐  ┌──────────────┐
-│   Memory     │  │  Knowledge   │  │    Tools     │
-│   System     │  │    Base      │  │   Library    │
-│  (FAISS+SQL) │  │   (RAG)      │  │  (Sandboxed) │
-└──────────────┘  └──────────────┘  └──────────────┘
-
+NeuroCore is organized into **4 clean, decoupled layers**:
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
-│           🌐 Web Layer                                       │
-│   HTMX + Jinja2 (40+ templates) + TailwindCSS                │
+│           🌐 Web Layer                                        │
+│   HTMX + Jinja2 (40+ templates) + TailwindCSS               │
 │   Zero heavy JS frameworks — server-driven UI updates        │
 ├──────────────────────────────────────────────────────────────┤
-│           ⚙️  Core Layer                                     │
+│           ⚙️  Core Layer                                      │
 │   main.py          → FastAPI app + lifespan manager          │
 │   core/routers.py  → All HTTP routes (30+ endpoints)         │
 │   core/flow_runner.py  → DAG execution engine (Kahn's algo)  │
@@ -134,14 +87,14 @@ At its heart, NeuroCore is a **flow-based execution engine** that treats AI work
 │   core/settings.py → Thread-safe settings manager            │
 │   core/debug.py    → Structured debug logging system         │
 ├──────────────────────────────────────────────────────────────┤
-│           🔌 Module Layer                                    │
+│           🔌 Module Layer                                     │
 │   modules/<name>/                                            │
 │     module.json  → Metadata, config, enabled flag, nodes     │
 │     node.py      → Executor classes + dispatcher             │
 │     router.py    → FastAPI router (optional)                 │
 │     __init__.py  → Exports router for hot-loading            │
 ├──────────────────────────────────────────────────────────────┤
-│           💾 Data Layer                                      │
+│           💾 Data Layer                                       │
 │   data/memory.sqlite3 + memory.faiss  → Long-term memory     │
 │   data/knowledge_base.sqlite3 + .faiss→ RAG documents        │
 │   settings.json    → Runtime configuration                   │
@@ -289,8 +242,8 @@ Manage time-sensitive tasks and events.
 - **Event Watcher** — Flow node that checks for upcoming events
 - **Scheduled Execution** — Trigger actions at specific times
 
-### 🛠️ Tools Library with Secure Sandbox
-Define and manage custom Python functions that the LLM can execute—**safely**.
+### 🛠️ Tools Library
+Define and manage custom Python functions that the LLM can execute.
 
 <p align="center">
   <img src="screenshots/tools_library.png" alt="Tool Library Editor" width="100%" style="border-radius: 8px; border: 1px solid #334155;">
@@ -303,44 +256,6 @@ Define and manage custom Python functions that the LLM can execute—**safely**.
 - **Import/Export** — Share tools as JSON or Python files
 - **Per-Node Control** — `allowed_tools` config restricts which tools each dispatcher can use
 - **Rate Limiting** — `max_tools_per_turn` (default: 5) prevents runaway tool loops
-- **🔒 Secure Sandbox** — All tools execute in a restricted environment (see Security section)
-
-#### Security Sandbox Architecture
-
-Every tool executes in an isolated sandbox with multiple defense layers:
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                    Tool Execution Flow                      │
-│                                                             │
-│  Tool Code → Static Analysis → Restricted Globals → Exec    │
-│                  │                    │                     │
-│                  ▼                    ▼                     │
-│         ┌────────────────┐    ┌────────────────┐            │
-│         │  Blocked:      │    │  Allowed:      │            │
-│         │  • import os   │    │  • import math │            │
-│         │  • eval()      │    │  • import json │            │
-│         │  • exec()      │    │  • Safe HTTP   │            │
-│         │  • __import__  │    │  • File access │            │
-│         └────────────────┘    │   (restricted) │           │
-│                               └────────────────┘            │
-│                                                             │
-│  Security Features:                                         │
-│  • Domain whitelisting for HTTP requests                    │
-│  • SSRF protection (blocks 127.0.0.1, 10.x.x.x, etc.)       │
-│  • Resource limits (timeout, memory, output size)           │
-│  • Path traversal prevention                                │
-│  • Dangerous builtin blocking                               │
-└─────────────────────────────────────────────────────────────┘
-```
-
-**Security Features:**
-- **Restricted Imports** — Blocks `os`, `sys`, `subprocess`, `socket`, and 20+ dangerous modules
-- **Safe HTTP Client** — Domain whitelisting with SSRF protection for internal IPs
-- **File Access Control** — Optional read-only mode with directory restrictions
-- **Resource Limits** — Configurable timeout (default 30s), max output size (100KB)
-- **Static Analysis** — Pre-execution code scanning for dangerous patterns
-
 
 #### Built-in Tools (16 Total)
 
@@ -441,50 +356,18 @@ async def send(self, processed_data: dict) -> dict:
 
 ### Key Engine Mechanisms
 
-| Mechanism | Implementation | Purpose |
-|-----------|---------------|---------|
-| **Topological Sort** | Kahn's algorithm | Deterministic execution ordering based on dependencies |
-| **Cycle Detection** | Heuristic break | Detects cycles and picks lowest in-degree node to continue |
-| **Bridge Nodes** | BFS component grouping | Implicit parallel connections for synchronized execution |
-| **Conditional Routing** | `_route_targets` key | Dynamic branching based on runtime conditions |
-| **Context Propagation** | `messages` key preservation | Maintains conversation history across all nodes |
-| **Loop Guard** | `max_node_loops` counter | Prevents infinite loops (default: 1,000 iterations) |
-| **Executor Cache** | Class-level `_executor_cache` | Avoids re-importing modules on every execution |
-| **Dynamic Import** | `importlib` + `reload()` | Hot code updates without server restart |
-| **Background Tasks** | `asyncio.create_task()` | Non-blocking operations (memory save, consolidation) |
-| **Auto-Start** | Lifespan event handler | Repeater nodes start automatically on app launch |
-| **Bridge Execution** | Upstream-to-downstream ordering | Ensures bridged nodes execute in correct sequence |
-
-### Bridge Nodes: Advanced Parallel Execution
-
-Bridge nodes are a unique NeuroCore feature that enables **implicit parallel execution** with synchronized data sharing:
-
-```
-┌─────────┐      ┌─────────┐      ┌─────────┐
-│ Node A  │◀────▶│ Node B  │◀────▶│ Node C  │
-│(Input)  │bridge│(Process)│bridge│(Output) │
-└─────────┘      └─────────┘      └─────────┘
-      │                │                │
-      └────────────────┴────────────────┘
-              Bridge Group
-              
-All nodes in a bridge group:
-• Execute in upstream-to-downstream order
-• Share data via bridge_input merging
-• Enable parallel processing patterns
-```
-
-**How Bridges Work:**
-1. **Bridge Groups** — BFS identifies connected components of bridged nodes
-2. **Execution Order** — Nodes execute in topological order within the group
-3. **Data Merging** — Each node receives merged output from all upstream bridged nodes
-4. **Synchronization** — Ensures all bridged nodes complete before downstream nodes execute
-
-**Use Cases:**
-- **Multi-Input Processing** — Combine outputs from multiple LLM calls
-- **Parallel Tool Execution** — Run independent tools simultaneously
-- **Data Aggregation** — Merge results from different sources before final output
-
+| Mechanism | Implementation |
+|-----------|---------------|
+| **Topological Sort** | Kahn's algorithm for deterministic execution ordering |
+| **Cycle Detection** | Heuristic break — picks lowest in-degree node to continue |
+| **Bridge Nodes** | Implicit parallel connections (BFS component grouping) |
+| **Conditional Routing** | `_route_targets` key in output dict for branching |
+| **Context Propagation** | `messages` key auto-preserved across all nodes |
+| **Loop Guard** | `max_node_loops` setting (default: 1,000) |
+| **Executor Cache** | Class-level cache avoids re-importing modules per execution |
+| **Dynamic Import** | `importlib.import_module()` + `reload()` for hot code updates |
+| **Background Tasks** | `asyncio.create_task()` tracked in `app.state.background_tasks` |
+| **Auto-Start** | Repeater nodes with incoming connections start automatically on app launch |
 
 ### Typical Flow Execution
 
@@ -506,134 +389,65 @@ Chat Input  ──►  Memory Recall  ──►  System Prompt  ──►  LLM C
 
 ## 🧩 Available AI Flow Nodes
 
-NeuroCore provides **25+ built-in nodes** organized by function. Each node follows the `receive()` → `send()` contract for input processing and output generation.
-
 ### Input Nodes
-| Node | Description | Output |
-|------|-------------|--------|
-| **Chat Input** | Receives user messages from the chat interface | `{"messages": [...]}` |
-| **Telegram Input** | Receives messages from Telegram bot | `{"messages": [...]}` |
+| Node | Description |
+|------|-------------|
+| **Chat Input** | Receives user messages from the chat interface |
+| **Telegram Input** | Receives messages from Telegram |
 
 ### Processing Nodes
-| Node | Description | Key Features |
-|------|-------------|--------------|
-| **LLM Core** | Calls the configured LLM with messages | Streaming support, tool calling, vision |
-| **System Prompt** | Injects system prompts and enables tools | Merges `_memory_context`, `_kb_context` |
-| **Memory Save** | Saves content to long-term memory | Async background processing, arbiter filtering |
-| **Memory Recall** | Retrieves relevant memories semantically | FAISS vector search, score thresholding |
-| **Knowledge Query** | Queries the knowledge base for context | Hybrid search (vector + keyword) |
-| **Check Goal** | Injects current goal into context | Priority-based goal selection |
-| **Reasoning Load** | Loads reasoning history into context | Temporal reasoning injection |
+| Node | Description |
+|------|-------------|
+| **LLM Core** | Calls the configured LLM with messages |
+| **System Prompt** | Injects system prompts and enables tools |
+| **Memory Save** | Saves content to long-term memory |
+| **Memory Recall** | Retrieves relevant memories semantically |
+| **Knowledge Query** | Queries the knowledge base for context |
+| **Check Goal** | Injects current goal into context |
+| **Reasoning Load** | Loads reasoning history into context |
 
 ### Output Nodes
-| Node | Description | Use Case |
-|------|-------------|----------|
-| **Chat Output** | Sends responses to the chat interface | Standard chat responses |
-| **Telegram Output** | Sends responses to Telegram | Remote bot interactions |
-| **Tool Dispatcher** | Executes tools requested by the LLM | Function calling, sandboxed execution |
+| Node | Description |
+|------|-------------|
+| **Chat Output** | Sends responses to the chat interface |
+| **Telegram Output** | Sends responses to Telegram |
+| **Tool Dispatcher** | Executes tools requested by the LLM |
 
-### Logic & Control Nodes
-| Node | Description | Configuration |
-|------|-------------|---------------|
-| **Trigger** | Pass-through node for manual triggering | Used with "Run Node" button |
-| **Delay** | Pauses execution for specified seconds | `seconds` parameter |
-| **Python Script** | Executes custom Python code | `code` parameter with sandbox |
-| **Repeater** | Re-triggers flow after delay | `delay_seconds`, `max_repeats` (0=infinite) |
-| **Conditional Router** | Routes based on field existence | Checks for `_route_targets` key |
-| **Scheduled Start** | Waits until specific date/time | ISO 8601 datetime string |
+### Logic Nodes
+| Node | Description |
+|------|-------------|
+| **Trigger** | Pass-through node for manual triggering |
+| **Delay** | Pauses execution for specified seconds |
+| **Python Script** | Executes custom Python code |
+| **Repeater** | Re-triggers flow after delay (supports loops) |
+| **Conditional Router** | Routes based on field existence |
+| **Scheduled Start** | Waits until specific date/time |
 
 ### Utility Nodes
-| Node | Description | Visual |
-|------|-------------|--------|
-| **Annotation** | Adds comments to document flow logic | Yellow note-style node |
-| **Bridge** | Connects nodes for parallel execution | Visual bridge indicator |
-
-### Node Execution Contract
-
-Every node implements this async interface:
-
-```python
-class NodeExecutor:
-    async def receive(self, input_data: dict, config: dict = None) -> dict | None:
-        """
-        Process input data.
-        
-        Args:
-            input_data: Data from upstream nodes (merged if multiple)
-            config: Node-specific configuration from flow editor
-        
-        Returns:
-            dict: Output data passed to downstream nodes
-            None: STOP this branch (conditional logic)
-        """
-        # Process input...
-        return {"key": "value"}  # or None to stop branch
-    
-    async def send(self, processed_data: dict) -> dict:
-        """
-        Finalize output before passing to next nodes.
-        
-        Args:
-            processed_data: Data from receive() method
-        
-        Returns:
-            dict: Final output for downstream consumption
-        """
-        return processed_data
-```
-
-### Special Keys & Conventions
-
-| Key | Purpose | Set By | Read By |
-|-----|---------|--------|---------|
-| `messages` | Conversation history | Chat Input | LLM Core, System Prompt |
-| `_memory_context` | Retrieved memories | Memory Recall | System Prompt |
-| `_kb_context` | Knowledge base results | Knowledge Query | System Prompt |
-| `_route_targets` | Conditional routing | Any node | FlowRunner |
-| `tool_calls` | LLM tool requests | LLM Core | Tool Dispatcher |
-| `tool_results` | Tool execution results | Tool Dispatcher | LLM Core |
-| `requires_continuation` | Multi-turn tool loops | Tool Dispatcher | Conditional Router |
-
+| Node | Description |
+|------|-------------|
+| **Annotation** | Adds comments to document flow logic |
 
 ---
 
 ## 🛠️ Tech Stack
 
-| Layer | Technology | Purpose |
-|-------|-----------|---------|
-| **Backend** | Python 3.12+, FastAPI, Uvicorn, HTTPX | High-performance async API server |
-| **Frontend** | HTMX, TailwindCSS, Vanilla JavaScript | Lightweight, server-driven UI |
-| **Templating** | Jinja2 (40+ templates) | Server-side HTML generation |
-| **Vector Database** | FAISS (`faiss-cpu`) — `IndexIDMap(IndexFlatIP)` | Efficient similarity search |
-| **Relational Database** | SQLite (WAL mode, FTS5 full-text search) | Persistence + text search |
-| **LLM Integration** | OpenAI-compatible API | Universal LLM support |
-| **Testing** | pytest, pytest-asyncio, pytest-httpx, pytest-cov | Comprehensive test coverage |
-| **Deployment** | Docker + docker-compose | Containerized deployment |
-
-### Why These Technologies?
-
-**FastAPI + HTMX = Hypermedia-Driven Architecture**
-- No heavy JavaScript frameworks needed
-- Server renders HTML, HTMX swaps DOM fragments
-- Simpler mental model: backend owns state, frontend displays it
-- Perfect for AI applications where backend processing dominates
-
-**FAISS + SQLite = Best of Both Worlds**
-- FAISS provides state-of-the-art vector similarity search
-- SQLite offers ACID compliance and full-text search
-- Combined: hybrid search with RRF ranking
-
-**Async-First Design**
-- All I/O operations are non-blocking
-- Multiple flows can execute concurrently
-- Background tasks (memory consolidation) don't block requests
+| Layer | Technology |
+|-------|-----------|
+| **Backend** | Python 3.12+, FastAPI, Uvicorn, HTTPX |
+| **Frontend** | HTMX, TailwindCSS, Vanilla JavaScript |
+| **Templating** | Jinja2 (40+ templates) |
+| **Vector Database** | FAISS (`faiss-cpu`) — `IndexIDMap(IndexFlatIP)` |
+| **Relational Database** | SQLite (WAL mode, FTS5 full-text search) |
+| **LLM Integration** | OpenAI-compatible API (Ollama, LM Studio, LocalAI, OpenAI) |
+| **Testing** | pytest, pytest-asyncio, pytest-httpx, pytest-cov |
+| **Deployment** | Docker + docker-compose |
 
 ### Runtime Dependencies
 
 ```
 fastapi  •  uvicorn  •  httpx  •  jinja2  •  numpy  •  faiss-cpu  •  python-multipart
 ```
-
 
 ---
 
@@ -773,7 +587,7 @@ NeuroCore exposes a comprehensive REST API:
 
 ## 🧪 Testing
 
-Comprehensive test suite with **50+ test files** and **500+ individual tests** covering all layers:
+Comprehensive test suite with **50+ test files** covering all layers:
 
 ```bash
 # Run all tests
@@ -781,52 +595,21 @@ python tests/run_tests.py
 
 # Run with coverage
 python tests/run_tests.py --coverage
-
-# Run specific test file
-pytest tests/test_tool_sandbox.py -v
-
-# Run with markers
-pytest -m "not slow"  # Skip slow integration tests
 ```
-
-### Test Philosophy
-
-NeuroCore follows **test-driven development** principles:
-- **Unit Tests** — Test individual functions and classes in isolation
-- **Integration Tests** — Test module interactions and data flow
-- **End-to-End Tests** — Test complete user workflows via HTTP requests
 
 ### Coverage Areas
 
-| Area | Test Files | Test Count |
-|------|-----------|------------|
-| **Core Engine** | `test_flow_runner.py`, `test_flow_manager.py`, `test_flow_integration.py`, `test_flow_validation.py` | 40+ |
-| **Module System** | `test_module_manager.py`, `test_dependencies.py` | 20+ |
-| **Memory** | `test_memory_nodes.py`, `test_memory_arbiter.py`, `test_memory_consolidation.py`, `test_memory_router.py`, `test_memory_browser.py` | 50+ |
-| **Knowledge Base** | `test_knowledge_base.py`, `test_knowledge_base_improvements.py` | 30+ |
-| **Chat** | `test_chat_module.py`, `test_chat_sessions.py`, `test_chat_features.py`, `test_chat_router_flow.py` | 40+ |
-| **Tools** | `test_tools_library.py`, `test_tools_node.py`, `test_tool_sandbox.py` | 90+ |
-| **LLM** | `test_core_llm.py`, `test_llm_node.py` | 25+ |
-| **Security** | `test_tool_sandbox.py` | 24 |
-| **Robustness** | `test_core_concurrency.py`, `test_core_robustness.py`, `test_core_improvements.py` | 30+ |
-| **Integrations** | `test_telegram_module.py`, `test_calendar.py`, `test_reasoning_book.py` | 35+ |
-
-### Security Testing
-
-The tool sandbox includes **24 dedicated security tests**:
-
-```python
-# Example: Testing that dangerous imports are blocked
-def test_blocks_dangerous_modules():
-    with pytest.raises(SecurityError):
-        execute_sandboxed("import os; result = os.getcwd()", {})
-
-# Example: Testing SSRF protection
-def test_blocks_internal_ips():
-    client = SafeHttpxClient()
-    assert client._is_ip_blocked('127.0.0.1') == True
-```
-
+| Area | Test Files |
+|------|-----------|
+| **Core Engine** | `test_flow_runner.py`, `test_flow_manager.py`, `test_flow_integration.py`, `test_flow_validation.py` |
+| **Module System** | `test_module_manager.py`, `test_dependencies.py` |
+| **Memory** | `test_memory_nodes.py`, `test_memory_arbiter.py`, `test_memory_consolidation.py`, `test_memory_router.py`, `test_memory_browser.py` |
+| **Knowledge Base** | `test_knowledge_base.py`, `test_knowledge_base_improvements.py` |
+| **Chat** | `test_chat_module.py`, `test_chat_sessions.py`, `test_chat_features.py`, `test_chat_router_flow.py` |
+| **Tools** | `test_tools_library.py` |
+| **LLM** | `test_core_llm.py`, `test_llm_node.py` |
+| **Robustness** | `test_core_concurrency.py`, `test_core_robustness.py`, `test_core_improvements.py` |
+| **Integrations** | `test_telegram_module.py`, `test_calendar.py`, `test_reasoning_book.py` |
 
 ---
 
@@ -834,38 +617,9 @@ def test_blocks_internal_ips():
 
 We welcome contributions! Please see our [Module Development Guide](modules/MODULE_GUIDE.md) for creating custom modules and the [Tool Guide](modules/TOOL_GUIDE.md) for adding new tools.
 
-### Development Setup
-
-```bash
-# Install dev dependencies
-pip install -e ".[dev]"
-
-# Run pre-commit hooks (if contributing)
-pre-commit install
-
-# Run tests before submitting PR
-pytest tests/ -x  # Stop on first failure
-```
-
-### Contribution Ideas
-
-- **New Modules** — Add integrations for Discord, Slack, email, etc.
-- **New Tools** — Create tools for specific domains (finance, science, etc.)
-- **UI Improvements** — Enhance the flow editor with new features
-- **Documentation** — Improve guides and add examples
-- **Security** — Help audit and improve the sandbox system
-
 ## 📄 License
 
 NeuroCore is licensed under the [Apache 2.0 License](LICENSE).
-
-## 🙏 Acknowledgments
-
-- **FAISS** — Facebook AI Similarity Search library
-- **FastAPI** — Modern, fast web framework
-- **HTMX** — HTML over the wire movement
-- **Ollama/LM Studio/LocalAI** — Making local LLMs accessible
-
 
 ---
 
