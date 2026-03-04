@@ -172,3 +172,99 @@ async def test_get_executor_class_unknown():
     """get_executor_class with unknown id should return None."""
     cls = await get_executor_class("unknown")
     assert cls is None
+
+
+# ============ NEW TESTS FOR MAX_TOKENS CALCULATION ============
+
+@pytest.mark.asyncio
+async def test_max_tokens_calculated_dynamically():
+    """max_tokens should be calculated based on max_steps."""
+    executor = make_executor()
+    
+    # Capture the actual call to chat_completion
+    call_args = {}
+    async def capture_call(*args, **kwargs):
+        call_args.update(kwargs)
+        return make_llm_response("[]")
+    
+    executor.llm.chat_completion = AsyncMock(side_effect=capture_call)
+
+    # Test with max_steps=5
+    await executor.receive(make_input("Test"), config={"max_steps": 5})
+    
+    # Expected: base_tokens(200) + tokens_per_step(50) * max_steps(5) = 450
+    # But min_tokens is 500, so should be 500
+    assert call_args["max_tokens"] == 500
+
+    # Test with max_steps=20
+    call_args.clear()
+    await executor.receive(make_input("Test"), config={"max_steps": 20})
+    
+    # Expected: 200 + 50*20 = 1200
+    assert call_args["max_tokens"] == 1200
+
+
+@pytest.mark.asyncio
+async def test_max_tokens_minimum_enforced():
+    """max_tokens should never go below minimum (500)."""
+    executor = make_executor()
+    
+    call_args = {}
+    async def capture_call(*args, **kwargs):
+        call_args.update(kwargs)
+        return make_llm_response("[]")
+    
+    executor.llm.chat_completion = AsyncMock(side_effect=capture_call)
+
+    # Test with max_steps=1 (very small plan)
+    await executor.receive(make_input("Test"), config={"max_steps": 1})
+    
+    # Expected: 200 + 50*1 = 250, but min is 500
+    assert call_args["max_tokens"] == 500
+
+
+# ============ NEW TESTS FOR PLAN_CONTEXT CURRENT STEP ============
+
+@pytest.mark.asyncio
+async def test_plan_context_shows_current_step():
+    """plan_context should indicate which step is current."""
+    executor = make_executor()
+    plan_json = '[{"step": 1, "action": "First", "target": "A"}, {"step": 2, "action": "Second", "target": "B"}]'
+    executor.llm.chat_completion = AsyncMock(return_value=make_llm_response(plan_json))
+
+    result = await executor.receive(make_input("Do two things"))
+
+    assert "Currently on step 1 of 2" in result["plan_context"]
+    assert "→ 1. First: A (CURRENT)" in result["plan_context"]
+    assert "  2. Second: B" in result["plan_context"]
+
+
+@pytest.mark.asyncio
+async def test_plan_context_with_depends_on():
+    """plan_context should preserve depends_on field in plan."""
+    executor = make_executor()
+    plan_json = '[{"step": 1, "action": "Prepare"}, {"step": 2, "action": "Execute", "depends_on": 1}]'
+    executor.llm.chat_completion = AsyncMock(return_value=make_llm_response(plan_json))
+
+    result = await executor.receive(make_input("Do something"))
+
+    assert result["plan_needed"] is True
+    assert len(result["plan"]) == 2
+    assert result["plan"][1]["depends_on"] == 1
+
+
+@pytest.mark.asyncio
+async def test_plan_context_empty_plan():
+    """plan_context should not be set for empty plans."""
+    executor = make_executor()
+    executor.llm.chat_completion = AsyncMock(return_value=make_llm_response("[]"))
+
+    result = await executor.receive(make_input("Simple question"))
+
+    assert result["plan_needed"] is False
+    assert "plan_context" not in result or result["plan_context"] is None
+
+
+if __name__ == "__main__":
+    import pytest
+    pytest.main([__file__, "-v"])
