@@ -11,14 +11,12 @@ import numpy as np
 from datetime import datetime
 import concurrent.futures
 
-logger = logging.getLogger(__name__)
-
 try:
     import faiss
     FAISS_AVAILABLE = True
 except ImportError:
     FAISS_AVAILABLE = False
-    logger.warning("FAISS not installed. Vector search will fall back to linear scan (slow).")
+    print("Warning: FAISS not installed. Vector search will fall back to linear scan (slow).")
 
 class MemoryStore:
     """
@@ -140,11 +138,7 @@ class MemoryStore:
             if isinstance(blob, bytes):
                 return np.frombuffer(blob, dtype='float32')
             return np.array(json.loads(blob), dtype='float32')
-        except (json.JSONDecodeError, ValueError, TypeError) as e:
-            # JSONDecodeError: Corrupted JSON embedding data
-            # ValueError: Invalid numeric values in embedding
-            # TypeError: Unexpected type in embedding data
-            logger.warning(f"Failed to parse embedding: {e}")
+        except Exception as e:
             return None
 
     def _save_faiss_index(self, force=False):
@@ -158,10 +152,8 @@ class MemoryStore:
             index_path = self.db_path.replace(".sqlite3", ".faiss")
             faiss.write_index(self.faiss_index, index_path)
             self.unsaved_changes = 0
-        except (OSError, ValueError) as e:
-            # OSError: File write permissions or I/O issues
-            # ValueError: Invalid FAISS index state
-            logger.error(f"Failed to save FAISS index: {e}")
+        except Exception as e:
+            print(f"Failed to save FAISS index: {e}")
 
     def _load_faiss_index(self) -> bool:
         if not FAISS_AVAILABLE: return False
@@ -170,10 +162,7 @@ class MemoryStore:
             try:
                 self.faiss_index = faiss.read_index(index_path)
                 return True
-            except (OSError, ValueError) as e:
-                # OSError: File read permissions or I/O issues
-                # ValueError: Corrupted FAISS index
-                logger.warning(f"Failed to load FAISS index: {e}")
+            except Exception:
                 return False
         return False
 
@@ -184,7 +173,7 @@ class MemoryStore:
             db_count = con.execute("SELECT COUNT(*) FROM memories WHERE deleted = 0 AND parent_id IS NULL AND embedding IS NOT NULL").fetchone()[0]
         
         if self.faiss_index.ntotal != db_count:
-            logger.info(f"Memory Index out of sync (Index: {self.faiss_index.ntotal}, DB: {db_count}). Rebuilding...")
+            print(f"Memory Index out of sync (Index: {self.faiss_index.ntotal}, DB: {db_count}). Rebuilding...")
             self._build_faiss_index()
 
     def _build_faiss_index(self):
@@ -214,11 +203,8 @@ class MemoryStore:
                 self.faiss_index = faiss.IndexIDMap(quantizer)
                 self.faiss_index.add_with_ids(embs_np, ids_np)
                 self._save_faiss_index(force=True)
-            except (OSError, ValueError, RuntimeError) as e:
-                # OSError: File I/O issues
-                # ValueError: Invalid array dimensions or data
-                # RuntimeError: FAISS internal errors
-                logger.error(f"Failed to build FAISS index: {e}")
+            except Exception as e:
+                print(f"Failed to build FAISS index: {e}")
 
     def compute_identity(self, text: str) -> str:
         text_lower = " ".join(text.lower().strip().split())
@@ -334,11 +320,8 @@ class MemoryStore:
                         score = np.dot(q_emb_np, emb)
                         candidate_ids.append(r[0])
                         candidate_scores[r[0]] = float(score)
-            except (sqlite3.Error, OSError, ValueError) as e:
-                # sqlite3.Error: Database query failed
-                # OSError: File I/O issues
-                # ValueError: Invalid numeric operations
-                logger.error(f"Linear search failed: {e}")
+            except Exception as e:
+                print(f"Linear search failed: {e}")
 
         # 3. Fetch Details
         results = []
@@ -537,7 +520,7 @@ class MemoryStore:
             with self._connect() as con:
                 con.execute("DELETE FROM memories")
                 try: con.execute("DELETE FROM sqlite_sequence WHERE name='memories'")
-                except sqlite3.OperationalError: pass
+                except Exception: pass
             
             if FAISS_AVAILABLE and self.faiss_index:
                 with self.faiss_lock:
@@ -789,7 +772,7 @@ REASON: Brief explanation (1-2 sentences)"""
                         self.log_meta_memory("conflict", [mem1['id'], mem2['id']], None, f"Conflict detected: #{mem1['id']} contradicts #{mem2['id']}: {reason}")
                         
                 except Exception as e:
-                    logger.warning(f"Conflict check failed for {mem1['id']} vs {mem2['id']}: {e}")
+                    print(f"Conflict check failed for {mem1['id']} vs {mem2['id']}: {e}")
         
         return conflicts
 
@@ -875,4 +858,84 @@ REASON: Brief explanation (1-2 sentences)"""
             "completed_at": row[8]
         }
 
-    def update_goal(self, goal_id: int, description: str = None, priority: int = None, status: str = None, context: str
+    def update_goal(self, goal_id: int, description: str = None, priority: int = None, status: str = None, context: str = None, deadline: int = None) -> bool:
+        """Update a goal. Returns True if successful."""
+        goal = self.get_goal(goal_id)
+        if not goal:
+            return False
+        
+        with self.write_lock:
+            with self._connect() as con:
+                updates = []
+                params = []
+                
+                if description is not None:
+                    updates.append("description = ?")
+                    params.append(description)
+                if priority is not None:
+                    updates.append("priority = ?")
+                    params.append(priority)
+                if status is not None:
+                    updates.append("status = ?")
+                    params.append(status)
+                    if status == "completed":
+                        updates.append("completed_at = ?")
+                        params.append(int(time.time()))
+                if context is not None:
+                    updates.append("context = ?")
+                    params.append(context)
+                if deadline is not None:
+                    updates.append("deadline = ?")
+                    params.append(deadline)
+                
+                if not updates:
+                    return False
+                
+                updates.append("updated_at = ?")
+                params.append(int(time.time()))
+                params.append(goal_id)
+                
+                con.execute(f"UPDATE goals SET {', '.join(updates)} WHERE id = ?", params)
+                return True
+
+    def delete_goal(self, goal_id: int) -> bool:
+        """Delete a goal. Returns True if successful."""
+        with self.write_lock:
+            with self._connect() as con:
+                cur = con.execute("DELETE FROM goals WHERE id = ?", (goal_id,))
+                return cur.rowcount > 0
+
+    def complete_goal(self, goal_id: int) -> bool:
+        """Mark a goal as completed. Returns True if successful."""
+        return self.update_goal(goal_id, status="completed")
+
+    def get_next_goal(self) -> Optional[Dict]:
+        """Get the highest priority pending/in_progress goal. In_progress goals take priority regardless of lower priority."""
+        with self._connect() as con:
+            row = con.execute("""
+                SELECT id, description, priority, status, context, created_at, updated_at, deadline, completed_at
+                FROM goals WHERE status IN ('pending', 'in_progress') 
+                ORDER BY 
+                    CASE WHEN status = 'in_progress' THEN 0 ELSE 1 END,
+                    priority DESC, 
+                    created_at ASC 
+                LIMIT 1
+            """).fetchone()
+        
+        if not row:
+            return None
+        
+        return {
+            "id": row[0],
+            "description": row[1],
+            "priority": row[2],
+            "status": row[3],
+            "context": row[4],
+            "created_at": row[5],
+            "updated_at": row[6],
+            "deadline": row[7],
+            "completed_at": row[8]
+        }
+
+# Global Instance
+memory_store = MemoryStore()

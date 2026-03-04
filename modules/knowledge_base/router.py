@@ -1,7 +1,8 @@
-from fastapi import APIRouter, Request, UploadFile, File, Query, Depends, BackgroundTasks
+from fastapi import APIRouter, Request, UploadFile, File, Query, Depends, BackgroundTasks, HTTPException
 from fastapi.responses import HTMLResponse, Response
 from fastapi.templating import Jinja2Templates
 from typing import List
+from pathlib import Path
 from core.settings import settings
 from core.dependencies import get_llm_bridge
 from core.llm import LLMBridge
@@ -24,6 +25,47 @@ if not os.path.exists(UPLOAD_DIR):
     os.makedirs(UPLOAD_DIR)
 if not os.path.exists(PROCESSED_DIR):
     os.makedirs(PROCESSED_DIR)
+
+# --- Security Configuration ---
+ALLOWED_EXTENSIONS = {'.pdf', '.md', '.txt', '.docx', '.html', '.json'}
+MAX_FILE_SIZE = 50 * 1024 * 1024  # 50MB
+
+def validate_upload(file: UploadFile) -> None:
+    """
+    Validate file upload for security.
+    
+    Checks:
+    - File extension is in allowed list
+    - File size is within limits
+    - Filename doesn't contain path traversal attempts
+    
+    Raises:
+        HTTPException: If validation fails
+    """
+    # Check filename for path traversal
+    filename = file.filename or "unknown"
+    if '..' in filename or '/' in filename or '\\' in filename:
+        raise HTTPException(400, "Invalid filename: path traversal detected")
+    
+    # Check file extension
+    ext = Path(filename).suffix.lower()
+    if ext not in ALLOWED_EXTENSIONS:
+        raise HTTPException(
+            400, 
+            f"Invalid file type '{ext}'. Allowed types: {', '.join(ALLOWED_EXTENSIONS)}"
+        )
+    
+    # Check content type (basic validation)
+    allowed_content_types = {
+        'application/pdf', 'text/plain', 'text/markdown', 
+        'text/html', 'application/json', 
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        'application/msword'
+    }
+    if file.content_type and file.content_type not in allowed_content_types:
+        # Allow empty/unknown content type but warn for clearly wrong types
+        if file.content_type and file.content_type.startswith(('image/', 'video/', 'audio/', 'executable/')):
+            raise HTTPException(400, f"Invalid content type: {file.content_type}")
 
 # --- Progress Tracking ---
 upload_progress = {}
@@ -119,6 +161,22 @@ async def upload_doc(request: Request, background_tasks: BackgroundTasks, files:
     errors = []
 
     for file in files:
+        # Validate file before processing
+        try:
+            validate_upload(file)
+        except HTTPException as e:
+            errors.append(f"{file.filename}: {e.detail}")
+            continue
+        
+        # Check file size (read first chunk to check size without loading entire file)
+        file.file.seek(0, 2)  # Seek to end
+        file_size = file.file.tell()
+        file.file.seek(0)  # Reset to beginning
+        
+        if file_size > MAX_FILE_SIZE:
+            errors.append(f"{file.filename}: File too large ({file_size / (1024*1024):.1f}MB > {MAX_FILE_SIZE / (1024*1024):.0f}MB limit)")
+            continue
+        
         tracking_id = str(uuid.uuid4())
         file_path = os.path.join(UPLOAD_DIR, file.filename)
         

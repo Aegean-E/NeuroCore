@@ -18,6 +18,11 @@ import functools
 from typing import Any, Dict, Set, Optional, List
 from contextlib import contextmanager
 import json
+from multiprocessing import Process, Queue
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 
 # Dangerous builtins that should never be available in sandboxed code
@@ -242,6 +247,34 @@ class SafeHttpxClient:
         return self.request('POST', url, **kwargs)
 
 
+def _execute_in_process(code: str, local_vars: Dict[str, Any], result_queue: Queue, 
+                        allowed_file_dirs: List[str], read_only_files: bool,
+                        allowed_domains: Optional[Set[str]], timeout: float,
+                        max_output_size: int):
+    """Execute code in a separate process with restricted environment."""
+    try:
+        # Rebuild sandbox environment in child process
+        sandbox = ToolSandbox(
+            timeout=timeout,
+            allowed_file_dirs=allowed_file_dirs,
+            allowed_domains=allowed_domains,
+            read_only_files=read_only_files,
+            max_output_size=max_output_size
+        )
+
+        result = sandbox._execute_internal(code, local_vars)
+        result_queue.put({'success': True, 'result': result.get('result')})
+    except SecurityError as e:
+        result_queue.put({'success': False, 'error_type': 'SecurityError', 'error_msg': str(e)})
+    except ResourceLimitError as e:
+        result_queue.put({'success': False, 'error_type': 'ResourceLimitError', 'error_msg': str(e)})
+    except TimeoutError as e:
+        result_queue.put({'success': False, 'error_type': 'TimeoutError', 'error_msg': str(e)})
+    except Exception as e:
+        result_queue.put({'success': False, 'error_type': type(e).__name__, 'error_msg': str(e)})
+
+
+
 class ToolSandbox:
     """
     Main sandbox class for executing tool code securely.
@@ -265,6 +298,7 @@ class ToolSandbox:
         
         # Build restricted globals
         self._globals = self._build_restricted_globals()
+
     
     def _build_restricted_globals(self) -> Dict[str, Any]:
         """Build a dictionary of restricted globals for sandboxed execution."""
@@ -338,22 +372,8 @@ class ToolSandbox:
         if '..' in code or '/etc/' in code or 'C:\\\\Windows' in code:
             raise SecurityError("Potential path traversal or system file access detected")
     
-    def execute(self, code: str, local_vars: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-        """
-        Execute code in the sandboxed environment.
-        
-        Args:
-            code: Python code to execute
-            local_vars: Variables to inject into the local scope
-            
-        Returns:
-            Dictionary containing execution results and any output variables
-            
-        Raises:
-            SecurityError: If code violates security policy
-            ResourceLimitError: If resource limits are exceeded
-            TimeoutError: If execution exceeds time limit
-        """
+    def _execute_internal(self, code: str, local_vars: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """Internal execution without multiprocessing - used by child process."""
         # Pre-execution safety checks
         self._check_code_safety(code)
         
@@ -361,27 +381,14 @@ class ToolSandbox:
         exec_globals = self._globals.copy()
         exec_locals = local_vars or {}
         
-        # Execute with timeout
+        # Execute
         result_container = {'result': None, 'error': None, 'output': ''}
         
-        def target():
-            try:
-                exec(code, exec_globals, exec_locals)
-                result_container['result'] = exec_locals.get('result')
-            except Exception as e:
-                result_container['error'] = e
-        
-        # Use threading for timeout (since signal-based timeouts don't work on Windows)
-        thread = threading.Thread(target=target)
-        thread.daemon = True
-        thread.start()
-        thread.join(timeout=self.timeout)
-        
-        if thread.is_alive():
-            # Thread is still running after timeout
-            # Note: We can't actually kill the thread, but we can mark it as timed out
-            # In production, consider using multiprocessing for true isolation
-            raise TimeoutError(f"Tool execution exceeded {self.timeout} second limit")
+        try:
+            exec(code, exec_globals, exec_locals)
+            result_container['result'] = exec_locals.get('result')
+        except Exception as e:
+            result_container['error'] = e
         
         # Check for errors
         if result_container['error']:
@@ -396,6 +403,79 @@ class ToolSandbox:
                 )
         
         return result_container
+
+    def execute(self, code: str, local_vars: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """
+        Execute code in the sandboxed environment using multiprocessing for true isolation.
+        
+        Args:
+            code: Python code to execute
+            local_vars: Variables to inject into the local scope
+            
+        Returns:
+            Dictionary containing execution results and any output variables
+            
+        Raises:
+            SecurityError: If code violates security policy
+            ResourceLimitError: If resource limits are exceeded
+            TimeoutError: If execution exceeds time limit
+        """
+        # Pre-execution safety checks (in parent process)
+        self._check_code_safety(code)
+        
+        # Use multiprocessing for true isolation and timeout enforcement
+        result_queue = Queue()
+        p = Process(
+            target=_execute_in_process,
+            args=(code, local_vars or {}, result_queue, 
+                  self.allowed_file_dirs, self.read_only_files,
+                  self.allowed_domains, self.timeout,
+                  self.max_output_size)
+        )
+
+        p.start()
+        p.join(timeout=self.timeout)
+        
+        if p.is_alive():
+            # Process is still running after timeout - terminate it
+            logger.warning(f"Tool execution exceeded {self.timeout} second limit, terminating process")
+            p.terminate()
+            p.join()
+            raise TimeoutError(f"Tool execution exceeded {self.timeout} second limit")
+        
+        # Check if process exited with error
+        if p.exitcode != 0:
+            logger.error(f"Tool process exited with code {p.exitcode}")
+            raise Exception(f"Tool execution failed with exit code {p.exitcode}")
+        
+        # Get result from queue
+        try:
+            result = result_queue.get_nowait()
+        except Exception:
+            raise Exception("Tool execution failed to return result")
+        
+        # Check if result contains an error
+        if isinstance(result, dict):
+            if not result.get('success', False):
+                error_type = result.get('error_type', 'Exception')
+                error_msg = result.get('error_msg', 'Unknown error')
+                
+                # Re-raise as appropriate exception type
+                if error_type == 'SecurityError':
+                    raise SecurityError(error_msg)
+                elif error_type == 'ResourceLimitError':
+                    raise ResourceLimitError(error_msg)
+                elif error_type == 'TimeoutError':
+                    raise TimeoutError(error_msg)
+                else:
+                    raise Exception(f"{error_type}: {error_msg}")
+            
+            # Return successful result
+            return {'result': result.get('result')}
+        
+        return result
+
+
 
 
 # Convenience function for simple sandboxed execution

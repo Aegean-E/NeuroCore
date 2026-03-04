@@ -9,10 +9,22 @@ from core.debug import debug_logger
 
 class FlowRunner:
     _executor_cache = {}
-
+    _max_cache_size = 100  # Maximum number of cached executor classes
+    
     @classmethod
     def clear_cache(cls):
         cls._executor_cache.clear()
+    
+    @classmethod
+    def _manage_cache_size(cls):
+        """Ensure cache doesn't grow indefinitely by removing oldest entries when limit reached."""
+        if len(cls._executor_cache) >= cls._max_cache_size:
+            # Remove oldest 20% of entries (FIFO eviction)
+            keys_to_remove = list(cls._executor_cache.keys())[:20]
+            for key in keys_to_remove:
+                del cls._executor_cache[key]
+            if settings.get("debug_mode"):
+                print(f"[FlowRunner] Cache size limit reached. Removed {len(keys_to_remove)} oldest entries.")
 
     def __init__(self, flow_id: str, flow_override: dict = None):
         self.flow_id = flow_id
@@ -439,6 +451,7 @@ class FlowRunner:
                             # Get or load the executor class for this bridge node
                             bridge_cache_key = f"{bridge_module_id}.{bridge_type_id}"
                             if bridge_cache_key not in self._executor_cache:
+                                self._manage_cache_size()  # Ensure cache doesn't grow too large
                                 node_dispatcher = importlib.import_module(f"modules.{bridge_module_id}.node")
                                 # Only reload in debug mode to pick up hot-code changes;
                                 # in production this is wasteful and can cause state issues.
@@ -568,6 +581,9 @@ class FlowRunner:
                     cache_key = f"{module_id}.{node_type_id}"
                     
                     if cache_key not in self._executor_cache:
+                        # Manage cache size before adding new entry
+                        self._manage_cache_size()
+                        
                         # Dynamically import the module's node logic dispatcher
                         node_dispatcher = importlib.import_module(f"modules.{module_id}.node")
                         # Only reload in debug mode to pick up hot-code changes;

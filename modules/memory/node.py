@@ -2,12 +2,15 @@ import asyncio
 import json
 import os
 import time
+import logging
 from functools import partial
 from core.llm import LLMBridge
 from core.settings import settings
 from .backend import memory_store
 from .arbiter import MemoryArbiter
 from .consolidation import MemoryConsolidator
+
+logger = logging.getLogger(__name__)
 
 class ConfigLoader:
     _cache = {"mtime": 0, "data": {}}
@@ -22,8 +25,8 @@ class ConfigLoader:
                     with open(cls._path, "r") as f:
                         cls._cache["data"] = json.load(f).get("config", {})
                     cls._cache["mtime"] = mtime
-        except Exception as e:
-            print(f"Error loading memory config: {e}")
+        except (json.JSONDecodeError, OSError, KeyError) as e:
+            logger.warning(f"Error loading memory config: {e}")
         return cls._cache["data"]
 
 class MemoryRecallExecutor:
@@ -162,7 +165,7 @@ class MemorySaveExecutor:
 
             # Fallback if specific arbiter model failed
             if "error" in response and extraction_model:
-                print(f"⚠️ Memory extraction with '{extraction_model}' failed. Retrying with default model.")
+                logger.warning(f"Memory extraction with '{extraction_model}' failed. Retrying with default model.")
                 response = await llm_bridge.chat_completion(
                     messages=[{"role": "user", "content": prompt}],
                     model=settings.get("default_model"),
@@ -179,8 +182,8 @@ class MemorySaveExecutor:
                     end = content.rfind("]") + 1
                     if start != -1 and end != -1:
                         facts = json.loads(content[start:end])
-                except Exception as e:
-                    print(f"Memory extraction JSON parse failed: {e}")
+                except (json.JSONDecodeError, ValueError) as e:
+                    logger.warning(f"Memory extraction JSON parse failed: {e}")
 
             valid_types = ["BELIEF", "FACT", "RULE", "EXPERIENCE", "PREFERENCE", "IDENTITY"]
             for item in facts:
@@ -211,7 +214,7 @@ class MemorySaveExecutor:
                         expires_at=expires_at
                     )
         except Exception as e:
-            print(f"Background memory save failed: {e}")
+            logger.error(f"Background memory save failed: {e}")
 
     async def receive(self, input_data: dict, config: dict = None) -> dict:
         # Pass through data immediately, save in background (conceptually)
@@ -288,19 +291,35 @@ class MemorySaveExecutor:
                 save_delay=save_delay,
             ))
 
-            # Auto-Consolidation Check
+            # Auto-Consolidation Check with timeout to prevent deadlock
             try:
                 auto_hours_val = self.config.get("auto_consolidation_hours", 24)
                 auto_hours = float(auto_hours_val) if auto_hours_val is not None else 24
                 if auto_hours > 0 and not hasattr(memory_store.last_consolidation_ts, 'assert_called'):
                     if time.time() - memory_store.last_consolidation_ts > (auto_hours * 3600):
-                        print("⏳ Triggering Auto-Consolidation...")
+                        logger.info("⏳ Triggering Auto-Consolidation...")
                         memory_store.last_consolidation_ts = time.time()
-                        self._consolidation_task = asyncio.create_task(
+                        
+                        # Create consolidation task with timeout to prevent deadlock
+                        consolidation_task = asyncio.create_task(
                             MemoryConsolidator(config=self.config).run()
                         )
+                        
+                        # Wrap in timeout to prevent indefinite blocking
+                        try:
+                            self._consolidation_task = await asyncio.wait_for(
+                                consolidation_task,
+                                timeout=300  # 5 minute max
+                            )
+                        except asyncio.TimeoutError:
+                            logger.error("Memory consolidation timed out after 5 minutes")
+                            consolidation_task.cancel()
+                            try:
+                                await consolidation_task
+                            except asyncio.CancelledError:
+                                pass
             except Exception as e:
-                print(f"Auto-consolidation check failed: {e}")
+                logger.warning(f"Auto-consolidation check failed: {e}")
 
         return input_data
 
