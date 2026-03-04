@@ -248,8 +248,14 @@
                     <label class="block text-sm font-medium text-slate-400 mb-2">System Prompt</label>
                     <textarea id="system-prompt-input" rows="8" class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all custom-scrollbar" placeholder="You are a helpful AI..."></textarea>
                     <p class="text-xs text-slate-500 mt-2">Define the persona and instructions for the AI.</p>
+                    
+                    <div class="mt-4 pt-4 border-t border-slate-800">
+                        <label class="block text-sm font-medium text-slate-400 mb-2">Token Budget</label>
+                        <input type="number" id="system-prompt-max-tokens" min="500" max="32000" step="100" value="4000" class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all">
+                        <p class="text-xs text-slate-500 mt-2">Maximum tokens for context (plan + memory + knowledge + reasoning + skills). Lower priority content is dropped when budget is exceeded. Default: 4000</p>
+                    </div>
                         
-                        <div class="mt-4 pt-4 border-t border-slate-800">
+                    <div class="mt-4 pt-4 border-t border-slate-800">
                         <label class="block text-sm font-medium text-slate-400 mb-2">Available Tools</label>
                         <p class="text-xs text-slate-500 mb-3">Select which tools to include in the system prompt:</p>
                         <div id="system-prompt-tools-checklist" class="space-y-2 max-h-32 overflow-y-auto custom-scrollbar bg-slate-950 border border-slate-700 rounded-xl p-3"></div>
@@ -263,6 +269,7 @@
                         </div>
                     </div>
                 </div>
+
                 <!-- Python Script Editor -->
                 <div id="config-script" class="hidden">
                     <label class="block text-sm font-medium text-slate-400 mb-2">Python Code</label>
@@ -1957,6 +1964,7 @@
             } else if (node.nodeTypeId === 'system_prompt') {
                 document.getElementById('config-system-prompt').classList.remove('hidden');
                 document.getElementById('system-prompt-input').value = node.config.system_prompt || '';
+                document.getElementById('system-prompt-max-tokens').value = node.config.max_token_budget || 4000;
                 
                 const toolsChecklist = document.getElementById('system-prompt-tools-checklist');
                 toolsChecklist.innerHTML = '<div class="animate-pulse text-slate-600 text-xs">Loading tools...</div>';
@@ -1973,6 +1981,7 @@
                             </label>`;
                     });
                 });
+
             } else if (node.nodeTypeId === 'script_node') {
                 document.getElementById('config-script').classList.remove('hidden');
                 document.getElementById('script-code-input').value = node.config.code || '';
@@ -2087,11 +2096,14 @@
                 } else if (node.nodeTypeId === 'system_prompt') {
                     const checkboxes = document.querySelectorAll('#system-prompt-tools-checklist input:checked');
                     const enabled = Array.from(checkboxes).map(cb => cb.value);
+                    const maxTokens = parseInt(document.getElementById('system-prompt-max-tokens').value) || 4000;
                     newConfig = { 
                         system_prompt: document.getElementById('system-prompt-input').value,
-                        enabled_tools: enabled
+                        enabled_tools: enabled,
+                        max_token_budget: maxTokens
                     };
                     console.log('System Prompt Config Saved:', newConfig);
+
                 } else if (node.nodeTypeId === 'script_node') {
                     newConfig = { code: document.getElementById('script-code-input').value };
                 } else if (node.nodeTypeId === 'llm_module') {
