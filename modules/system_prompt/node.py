@@ -26,25 +26,6 @@ class SystemPromptExecutor:
             logger.warning(f"Failed to load available tools: {e}")
         return {}
 
-    def _format_tools_section(self, enabled_tool_names: list) -> str:
-        """Format available tools into a readable section for the system prompt."""
-        all_tools = self._load_available_tools()
-        
-        if not enabled_tool_names:
-            return ""
-        
-        tools_text = "\n## Available Tools\nYou have access to the following tools:\n"
-        
-        for tool_name in enabled_tool_names:
-            if tool_name in all_tools:
-                tool_data = all_tools[tool_name]
-                if "definition" in tool_data and "function" in tool_data["definition"]:
-                    func_def = tool_data["definition"]["function"]
-                    desc = func_def.get("description", "No description available")
-                    tools_text += f"- **{tool_name}**: {desc}\n"
-        
-        return tools_text
-    
     def _get_tools_in_openai_format(self, enabled_tool_names: list) -> list:
         """Convert enabled tools to OpenAI tool format."""
         all_tools = self._load_available_tools()
@@ -107,42 +88,36 @@ class SystemPromptExecutor:
         # Default prompt if none is configured
         prompt_text = config.get("system_prompt", "You are NeuroCore, a helpful and intelligent AI assistant.")
         
-        # Get enabled tools from config
+        # Get enabled tools from config (structured format only - no markdown duplication)
         enabled_tools = config.get("enabled_tools", [])
-        tools_section = self._format_tools_section(enabled_tools)
-        
-        # Combine prompt with tools section
-        full_prompt = prompt_text + tools_section
         
         # Check for injected context from bridge nodes (memory, knowledge, reasoning)
         # These are injected by Memory Recall, Query Knowledge, and Reasoning Load nodes
         
-        # Memory context (injected as _memory_context by memory_recall)
+        # Memory context (injected as _memory_context by memory_recall) - HIGH PRIORITY
         memory_context = input_data.get("_memory_context")
         
-        # Knowledge context (from query_knowledge node)
+        # Knowledge context (from query_knowledge node) - MEDIUM PRIORITY
         knowledge_context = input_data.get("knowledge_context")
         
-        # Reasoning context (from reasoning_load node)
+        # Reasoning context (from reasoning_load node) - MEDIUM PRIORITY
         reasoning_context = input_data.get("reasoning_context")
         
-        # Plan context (from planner node)
+        # Plan context (from planner node) - HIGH PRIORITY
         plan_context = input_data.get("plan_context")
         
-        # Skills context (from enabled_skills config)
+        # Skills context (from enabled_skills config) - LOW PRIORITY
         enabled_skills = config.get("enabled_skills", [])
         skills_context = self._load_skills_content(enabled_skills)
         
-        # Build context sections
+        # Build context sections with priority-based ordering
+        # Priority: plan → memory → knowledge → reasoning → skills
+        # User-specific context (memory) comes before generic context (skills)
         context_parts = []
+        
+        # High priority: Plan and Memory (user-specific)
         if plan_context:
             context_parts.append(plan_context)
-        if skills_context:
-            context_parts.append(skills_context)
-        if reasoning_context:
-            context_parts.append(f"## Previous Reasoning\n{reasoning_context}")
-        if knowledge_context:
-            context_parts.append(f"## Relevant Knowledge\n{knowledge_context}")
         if memory_context:
             # Extract just the memory content (after "Relevant memories retrieved...")
             if "Relevant memories retrieved" in memory_context:
@@ -150,8 +125,19 @@ class SystemPromptExecutor:
             else:
                 context_parts.append(f"## User Memories\n{memory_context}")
         
-        if context_parts:
-            full_prompt = full_prompt + "\n\n" + "\n\n".join(context_parts)
+        # Medium priority: Knowledge and Reasoning
+        if knowledge_context:
+            context_parts.append(f"## Relevant Knowledge\n{knowledge_context}")
+        if reasoning_context:
+            context_parts.append(f"## Previous Reasoning\n{reasoning_context}")
+        
+        # Low priority: Skills (generic, can be dropped if needed)
+        if skills_context:
+            context_parts.append(skills_context)
+        
+        # Apply token budget management
+        max_token_budget = config.get("max_token_budget", 4000)
+        full_prompt = self._apply_token_budget(prompt_text, context_parts, max_token_budget)
         
         # Get existing messages from the flow data
         messages = input_data.get("messages")
@@ -175,6 +161,52 @@ class SystemPromptExecutor:
             result["available_tools"] = enabled_tools
         
         return result
+
+    def _estimate_tokens(self, text: str) -> int:
+        """Rough token estimation: ~4 characters per token."""
+        return len(text) // 4
+
+    def _apply_token_budget(self, base_prompt: str, context_parts: list, max_tokens: int) -> str:
+        """
+        Apply token budget management with priority-based trimming.
+        Priority order: plan, memory, knowledge, reasoning, skills
+        """
+        base_tokens = self._estimate_tokens(base_prompt)
+        available_tokens = max_tokens - base_tokens - 100  # Reserve 100 tokens for safety
+        
+        if available_tokens <= 0:
+            # Base prompt alone exceeds budget, return truncated base
+            return base_prompt[:max_tokens * 4]  # Rough char limit
+        
+        result_parts = []
+        remaining_tokens = available_tokens
+        
+        for i, part in enumerate(context_parts):
+            part_tokens = self._estimate_tokens(part)
+            
+            # Check if this part fits within remaining budget
+            if part_tokens <= remaining_tokens:
+                result_parts.append(part)
+                remaining_tokens -= part_tokens
+            else:
+                # Part doesn't fit - try to truncate if it's not the first part
+                # and we have some remaining budget
+                if remaining_tokens > 200 and i > 0:
+                    # Truncate with ellipsis
+                    max_chars = remaining_tokens * 4 - 20  # Reserve for ellipsis
+                    truncated = part[:max_chars] + "\n\n[... content truncated due to token budget]"
+                    result_parts.append(truncated)
+                    remaining_tokens = 0
+                
+                # For lower priority parts (skills, reasoning), we can skip entirely
+                # if they don't fit. Higher priority parts (plan, memory) were added first.
+                if i >= 3:  # skills is typically index 4, reasoning at 3
+                    logger.debug(f"Dropping low-priority context part {i} due to token budget")
+                    break
+        
+        if result_parts:
+            return base_prompt + "\n\n" + "\n\n".join(result_parts)
+        return base_prompt
 
     async def send(self, processed_data: dict) -> dict:
         return processed_data

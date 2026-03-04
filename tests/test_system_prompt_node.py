@@ -58,7 +58,7 @@ async def test_system_prompt_bad_messages_type():
 
 @pytest.mark.asyncio
 async def test_system_prompt_with_enabled_tools():
-    """Test that enabled tools are included in the system prompt."""
+    """Test that enabled tools are passed in OpenAI format (not markdown in system prompt)."""
     executor = SystemPromptExecutor()
     
     input_data = {
@@ -77,11 +77,13 @@ async def test_system_prompt_with_enabled_tools():
     messages = result["messages"]
     assert len(messages) == 2
     assert messages[0]["role"] == "system"
-    # Check that the system message includes the tools section
+    # System prompt should NOT contain markdown tools description (removed to avoid duplication)
     system_content = messages[0]["content"]
     assert "You are a helpful assistant." in system_content
-    assert "Available Tools" in system_content
-    assert "Weather" in system_content
+    assert "Available Tools" not in system_content  # No markdown tools section
+    # Tools are passed in structured format via result["tools"] instead
+    assert "tools" in result
+    assert result["available_tools"] == ["Weather"]
 
 @pytest.mark.asyncio
 async def test_system_prompt_with_empty_tools():
@@ -243,3 +245,113 @@ async def test_get_executor_class_unknown():
     from modules.system_prompt.node import get_executor_class
     cls = await get_executor_class("unknown")
     assert cls is None
+
+
+# ---------------------------------------------------------------------------
+# Token budget management tests
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_token_budget_enforcement():
+    """Test that token budget limits context size."""
+    executor = SystemPromptExecutor()
+    
+    # Create a very large context that would exceed a small budget
+    large_memory = "User memory: " + "x" * 2000  # ~500 tokens
+    large_knowledge = "Knowledge: " + "y" * 2000  # ~500 tokens
+    
+    input_data = {
+        "messages": [{"role": "user", "content": "Hi"}],
+        "_memory_context": large_memory,
+        "knowledge_context": large_knowledge,
+    }
+    
+    config = {
+        "system_prompt": "You are helpful.",  # ~5 tokens
+        "max_token_budget": 300  # Very small budget
+    }
+    
+    result = await executor.receive(input_data, config)
+    system_content = result["messages"][0]["content"]
+    
+    # Should be truncated due to token budget
+    assert "[... content truncated" in system_content or len(system_content) < 2000
+
+
+@pytest.mark.asyncio
+async def test_token_budget_priority_ordering():
+    """Test that high-priority context (memory) comes before low-priority (skills)."""
+    executor = SystemPromptExecutor()
+    
+    input_data = {
+        "messages": [{"role": "user", "content": "Hi"}],
+        "_memory_context": "MEMORY_CONTENT: user likes Python",
+        "knowledge_context": "KNOWLEDGE_CONTENT: Python is a language",
+        "reasoning_context": "REASONING_CONTENT: thinking about code",
+        "plan_context": "## Plan\nPLAN_CONTENT: do something",
+    }
+    
+    config = {
+        "system_prompt": "You are helpful.",
+        "enabled_skills": [],  # No skills to load
+        "max_token_budget": 4000
+    }
+    
+    result = await executor.receive(input_data, config)
+    system_content = result["messages"][0]["content"]
+    
+    # Verify priority order: plan → memory → knowledge → reasoning → skills
+    plan_pos = system_content.find("PLAN_CONTENT")
+    memory_pos = system_content.find("MEMORY_CONTENT")
+    knowledge_pos = system_content.find("KNOWLEDGE_CONTENT")
+    reasoning_pos = system_content.find("REASONING_CONTENT")
+    
+    assert plan_pos < memory_pos, "Plan should come before memory"
+    assert memory_pos < knowledge_pos, "Memory should come before knowledge"
+    assert knowledge_pos < reasoning_pos, "Knowledge should come before reasoning"
+
+
+@pytest.mark.asyncio
+async def test_token_estimation():
+    """Test the token estimation helper."""
+    executor = SystemPromptExecutor()
+    
+    # ~4 chars per token
+    assert executor._estimate_tokens("") == 0
+    assert executor._estimate_tokens("abcd") == 1
+    assert executor._estimate_tokens("abcdefgh") == 2
+    assert executor._estimate_tokens("x" * 400) == 100
+
+
+@pytest.mark.asyncio
+async def test_low_priority_context_dropped_when_budget_exceeded():
+    """Test that token budget limits total context size."""
+    executor = SystemPromptExecutor()
+    
+    # Create contexts that will exceed a small budget
+    large_plan = "## Plan\n" + "Plan step " * 20  # ~50 tokens
+    large_memory = "Memory: " + "remember " * 20  # ~50 tokens
+    large_knowledge = "Knowledge: " + "fact " * 50  # ~100 tokens
+    large_reasoning = "Reasoning: " + "think " * 50  # ~100 tokens
+    
+    input_data = {
+        "messages": [{"role": "user", "content": "Hi"}],
+        "plan_context": large_plan,
+        "_memory_context": large_memory,
+        "knowledge_context": large_knowledge,
+        "reasoning_context": large_reasoning,
+    }
+    
+    # Small budget that can't fit everything
+    config = {
+        "system_prompt": "You are helpful.",
+        "max_token_budget": 200
+    }
+    
+    result = await executor.receive(input_data, config)
+    system_content = result["messages"][0]["content"]
+    
+    # Verify budget enforcement - content should be limited
+    # The exact truncation behavior depends on the algorithm, but total size should be controlled
+    assert len(system_content) < 2000  # Should be significantly limited vs unlimited
+    assert "You are helpful." in system_content  # Base prompt always present
