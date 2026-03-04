@@ -37,21 +37,23 @@ class ReflectionExecutor:
                 return msg.get("content", "")
         return ""
 
-    def _inject_improvement_message(self, input_data: dict, needs_improvement: str) -> dict:
+    def _inject_improvement_message(self, input_data: dict, needs_improvement: str, user_request: str) -> dict:
         """
         Inject an improvement feedback message into the conversation so that
         when agent_loop receives the data again (via flow loop-back), it sees
         the critique and can produce a better response.
 
-        The injected message has role='user' and is appended to 'messages'.
+        The injected message has role='system' to preserve conversational
+        turn structure and includes the original user request for context.
         """
         result = input_data.copy()
         messages = list(result.get("messages", []))
         messages.append({
-            "role": "user",
+            "role": "system",
             "content": (
-                f"Your previous response needs improvement: {needs_improvement}\n"
-                "Please try again with a better response."
+                f"REFLECTION FEEDBACK: Your previous response needs improvement: {needs_improvement}\n\n"
+                f"ORIGINAL USER REQUEST: {user_request}\n\n"
+                "Please provide a better response that fully addresses the original request."
             )
         })
         result["messages"] = messages
@@ -73,9 +75,16 @@ class ReflectionExecutor:
 
         Config:
             - default_reflection_prompt (str): system prompt for the reflection LLM call
+              IMPORTANT: This should be customized for your domain. Code generation,
+              research summaries, and creative writing each need different evaluation
+              criteria and scoring rubrics. See module documentation for examples.
+            - reflection_prompt (str): Optional custom prompt to override default
             - inject_improvement (bool, default True):
                 When not satisfied, append an improvement feedback message to
                 'messages' so the agent_loop can act on it when retried.
+            - max_reflection_retries (int, default 3):
+                Maximum number of reflection retry cycles before forcing satisfied=True
+                to prevent infinite loops and unbounded context growth.
 
         Output:
             - reflection (dict):  {satisfied, reason, needs_improvement}
@@ -89,6 +98,21 @@ class ReflectionExecutor:
 
         user_request = self._extract_user_message(input_data)
         assistant_response = self._extract_assistant_response(input_data)
+
+        # Check reflection retry depth to prevent infinite loops
+        reflection_retry_count = int(input_data.get("reflection_retry_count", 0))
+        max_reflection_retries = int(config.get("max_reflection_retries", 3))
+        
+        if reflection_retry_count >= max_reflection_retries:
+            # Max retries exceeded — force satisfied to prevent infinite loops
+            result = input_data.copy()
+            result["reflection"] = {
+                "satisfied": True,
+                "reason": f"Max reflection retries ({max_reflection_retries}) exceeded — forcing completion",
+                "needs_improvement": None
+            }
+            result["satisfied"] = True
+            return result
 
         if not user_request or not assistant_response:
             # Not enough data to evaluate — treat as satisfied to avoid blocking the flow
@@ -165,7 +189,9 @@ class ReflectionExecutor:
             inject = config.get("inject_improvement", True)
             needs_improvement = reflection_result.get("needs_improvement")
             if not reflection_result["satisfied"] and needs_improvement and inject:
-                result = self._inject_improvement_message(result, needs_improvement)
+                result = self._inject_improvement_message(result, needs_improvement, user_request)
+                # Increment retry counter for depth tracking
+                result["reflection_retry_count"] = reflection_retry_count + 1
 
             return result
 

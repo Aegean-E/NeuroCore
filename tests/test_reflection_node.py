@@ -13,6 +13,9 @@ Covers:
 - send() passthrough
 - get_executor_class() dispatcher
 - _inject_improvement_message() direct unit tests
+- Reflection retry depth counter — max_reflection_retries enforcement
+- System role for improvement messages (not user role)
+- reflection_retry_count increment on retry
 """
 
 import pytest
@@ -177,7 +180,7 @@ class TestImprovementInjection:
 
     @pytest.mark.asyncio
     async def test_not_satisfied_injects_improvement_message(self):
-        """When not satisfied and needs_improvement is set, a user message should be appended."""
+        """When not satisfied and needs_improvement is set, a system message should be appended."""
         executor = make_executor()
         executor.llm.chat_completion = AsyncMock(
             return_value=make_reflection_llm_response(
@@ -189,9 +192,11 @@ class TestImprovementInjection:
         result = await executor.receive(make_input())
 
         messages = result["messages"]
-        injected = [m for m in messages if m.get("role") == "user" and "needs improvement" in m.get("content", "").lower()]
+        injected = [m for m in messages if m.get("role") == "system" and "REFLECTION FEEDBACK" in m.get("content", "")]
         assert len(injected) == 1
         assert "Be more concise" in injected[0]["content"]
+        # Should include original user request
+        assert "Explain Python" in injected[0]["content"]
 
     @pytest.mark.asyncio
     async def test_satisfied_does_not_inject_message(self):
@@ -259,7 +264,7 @@ class TestImprovementInjection:
         result = await executor.receive(make_input())
 
         last_msg = result["messages"][-1]
-        assert last_msg["role"] == "user"
+        assert last_msg["role"] == "system"
         assert "Provide code examples" in last_msg["content"]
 
     @pytest.mark.asyncio
@@ -279,6 +284,156 @@ class TestImprovementInjection:
         await executor.receive(input_data)
 
         assert input_data["messages"] == original_messages
+
+    @pytest.mark.asyncio
+    async def test_injected_message_uses_system_role_not_user(self):
+        """Improvement feedback should use system role, not user role."""
+        executor = make_executor()
+        executor.llm.chat_completion = AsyncMock(
+            return_value=make_reflection_llm_response(
+                satisfied=False,
+                needs_improvement="Fix this",
+            )
+        )
+
+        result = await executor.receive(make_input())
+
+        # Check that no user message was injected
+        user_messages = [m for m in result["messages"] if m.get("role") == "user" and "needs improvement" in m.get("content", "").lower()]
+        assert len(user_messages) == 0
+
+        # Check that system message was injected
+        system_messages = [m for m in result["messages"] if m.get("role") == "system" and "REFLECTION FEEDBACK" in m.get("content", "")]
+        assert len(system_messages) == 1
+
+
+# ---------------------------------------------------------------------------
+# Reflection retry depth counter
+# ---------------------------------------------------------------------------
+
+class TestReflectionRetryDepth:
+    """Tests for reflection retry depth counter and max_reflection_retries."""
+
+    @pytest.mark.asyncio
+    async def test_reflection_retry_count_increments_on_retry(self):
+        """When not satisfied, reflection_retry_count should increment."""
+        executor = make_executor()
+        executor.llm.chat_completion = AsyncMock(
+            return_value=make_reflection_llm_response(
+                satisfied=False,
+                needs_improvement="Improve this",
+            )
+        )
+
+        input_data = make_input()
+        input_data["reflection_retry_count"] = 1
+
+        result = await executor.receive(input_data)
+
+        assert result["reflection_retry_count"] == 2
+
+    @pytest.mark.asyncio
+    async def test_max_reflection_retries_enforced(self):
+        """When reflection_retry_count >= max_reflection_retries, force satisfied=True."""
+        executor = make_executor()
+        executor.llm.chat_completion = AsyncMock(
+            return_value=make_reflection_llm_response(
+                satisfied=False,
+                needs_improvement="Still not good",
+            )
+        )
+
+        input_data = make_input()
+        input_data["reflection_retry_count"] = 3  # At limit
+
+        result = await executor.receive(input_data, config={"max_reflection_retries": 3})
+
+        # Should force satisfied=True to prevent infinite loop
+        assert result["satisfied"] is True
+        assert "Max reflection retries" in result["reflection"]["reason"]
+        # Should not inject improvement message
+        assert len(result["messages"]) == len(input_data["messages"])
+
+    @pytest.mark.asyncio
+    async def test_max_reflection_retries_default_is_3(self):
+        """Default max_reflection_retries should be 3."""
+        executor = make_executor()
+        executor.llm.chat_completion = AsyncMock(
+            return_value=make_reflection_llm_response(
+                satisfied=False,
+                needs_improvement="Improve",
+            )
+        )
+
+        input_data = make_input()
+        input_data["reflection_retry_count"] = 3  # At default limit
+
+        result = await executor.receive(input_data)  # No config passed
+
+        # Should force satisfied=True with default limit
+        assert result["satisfied"] is True
+        assert "Max reflection retries (3) exceeded" in result["reflection"]["reason"]
+
+    @pytest.mark.asyncio
+    async def test_custom_max_reflection_retries(self):
+        """Custom max_reflection_retries config should be respected."""
+        executor = make_executor()
+        executor.llm.chat_completion = AsyncMock(
+            return_value=make_reflection_llm_response(
+                satisfied=False,
+                needs_improvement="Improve",
+            )
+        )
+
+        input_data = make_input()
+        input_data["reflection_retry_count"] = 2  # At custom limit
+
+        result = await executor.receive(input_data, config={"max_reflection_retries": 2})
+
+        # Should force satisfied=True with custom limit
+        assert result["satisfied"] is True
+        assert "Max reflection retries (2) exceeded" in result["reflection"]["reason"]
+
+    @pytest.mark.asyncio
+    async def test_below_max_retries_allows_retry(self):
+        """When below max retries, should allow normal reflection behavior."""
+        executor = make_executor()
+        executor.llm.chat_completion = AsyncMock(
+            return_value=make_reflection_llm_response(
+                satisfied=False,
+                needs_improvement="Needs work",
+            )
+        )
+
+        input_data = make_input()
+        input_data["reflection_retry_count"] = 1  # Below limit of 3
+
+        result = await executor.receive(input_data, config={"max_reflection_retries": 3})
+
+        # Should allow normal not-satisfied behavior
+        assert result["satisfied"] is False
+        assert result["reflection_retry_count"] == 2
+        # Should inject improvement message
+        system_messages = [m for m in result["messages"] if m.get("role") == "system"]
+        assert len(system_messages) == 1
+
+    @pytest.mark.asyncio
+    async def test_reflection_retry_count_zero_by_default(self):
+        """reflection_retry_count should default to 0 if not present."""
+        executor = make_executor()
+        executor.llm.chat_completion = AsyncMock(
+            return_value=make_reflection_llm_response(
+                satisfied=False,
+                needs_improvement="Improve",
+            )
+        )
+
+        input_data = make_input()  # No reflection_retry_count set
+
+        result = await executor.receive(input_data)
+
+        # Should start at 0 and increment to 1
+        assert result["reflection_retry_count"] == 1
 
 
 # ---------------------------------------------------------------------------
@@ -422,19 +577,21 @@ class TestInputDataPreservation:
 class TestInjectImprovementMessageDirect:
     """Direct unit tests for the _inject_improvement_message helper."""
 
-    def test_appends_user_message(self):
-        """Should append a user message to the messages list."""
+    def test_appends_system_message(self):
+        """Should append a system message to the messages list."""
         executor = ReflectionExecutor.__new__(ReflectionExecutor)
         input_data = {
             "messages": [{"role": "user", "content": "Hi"}],
             "other_key": "value",
         }
 
-        result = executor._inject_improvement_message(input_data, "Be more specific")
+        result = executor._inject_improvement_message(input_data, "Be more specific", "Original request")
 
         assert len(result["messages"]) == 2
-        assert result["messages"][-1]["role"] == "user"
+        assert result["messages"][-1]["role"] == "system"
         assert "Be more specific" in result["messages"][-1]["content"]
+        assert "Original request" in result["messages"][-1]["content"]
+        assert "REFLECTION FEEDBACK" in result["messages"][-1]["content"]
 
     def test_does_not_mutate_original(self):
         """Should not mutate the original input_data dict."""
@@ -442,7 +599,7 @@ class TestInjectImprovementMessageDirect:
         original_messages = [{"role": "user", "content": "Hi"}]
         input_data = {"messages": original_messages}
 
-        executor._inject_improvement_message(input_data, "Improve this")
+        executor._inject_improvement_message(input_data, "Improve this", "Original")
 
         assert len(input_data["messages"]) == 1
 
@@ -455,7 +612,7 @@ class TestInjectImprovementMessageDirect:
             "content": "Some content",
         }
 
-        result = executor._inject_improvement_message(input_data, "Hint")
+        result = executor._inject_improvement_message(input_data, "Hint", "Original request")
 
         assert result["session_id"] == "abc"
         assert result["content"] == "Some content"
@@ -465,10 +622,29 @@ class TestInjectImprovementMessageDirect:
         executor = ReflectionExecutor.__new__(ReflectionExecutor)
         input_data = {"messages": []}
 
-        result = executor._inject_improvement_message(input_data, "Add code examples")
+        result = executor._inject_improvement_message(input_data, "Add code examples", "Original request")
 
         assert "Add code examples" in result["messages"][-1]["content"]
-        assert "needs improvement" in result["messages"][-1]["content"].lower()
+        assert "REFLECTION FEEDBACK" in result["messages"][-1]["content"]
+
+    def test_message_includes_original_user_request(self):
+        """The injected message should include the original user request for context."""
+        executor = ReflectionExecutor.__new__(ReflectionExecutor)
+        input_data = {"messages": []}
+
+        result = executor._inject_improvement_message(input_data, "Fix this", "Please write a Python function")
+
+        assert "Please write a Python function" in result["messages"][-1]["content"]
+        assert "ORIGINAL USER REQUEST" in result["messages"][-1]["content"]
+
+    def test_uses_system_role_not_user(self):
+        """The injected message should use system role, not user role."""
+        executor = ReflectionExecutor.__new__(ReflectionExecutor)
+        input_data = {"messages": []}
+
+        result = executor._inject_improvement_message(input_data, "Improve", "Request")
+
+        assert result["messages"][-1]["role"] == "system"
 
 
 # ---------------------------------------------------------------------------
