@@ -33,7 +33,14 @@ class ReasoningSaveExecutor:
         if len(str(content)) < MIN_CONTENT_LENGTH:
             return data
 
-        service.log_thought(str(content), source=config.get("source", "Flow Node"))
+        await service.log_thought(
+            str(content), 
+            source=config.get("source", "Flow Node"),
+            step_id=config.get("step_id"),
+            parent_thought_id=config.get("parent_thought_id"),
+            tags=config.get("tags"),
+            session_id=config.get("session_id")
+        )
         return data
 
     async def send(self, data: dict) -> dict:
@@ -54,6 +61,20 @@ class ReasoningLoadExecutor:
             result["reasoning_history"] = [t["content"] for t in recent_thoughts]
             # Inject as a formatted string for prompts (Chronological order)
             result["reasoning_context"] = "\n".join([f"[{t['timestamp']}] {t['content']}" for t in reversed(recent_thoughts)])
+            # Inject structured reasoning data with full metadata
+            result["reasoning_structured"] = [
+                {
+                    "thought_id": t.get("thought_id"),
+                    "timestamp": t.get("timestamp"),
+                    "content": t.get("content"),
+                    "source": t.get("source"),
+                    "step_id": t.get("step_id"),
+                    "parent_thought_id": t.get("parent_thought_id"),
+                    "tags": t.get("tags", []),
+                    "session_id": t.get("session_id")
+                }
+                for t in reversed(recent_thoughts)
+            ]
             return result
         return data
 

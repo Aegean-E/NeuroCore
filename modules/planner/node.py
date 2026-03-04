@@ -186,7 +186,7 @@ class PlannerExecutor:
                         plan_summary += f"\nSteps: {', '.join([p['action'] for p in plan[:3]])}"
                         if len(plan) > 3:
                             plan_summary += f" and {len(plan) - 3} more"
-                    reasoning_service.log_thought(plan_summary, source="Planner")
+                    await reasoning_service.log_thought(plan_summary, source="Planner")
             
             return result
             
@@ -202,7 +202,7 @@ class PlannerExecutor:
             if config.get("log_to_reasoning_book", False):
                 reasoning_service = self._get_reasoning_service()
                 if reasoning_service:
-                    reasoning_service.log_thought(f"Planning failed for: {user_request[:100]}... Error: {str(e)}", source="Planner")
+                    await reasoning_service.log_thought(f"Planning failed for: {user_request[:100]}... Error: {str(e)}", source="Planner")
             
             return result
 

@@ -1,6 +1,7 @@
 """
 Tests for modules/reasoning_book/node.py
 
+
 Covers:
 - ReasoningSaveExecutor: default source_field ("content"), fallback fields,
   configurable source_field, error-skip, too-short skip, no vague-pattern filter,
@@ -11,13 +12,14 @@ Covers:
 """
 
 import pytest
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import MagicMock, patch, call, AsyncMock
 
 from modules.reasoning_book.node import (
     ReasoningSaveExecutor,
     ReasoningLoadExecutor,
     get_executor_class,
 )
+
 
 LONG_CONTENT = "This is a sufficiently long piece of reasoning content for testing."  # 68 chars
 SHORT_CONTENT = "Too short"  # 9 chars < 30
@@ -43,17 +45,21 @@ class TestReasoningSaveExecutorDefaultField:
         """Should save from 'content' key when no source_field config is set."""
         executor = ReasoningSaveExecutor()
         with patch("modules.reasoning_book.node.service") as mock_service:
+            mock_service.log_thought = AsyncMock(return_value="mock-thought-id")
             await executor.receive({"content": LONG_CONTENT})
-            mock_service.log_thought.assert_called_once_with(LONG_CONTENT, source="Flow Node")
+            mock_service.log_thought.assert_called_once_with(LONG_CONTENT, source="Flow Node", step_id=None, parent_thought_id=None, tags=None, session_id=None)
+
 
     @pytest.mark.asyncio
     async def test_returns_data_unchanged(self):
         """receive() should always return the original data dict unchanged."""
         executor = ReasoningSaveExecutor()
         data = {"content": LONG_CONTENT, "session_id": "abc"}
-        with patch("modules.reasoning_book.node.service"):
+        with patch("modules.reasoning_book.node.service") as mock_service:
+            mock_service.log_thought = AsyncMock(return_value="mock-thought-id")
             result = await executor.receive(data)
         assert result is data
+
 
     @pytest.mark.asyncio
     async def test_skips_when_content_field_missing_and_no_fallback(self):
@@ -86,8 +92,10 @@ class TestReasoningSaveExecutorDefaultField:
         # These phrases were in the old VAGUE_PATTERNS list
         previously_blocked = "I will now consider the neural networks and deep learning approach here."
         with patch("modules.reasoning_book.node.service") as mock_service:
+            mock_service.log_thought = AsyncMock(return_value="mock-thought-id")
             await executor.receive({"content": previously_blocked})
             mock_service.log_thought.assert_called_once()
+
 
     @pytest.mark.asyncio
     async def test_exact_min_length_boundary_saved(self):
@@ -95,8 +103,10 @@ class TestReasoningSaveExecutorDefaultField:
         executor = ReasoningSaveExecutor()
         exactly_30 = "a" * 30
         with patch("modules.reasoning_book.node.service") as mock_service:
+            mock_service.log_thought = AsyncMock(return_value="mock-thought-id")
             await executor.receive({"content": exactly_30})
             mock_service.log_thought.assert_called_once()
+
 
     @pytest.mark.asyncio
     async def test_one_below_min_length_skipped(self):
@@ -116,52 +126,64 @@ class TestReasoningSaveExecutorFallbackFields:
         """Should fall back to 'reasoning' when 'content' is absent."""
         executor = ReasoningSaveExecutor()
         with patch("modules.reasoning_book.node.service") as mock_service:
+            mock_service.log_thought = AsyncMock(return_value="mock-thought-id")
             await executor.receive({"reasoning": LONG_CONTENT})
-            mock_service.log_thought.assert_called_once_with(LONG_CONTENT, source="Flow Node")
+            mock_service.log_thought.assert_called_once_with(LONG_CONTENT, source="Flow Node", step_id=None, parent_thought_id=None, tags=None, session_id=None)
+
 
     @pytest.mark.asyncio
     async def test_fallback_to_thought_field(self):
         """Should fall back to 'thought' when 'content' and 'reasoning' are absent."""
         executor = ReasoningSaveExecutor()
         with patch("modules.reasoning_book.node.service") as mock_service:
+            mock_service.log_thought = AsyncMock(return_value="mock-thought-id")
             await executor.receive({"thought": LONG_CONTENT})
-            mock_service.log_thought.assert_called_once_with(LONG_CONTENT, source="Flow Node")
+            mock_service.log_thought.assert_called_once_with(LONG_CONTENT, source="Flow Node", step_id=None, parent_thought_id=None, tags=None, session_id=None)
+
 
     @pytest.mark.asyncio
     async def test_fallback_to_summary_field(self):
         """Should fall back to 'summary' when earlier fields are absent."""
         executor = ReasoningSaveExecutor()
         with patch("modules.reasoning_book.node.service") as mock_service:
+            mock_service.log_thought = AsyncMock(return_value="mock-thought-id")
             await executor.receive({"summary": LONG_CONTENT})
-            mock_service.log_thought.assert_called_once_with(LONG_CONTENT, source="Flow Node")
+            mock_service.log_thought.assert_called_once_with(LONG_CONTENT, source="Flow Node", step_id=None, parent_thought_id=None, tags=None, session_id=None)
+
 
     @pytest.mark.asyncio
     async def test_fallback_to_conclusion_field(self):
         """Should fall back to 'conclusion'."""
         executor = ReasoningSaveExecutor()
         with patch("modules.reasoning_book.node.service") as mock_service:
+            mock_service.log_thought = AsyncMock(return_value="mock-thought-id")
             await executor.receive({"conclusion": LONG_CONTENT})
-            mock_service.log_thought.assert_called_once_with(LONG_CONTENT, source="Flow Node")
+            mock_service.log_thought.assert_called_once_with(LONG_CONTENT, source="Flow Node", step_id=None, parent_thought_id=None, tags=None, session_id=None)
+
 
     @pytest.mark.asyncio
     async def test_fallback_to_result_field(self):
         """Should fall back to 'result'."""
         executor = ReasoningSaveExecutor()
         with patch("modules.reasoning_book.node.service") as mock_service:
+            mock_service.log_thought = AsyncMock(return_value="mock-thought-id")
             await executor.receive({"result": LONG_CONTENT})
-            mock_service.log_thought.assert_called_once_with(LONG_CONTENT, source="Flow Node")
+            mock_service.log_thought.assert_called_once_with(LONG_CONTENT, source="Flow Node", step_id=None, parent_thought_id=None, tags=None, session_id=None)
+
 
     @pytest.mark.asyncio
     async def test_content_takes_priority_over_fallback(self):
         """'content' should be used even when fallback fields are also present."""
         executor = ReasoningSaveExecutor()
         with patch("modules.reasoning_book.node.service") as mock_service:
+            mock_service.log_thought = AsyncMock(return_value="mock-thought-id")
             await executor.receive({
                 "content": LONG_CONTENT,
                 "reasoning": "This is a different long reasoning text that should not be saved.",
             })
             saved_content = mock_service.log_thought.call_args[0][0]
             assert saved_content == LONG_CONTENT
+
 
 
 class TestReasoningSaveExecutorConfig:
@@ -172,41 +194,49 @@ class TestReasoningSaveExecutorConfig:
         """source_field config should override the default 'content' field."""
         executor = ReasoningSaveExecutor()
         with patch("modules.reasoning_book.node.service") as mock_service:
+            mock_service.log_thought = AsyncMock(return_value="mock-thought-id")
             await executor.receive(
                 {"my_custom_field": LONG_CONTENT},
                 config={"source_field": "my_custom_field"},
             )
-            mock_service.log_thought.assert_called_once_with(LONG_CONTENT, source="Flow Node")
+            mock_service.log_thought.assert_called_once_with(LONG_CONTENT, source="Flow Node", step_id=None, parent_thought_id=None, tags=None, session_id=None)
+
 
     @pytest.mark.asyncio
     async def test_custom_source_label(self):
         """source config should set the source label passed to log_thought."""
         executor = ReasoningSaveExecutor()
         with patch("modules.reasoning_book.node.service") as mock_service:
+            mock_service.log_thought = AsyncMock(return_value="mock-thought-id")
             await executor.receive(
                 {"content": LONG_CONTENT},
                 config={"source": "Agent Loop"},
             )
-            mock_service.log_thought.assert_called_once_with(LONG_CONTENT, source="Agent Loop")
+            mock_service.log_thought.assert_called_once_with(LONG_CONTENT, source="Agent Loop", step_id=None, parent_thought_id=None, tags=None, session_id=None)
+
 
     @pytest.mark.asyncio
     async def test_custom_source_field_missing_falls_back(self):
         """If the configured source_field is absent, should fall back to reasoning/thought/etc."""
         executor = ReasoningSaveExecutor()
         with patch("modules.reasoning_book.node.service") as mock_service:
+            mock_service.log_thought = AsyncMock(return_value="mock-thought-id")
             await executor.receive(
                 {"reasoning": LONG_CONTENT},
                 config={"source_field": "nonexistent_field"},
             )
-            mock_service.log_thought.assert_called_once_with(LONG_CONTENT, source="Flow Node")
+            mock_service.log_thought.assert_called_once_with(LONG_CONTENT, source="Flow Node", step_id=None, parent_thought_id=None, tags=None, session_id=None)
+
 
     @pytest.mark.asyncio
     async def test_none_config_uses_defaults(self):
         """Passing config=None should use all defaults without error."""
         executor = ReasoningSaveExecutor()
         with patch("modules.reasoning_book.node.service") as mock_service:
+            mock_service.log_thought = AsyncMock(return_value="mock-thought-id")
             await executor.receive({"content": LONG_CONTENT}, config=None)
             mock_service.log_thought.assert_called_once()
+
 
 
 class TestReasoningSaveExecutorSend:
