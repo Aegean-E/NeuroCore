@@ -174,19 +174,28 @@
 
                 <div class="bg-slate-950/50 rounded-xl border border-slate-800 p-6">
                     <h4 class="text-sm font-semibold text-slate-300 mb-4 uppercase tracking-wider">Behavior Settings</h4>
-                    <div class="flex items-center space-x-3">
-                        <input type="checkbox" name="inject_improvement" value="true" {% if module.config.inject_improvement %}checked{% endif %}
-                               class="w-5 h-5 rounded border-slate-700 bg-slate-950 text-blue-600 focus:ring-blue-500 focus:ring-offset-slate-900"
-                               id="inject_improvement">
-                        <label for="inject_improvement" class="text-sm text-slate-300 cursor-pointer">
-                            Inject improvement feedback into conversation
-                        </label>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-sm font-medium text-slate-400 mb-2">Max Reflection Retries</label>
+                            <input type="number" name="max_reflection_retries" value="{{ module.config.max_reflection_retries }}" min="0" max="10"
+                                   class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all">
+                            <p class="text-xs text-slate-500 mt-2">Maximum number of reflection-driven retry attempts when a response is not satisfactory. Set to 0 to disable retries. Default: 3</p>
+                        </div>
+                        <div class="flex items-center space-x-3 pt-8">
+                            <input type="checkbox" name="inject_improvement" value="true" {% if module.config.inject_improvement %}checked{% endif %}
+                                   class="w-5 h-5 rounded border-slate-700 bg-slate-950 text-blue-600 focus:ring-blue-500 focus:ring-offset-slate-900"
+                                   id="inject_improvement">
+                            <label for="inject_improvement" class="text-sm text-slate-300 cursor-pointer">
+                                Inject improvement feedback
+                            </label>
+                        </div>
                     </div>
-                    <p class="text-xs text-slate-500 mt-2 ml-8">
+                    <p class="text-xs text-slate-500 mt-2">
                         When enabled, the reflection agent will add feedback messages to the conversation 
                         when a response needs improvement, allowing the agent to retry with better results.
                     </p>
                 </div>
+
             </div>
 
             <div class="mt-6 flex justify-end">
@@ -283,7 +292,78 @@
     </div>
     {% endif %}
 
-    {% if module.config and has_visible_config and module.id != 'agent_loop' and module.id != 'reflection' and module.id != 'planner' %}
+
+    {% if module.id == 'system_prompt' and module.enabled %}
+    <div class="bg-slate-900 rounded-xl border border-slate-800 p-6 mt-6">
+        <h3 class="font-semibold text-lg mb-4">System Prompt Settings</h3>
+        <form hx-post="/modules/{{ module.id }}/config" 
+              hx-swap="none"
+              hx-on::after-request="const btn = this.querySelector('button[type=submit]'); const orig = btn.innerText; btn.innerText = 'Saved!'; btn.classList.remove('bg-blue-600', 'hover:bg-blue-500'); btn.classList.add('bg-emerald-600', 'hover:bg-emerald-500'); setTimeout(() => { btn.innerText = orig; btn.classList.add('bg-blue-600', 'hover:bg-blue-500'); btn.classList.remove('bg-emerald-600', 'hover:bg-emerald-500'); }, 2000);">
+            
+            <div class="space-y-6">
+                <div class="bg-slate-950/50 rounded-xl border border-slate-800 p-6">
+                    <h4 class="text-sm font-semibold text-slate-300 mb-4 uppercase tracking-wider">System Instruction</h4>
+                    <textarea name="system_prompt" rows="8" 
+                              class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all custom-scrollbar">{{ module.config.system_prompt }}</textarea>
+                    <p class="text-xs text-slate-500 mt-3">
+                        The system prompt defines the AI's persona and behavior. This is injected into every conversation.
+                        <span class="text-amber-400">⚠️ Changes affect all conversations using this module.</span>
+                    </p>
+                </div>
+
+                <div class="bg-slate-950/50 rounded-xl border border-slate-800 p-6">
+                    <h4 class="text-sm font-semibold text-slate-300 mb-4 uppercase tracking-wider">Enabled Capabilities</h4>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-sm font-medium text-slate-400 mb-2">Enabled Tools</label>
+                            <input type="text" name="enabled_tools" value="{{ module.config.enabled_tools | join(', ') if module.config.enabled_tools else '' }}" placeholder="tool1, tool2, tool3"
+                                   class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all">
+                            <p class="text-xs text-slate-500 mt-2">Comma-separated list of tool names to enable for this system prompt. Leave empty to allow all tools.</p>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-slate-400 mb-2">Enabled Skills</label>
+                            <input type="text" name="enabled_skills" value="{{ module.config.enabled_skills | join(', ') if module.config.enabled_skills else '' }}" placeholder="skill1, skill2"
+                                   class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all">
+                            <p class="text-xs text-slate-500 mt-2">Comma-separated list of skill IDs to inject into the system prompt. Leave empty to disable skills.</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="mt-6 flex justify-end">
+                <button type="submit" class="bg-blue-600 hover:bg-blue-500 text-white px-6 py-2 rounded-lg text-sm font-semibold transition-colors">Save System Prompt Settings</button>
+            </div>
+        </form>
+    </div>
+    {% endif %}
+
+    {% if module.id == 'skills' and module.enabled %}
+    <div class="bg-slate-900 rounded-xl border border-slate-800 p-6 mt-6">
+        <h3 class="font-semibold text-lg mb-4">Skills Storage Settings</h3>
+        <form hx-post="/modules/{{ module.id }}/config" 
+              hx-swap="none"
+              hx-on::after-request="const btn = this.querySelector('button[type=submit]'); const orig = btn.innerText; btn.innerText = 'Saved!'; btn.classList.remove('bg-blue-600', 'hover:bg-blue-500'); btn.classList.add('bg-emerald-600', 'hover:bg-emerald-500'); setTimeout(() => { btn.innerText = orig; btn.classList.add('bg-blue-600', 'hover:bg-blue-500'); btn.classList.remove('bg-emerald-600', 'hover:bg-emerald-500'); }, 2000);">
+            
+            <div class="space-y-6">
+                <div class="bg-slate-950/50 rounded-xl border border-slate-800 p-6">
+                    <h4 class="text-sm font-semibold text-slate-300 mb-4 uppercase tracking-wider">Storage Configuration</h4>
+                    <div>
+                        <label class="block text-sm font-medium text-slate-400 mb-2">Storage Path</label>
+                        <input type="text" name="storage_path" value="{{ module.config.storage_path }}" placeholder="modules/skills/data"
+                               class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all">
+                        <p class="text-xs text-slate-500 mt-2">Directory path where skill files (SKILL.md) are stored. Relative to project root. Default: modules/skills/data</p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="mt-6 flex justify-end">
+                <button type="submit" class="bg-blue-600 hover:bg-blue-500 text-white px-6 py-2 rounded-lg text-sm font-semibold transition-colors">Save Skills Settings</button>
+            </div>
+        </form>
+    </div>
+    {% endif %}
+
+    {% if module.config and has_visible_config and module.id != 'agent_loop' and module.id != 'reflection' and module.id != 'planner' and module.id != 'system_prompt' and module.id != 'skills' %}
     <div class="bg-slate-900 rounded-xl border border-slate-800 p-6 mt-6">
         <h3 class="font-semibold text-lg mb-4">Configuration</h3>
         <form hx-post="/modules/{{ module.id }}/config" hx-swap="none"
@@ -295,6 +375,7 @@
         </form>
     </div>
     {% endif %}
+
 
 
     {% if module.id == 'llm_module' and module.enabled %}
@@ -453,7 +534,22 @@
                             <p class="text-xs text-slate-500 mt-2">Rejects new memories too similar to existing ones (0.0 to 1.0). Set to 1.0 to allow duplicates, lower to prevent redundancy. Default: 0.9</p>
                         </div>
                     </div>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
+                        <div>
+                            <label class="block text-sm font-medium text-slate-400 mb-2">Default Confidence</label>
+                            <input type="number" name="save_default_confidence" value="{{ module.config.save_default_confidence }}" step="0.05" min="0.0" max="1.0"
+                                   class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all">
+                            <p class="text-xs text-slate-500 mt-2">Default confidence value assigned to new memories when extraction confidence cannot be determined. Default: 1.0</p>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-slate-400 mb-2">Save Delay (seconds)</label>
+                            <input type="number" name="save_delay" value="{{ module.config.save_delay }}" step="0.5" min="0.0" max="60.0"
+                                   class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all">
+                            <p class="text-xs text-slate-500 mt-2">Delay before saving memories after conversation ends. Allows time for context to settle. Default: 3.0</p>
+                        </div>
+                    </div>
                 </div>
+
 
                 <div class="bg-slate-900 rounded-xl border border-slate-800 p-6">
                     <h4 class="text-sm font-semibold text-slate-300 mb-4 uppercase tracking-wider">Memory Recall</h4>
