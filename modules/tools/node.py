@@ -3,8 +3,17 @@ import os
 import asyncio
 import httpx
 from .router import TOOLS_FILE, LIBRARY_DIR
+from .sandbox import ToolSandbox, SecurityError, ResourceLimitError, TimeoutError
 
 class ToolDispatcherExecutor:
+    def __init__(self):
+        # Initialize sandbox with security settings from config
+        self.sandbox = ToolSandbox(
+            timeout=30.0,  # 30 second timeout for tool execution
+            max_output_size=100 * 1024,  # 100KB max output
+            read_only_files=True,  # Tools cannot write files by default
+        )
+    
     def _load_tools(self):
         if os.path.exists(TOOLS_FILE):
             with open(TOOLS_FILE, "r") as f:
@@ -75,11 +84,17 @@ class ToolDispatcherExecutor:
                 if os.path.exists(code_path):
                     with open(code_path, "r") as f:
                         code = f.read()
-                # Execute custom tool logic
-                local_scope = {"args": args, "result": None, "json": json, "httpx": httpx}
+                
+                # Execute tool code in sandboxed environment for security
                 try:
-                    exec(code, local_scope)
-                    output = local_scope.get("result", "Success (no result returned)")
+                    result = self.sandbox.execute(code, {"args": args})
+                    output = result.get("result", "Success (no result returned)")
+                except SecurityError as e:
+                    output = f"Security Error: Tool '{func_name}' violated security policy: {str(e)}"
+                except ResourceLimitError as e:
+                    output = f"Resource Limit Error: Tool '{func_name}' exceeded resource limits: {str(e)}"
+                except TimeoutError as e:
+                    output = f"Timeout Error: Tool '{func_name}' took too long to execute: {str(e)}"
                 except Exception as e:
                     output = f"Error executing tool {func_name}: {str(e)}"
             else:
