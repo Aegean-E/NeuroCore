@@ -34,7 +34,24 @@ class FlowRunner:
             print(f"[FlowRunner] Initialized for flow {flow_id}")
 
     def _build_bridge_groups(self):
-        """Identifies groups of bridged nodes."""
+        """
+        Identifies groups of bridged nodes using BFS to find connected components.
+        
+        Bridges are bidirectional connections that create implicit execution dependencies.
+        When nodes A-B-C are bridged together, they form a "bridge group" where:
+        - All nodes in the group share the same input data
+        - The group executes in upstream-to-downstream order
+        - Outputs from earlier nodes in the chain are merged into later nodes
+        
+        Algorithm:
+        1. Build adjacency list from bridge connections (undirected graph)
+        2. Use BFS to find all connected components
+        3. Map each node to its full component group
+        
+        Returns:
+            dict: Mapping of node_id -> list of all node_ids in the same bridge group
+        """
+        # Build undirected adjacency list: bridges connect nodes bidirectionally
         adj = {node_id: [] for node_id in self.nodes}
         for b in self.bridges:
             if b['from'] in adj and b['to'] in adj:
@@ -44,10 +61,12 @@ class FlowRunner:
         groups = {}
         visited = set()
         for node_id in self.nodes:
-            if node_id in visited: continue
-            if not adj[node_id]: continue
+            if node_id in visited: 
+                continue
+            if not adj[node_id]: 
+                continue
             
-            # BFS to find connected component
+            # BFS to find all nodes in this connected component
             component = []
             queue = deque([node_id])
             visited.add(node_id)
@@ -59,62 +78,101 @@ class FlowRunner:
                         visited.add(neighbor)
                         queue.append(neighbor)
             
+            # Each node in the component maps to the full component list
             for member in component:
                 groups[member] = component
         return groups
+
     
     def _get_bridge_order(self, node_id):
-        """Get bridge chain nodes in execution order (upstream to downstream)."""
+        """
+        Get bridge chain nodes in execution order (upstream to downstream).
+        
+        Bridges have a direction: from_node executes BEFORE to_node. This method
+        performs a topological sort within the bridge group to determine the
+        correct execution order.
+        
+        For example, if bridges are A->B and B->C, the order is [A, B, C].
+        This ensures that when node C executes, it has access to outputs from A and B.
+        
+        Args:
+            node_id: The ID of a node in the bridge group
+            
+        Returns:
+            list: Ordered list of node IDs from furthest upstream to downstream
+        """
         if node_id not in self.bridge_groups:
             return []
         
-        # Build bridge direction map
+        # Build directed adjacency list from bridge definitions
+        # Each bridge defines: from_node runs BEFORE to_node
         bridge_dir = {}
         for b in self.bridges:
             from_node = b['from']
             to_node = b['to']
-            # from_node runs BEFORE to_node
             if from_node not in bridge_dir:
                 bridge_dir[from_node] = []
             bridge_dir[from_node].append(to_node)
         
-        # Find all nodes in chain starting from furthest upstream
+        # Get all nodes in this bridge group
         group = self.bridge_groups[node_id]
         ordered = []
         visited = set()
         
+        # DFS to build topological order (visit dependencies first)
         def visit(nid):
             if nid in visited:
                 return
             visited.add(nid)
-            # Visit dependencies first
+            # Visit all upstream nodes first (nodes that have edges TO this node)
             for b in self.bridges:
                 if b['to'] == nid and b['from'] in group:
                     visit(b['from'])
             ordered.append(nid)
         
+        # Visit all nodes in the group to build complete ordering
         for nid in group:
             visit(nid)
         
         return ordered
 
+
     def _compute_execution_order(self):
-        """Performs a topological sort (Kahn's algorithm) to find the execution order."""
+        """
+        Performs a topological sort (Kahn's algorithm) to find the execution order.
+        
+        This method builds a directed acyclic graph (DAG) from:
+        1. Bridge connections (implicit dependencies between bridged nodes)
+        2. Regular connections (explicit user-defined edges)
+        
+        Bridge handling: When a node is bridged, all nodes in its bridge group
+        receive the same input. The bridge edges define execution order within
+        the group, while connections to any group member feed the entire group.
+        
+        Cycle handling: If cycles are detected (e.g., A->B->A), we break them
+        arbitrarily by picking remaining nodes and forcing them into the order.
+        This allows execution to continue even with malformed flows.
+        
+        Returns:
+            list: Topologically sorted list of node IDs for execution
+        """
+        # Build adjacency list and in-degree count for Kahn's algorithm
         adj = {node_id: [] for node_id in self.nodes}
         in_degree = {node_id: 0 for node_id in self.nodes}
 
-        # First, add bridge dependencies to the graph
-        # Bridges create implicit connections between all bridged nodes
+        # Step 1: Add bridge dependencies to the graph
+        # Bridges are directed: from_node must execute before to_node
         for b in self.bridges:
             from_node = b['from']
             to_node = b['to']
             if from_node not in self.nodes or to_node not in self.nodes:
                 continue
-            # Add bridge edge: from_node -> to_node (from runs before to)
+            # Add bridge edge: from_node -> to_node
             if to_node not in adj[from_node]:
                 adj[from_node].append(to_node)
                 in_degree[to_node] += 1
 
+        # Step 2: Add regular connections to the graph
         for conn in self.connections:
             source = conn['from']
             target = conn['to']
@@ -123,8 +181,8 @@ class FlowRunner:
             if source not in self.nodes or target not in self.nodes:
                 continue
             
+            # If target is bridged, the source feeds the entire bridge group
             targets = [target]
-            # If target is bridged, the source effectively feeds the whole bridge group
             if target in self.bridge_groups:
                 targets = self.bridge_groups[target]
             
@@ -136,6 +194,7 @@ class FlowRunner:
                         adj[source].append(t)
                         in_degree[t] += 1
 
+        # Step 3: Kahn's algorithm - start with nodes that have no dependencies
         queue = deque([node_id for node_id in self.nodes if in_degree[node_id] == 0])
         sorted_order = []
 
@@ -143,25 +202,24 @@ class FlowRunner:
             u = queue.popleft()
             sorted_order.append(u)
 
+            # Reduce in-degree for all neighbors
             for v in adj[u]:
                 in_degree[v] -= 1
                 if in_degree[v] == 0:
                     queue.append(v)
         
+        # Step 4: Handle cycles - if not all nodes were sorted, we have a cycle
         if len(sorted_order) != len(self.nodes):
-            # Cycle detected. We continue by breaking the cycle to allow execution.
-            # We iteratively pick the remaining node with the lowest in-degree (heuristic)
-            # and treat it as satisfied to proceed.
+            # Cycle detected. Break it by arbitrarily adding remaining nodes.
+            # This is a heuristic to allow execution even with malformed flows.
             remaining_nodes = list(set(self.nodes.keys()) - set(sorted_order))
             
             while len(sorted_order) < len(self.nodes):
-                # Re-calculate in-degrees for remaining nodes based only on other remaining nodes
-                # actually, we just need to pick one to break the deadlock.
+                # Pick the first remaining node to break the deadlock
                 candidates = [n for n in self.nodes if n not in sorted_order]
                 if not candidates:
                     break
                 
-                # Pick the first one (arbitrary break)
                 next_node = candidates[0]
                 sorted_order.append(next_node)
                 
@@ -182,6 +240,7 @@ class FlowRunner:
                                 queue.append(v)
 
         return sorted_order
+
 
     def validate(self, module_manager) -> dict:
         """Validates the flow for potential issues before execution."""
@@ -361,17 +420,23 @@ class FlowRunner:
                 # 1. Determine Input Data (DAG Logic)
                 incoming_edges = [c for c in self.connections if c['to'] == node_id]
                 
-                # Check if this node has upstream bridge dependencies that haven't run yet
+                # Bridge Execution: Process upstream bridge nodes before this node
+                # Bridges create implicit execution chains where earlier nodes in the
+                # chain feed their outputs to later nodes. This allows for patterns like:
+                # Memory Recall -> System Prompt -> LLM Core (all bridged together)
                 if node_id in self.bridge_groups and node_id not in explicit_start_nodes:
                     bridge_chain = self._get_bridge_order(node_id)
+                    # Start with initial input (excluding the internal routing marker)
                     bridge_input = {k: v for k, v in initial_input.items() if k != "_input_source"} if isinstance(initial_input, dict) else initial_input
                     
+                    # Execute each upstream bridge node in order
                     for bridge_node_id in bridge_chain:
                         if bridge_node_id != node_id and bridge_node_id not in node_outputs:
                             bridge_meta = self.nodes[bridge_node_id]
                             bridge_module_id = bridge_meta['moduleId']
                             bridge_type_id = bridge_meta['nodeTypeId']
                             
+                            # Get or load the executor class for this bridge node
                             bridge_cache_key = f"{bridge_module_id}.{bridge_type_id}"
                             if bridge_cache_key not in self._executor_cache:
                                 node_dispatcher = importlib.import_module(f"modules.{bridge_module_id}.node")
@@ -391,16 +456,24 @@ class FlowRunner:
                                     bridge_config['_flow_id'] = self.flow_id
                                     bridge_config['_node_id'] = bridge_node_id
                                     
+                                    # Execute the bridge node's receive/send cycle
                                     bridge_processed = await bridge_executor.receive(bridge_input, config=bridge_config)
                                     if bridge_processed is None:
+                                        # Node returned None - stop this branch
                                         break
                                     bridge_output = await bridge_executor.send(bridge_processed)
                                     node_outputs[bridge_node_id] = bridge_output
-                                    # Pass output as input to next bridge node
+                                    
+                                    # Merge bridge output into input for next node in chain
+                                    # This allows bridge nodes to progressively build context
                                     if isinstance(bridge_output, dict):
                                         bridge_input = bridge_input.copy()
                                         bridge_input.update(bridge_output)
-                                except Exception as bridge_err:
+                                except (ImportError, AttributeError, RuntimeError) as bridge_err:
+                                    # Specific exception types for better error categorization:
+                                    # - ImportError: Module not found or import failed
+                                    # - AttributeError: Executor class or method missing
+                                    # - RuntimeError: Node execution failed at runtime
                                     import traceback
                                     print(f"[Bridge Error] Node {bridge_node_id} failed: {bridge_err}")
                                     print(f"[Bridge Error] Traceback: {traceback.format_exc()}")
@@ -408,6 +481,7 @@ class FlowRunner:
                                         debug_logger.log(self.flow_id, bridge_node_id, bridge_meta.get('name', bridge_node_id), "bridge_error", {"error": str(bridge_err), "traceback": traceback.format_exc()})
                                     # Continue without bridge output - don't fail the whole flow
                                     break
+
                 
                 if node_id in explicit_start_nodes:
                     # Explicit start node receives the initial input directly
@@ -578,15 +652,18 @@ class FlowRunner:
                                 debug_logger.log(self.flow_id, node_id, node_meta['name'], "queue_next", {"next": child_name})
 
                 except (ImportError, AttributeError) as e:
+                    # Module import issues or missing executor classes
                     print(f"Warning: Could not find or use node logic for {module_id}/{node_type_id}. Error: {e}. Passing data through.")
                     node_outputs[node_id] = node_input
-                except Exception as e:
+                except (RuntimeError, ValueError, TypeError) as e:
+                    # Node execution errors: runtime failures, invalid values, type mismatches
                     error_msg = f"Execution failed at node '{node_meta['name']}': {e}"
                     if settings.get("debug_mode"):
-                        debug_logger.log(self.flow_id, node_id, node_meta['name'], "error", {"error": str(e)})
+                        debug_logger.log(self.flow_id, node_id, node_meta['name'], "error", {"error": str(e), "error_type": type(e).__name__})
                     print(f"Error in FlowRunner: {error_msg}")
                     # Return a structured error that the chat UI can display
                     return {"error": error_msg}
+
             
             if settings.get("debug_mode"):
                 debug_logger.log(self.flow_id, "SYSTEM", "FlowRunner", "flow_complete", {})
@@ -599,12 +676,14 @@ class FlowRunner:
                     
             return {}
         except asyncio.CancelledError:
+            # Flow was explicitly cancelled (e.g., user stopped active flows)
             if settings.get("debug_mode"):
                 debug_logger.log(self.flow_id, "SYSTEM", "FlowRunner", "flow_cancelled", {})
             print(f"[FlowRunner] Flow {self.flow_id} cancelled")
             raise
-        except Exception as e:
+        except (RuntimeError, ValueError) as e:
+            # Flow-level execution errors
             if settings.get("debug_mode"):
-                debug_logger.log(self.flow_id, "SYSTEM", "FlowRunner", "flow_error", {"error": str(e)})
+                debug_logger.log(self.flow_id, "SYSTEM", "FlowRunner", "flow_error", {"error": str(e), "error_type": type(e).__name__})
             print(f"[FlowRunner] Flow {self.flow_id} failed: {e}")
             raise

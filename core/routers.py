@@ -30,9 +30,12 @@ def format_reasoning_content(content):
                     message = data["choices"][0].get("message", {})
                     if "content" in message:
                         return message["content"]
-        except Exception:
+        except (ValueError, SyntaxError, KeyError, IndexError):
+            # ValueError/SyntaxError: ast.literal_eval failed to parse
+            # KeyError/IndexError: Missing expected keys in parsed structure
             pass
     return content
+
 
 templates.env.filters["format_reasoning"] = format_reasoning_content
 
@@ -81,7 +84,11 @@ async def get_dashboard_stats(request: Request):
             cursor.execute("SELECT COUNT(*) FROM memories WHERE is_archived = 0")
             memory_count = cursor.fetchone()[0]
             conn.close()
-        except: pass
+        except (sqlite3.Error, OSError) as e:
+            # sqlite3.Error: Database connection or query failed
+            # OSError: File system issues (permissions, disk full, etc.)
+            print(f"[Dashboard Stats] Warning: Could not read memory count: {e}")
+
     
     # Chat sessions count
     sessions_count = 0
@@ -91,7 +98,12 @@ async def get_dashboard_stats(request: Request):
             with open(sessions_path, 'r') as f:
                 sessions = json.load(f)
             sessions_count = len(sessions)
-        except: pass
+        except (json.JSONDecodeError, OSError, KeyError) as e:
+            # JSONDecodeError: Corrupted JSON file
+            # OSError: File read permissions or I/O issues
+            # KeyError: Unexpected structure in sessions data
+            print(f"[Dashboard Stats] Warning: Could not read sessions count: {e}")
+
     
     # Knowledge base docs count
     docs_count = 0
@@ -104,7 +116,11 @@ async def get_dashboard_stats(request: Request):
             cursor.execute("SELECT COUNT(*) FROM documents")
             docs_count = cursor.fetchone()[0]
             conn.close()
-        except: pass
+        except (sqlite3.Error, OSError) as e:
+            # sqlite3.Error: Database connection or query failed
+            # OSError: File system issues
+            print(f"[Dashboard Stats] Warning: Could not read knowledge base count: {e}")
+
     
     # Tools count
     tools_count = 0
@@ -116,11 +132,13 @@ async def get_dashboard_stats(request: Request):
             py_files = [f for f in files if f.suffix == '.py' and not f.name.startswith('_') and f.name != '__init__.py']
             tools_count = len(py_files)
             print(f"DEBUG: Found {tools_count} tools: {[f.name for f in py_files]}")
-        except Exception as e:
-            print(f"DEBUG: Error counting tools: {e}")
-            pass
+        except (OSError, PermissionError) as e:
+            # OSError: Directory iteration failed
+            # PermissionError: Insufficient permissions to read directory
+            print(f"[Dashboard Stats] Warning: Error counting tools: {e}")
     else:
         print(f"DEBUG: tools_path does not exist!")
+
     
     html = f"""
     <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -209,8 +227,13 @@ async def get_recent_sessions(request: Request):
             </button>
             """
         return html
-    except Exception as e:
+    except (json.JSONDecodeError, OSError, KeyError, ValueError) as e:
+        # JSONDecodeError: Corrupted sessions file
+        # OSError: File system issues
+        # KeyError/ValueError: Data structure issues
+        print(f"[Recent Sessions] Warning: Could not load recent sessions: {e}")
         return f'<p class="text-slate-500 text-sm italic">Error loading sessions</p>'
+
 
 @router.get("/navbar", response_class=HTMLResponse)
 async def get_navbar(request: Request, module_manager: ModuleManager = Depends(get_module_manager), settings_man: SettingsManager = Depends(get_settings_manager)):
@@ -414,8 +437,12 @@ async def save_module_config(request: Request, module_id: str, module_manager: M
         return Response(status_code=200, headers={"HX-Trigger": json.dumps({"showMessage": {"level": "success", "message": "Configuration saved"}})})
     except json.JSONDecodeError:
         return Response(status_code=400, headers={"HX-Trigger": json.dumps({"showMessage": {"level": "error", "message": "Invalid JSON format"}})})
-    except Exception as e:
-        return Response(status_code=500, headers={"HX-Trigger": json.dumps({"showMessage": {"level": "error", "message": str(e)}})})
+    except (KeyError, TypeError, ValueError) as e:
+        # KeyError: Missing expected form fields
+        # TypeError: Invalid type operations during config processing
+        # ValueError: Invalid values in form data
+        return Response(status_code=500, headers={"HX-Trigger": json.dumps({"showMessage": {"level": "error", "message": f"Configuration error: {e}"}})})
+
 
 
 @router.post("/modules/reorder")
@@ -425,8 +452,12 @@ async def reorder_modules(request: Request, order: str = Form(...), module_manag
         module_manager.reorder_modules(module_ids)
         # Trigger a refresh of the navbar to reflect the new order
         return Response(status_code=200, headers={"HX-Trigger": "modulesChanged"})
-    except Exception as e:
+    except (ValueError, KeyError, TypeError) as e:
+        # ValueError: Invalid module ID format
+        # KeyError: Module not found during reordering
+        # TypeError: Invalid operations on module data
         return Response(status_code=500, headers={"HX-Trigger": json.dumps({"showMessage": {"level": "error", "message": f"Failed to reorder: {e}"}})})
+
 
 @router.post("/modules/{module_id}/{action}")
 async def toggle_module(request: Request, module_id: str, action: str, module_manager: ModuleManager = Depends(get_module_manager)):
@@ -479,8 +510,12 @@ async def validate_flow(flow_id: str, request: Request):
         runner = FlowRunner(flow_id, flow_override=flow)
         validation_result = runner.validate(module_manager)
         return validation_result
-    except Exception as e:
-        return {"valid": False, "issues": [], "warnings": [], "error": str(e)}
+    except (ValueError, KeyError, TypeError) as e:
+        # ValueError: Flow not found or invalid flow structure
+        # KeyError: Missing required flow data
+        # TypeError: Invalid data types in flow structure
+        return {"valid": False, "issues": [], "warnings": [], "error": f"Validation error: {e}"}
+
 
 @router.post("/ai-flow/save")
 async def save_ai_flow(request: Request, name: str = Form(...), nodes: str = Form(...), connections: str = Form(...), bridges: str = Form("[]"), flow_id: str = Form(None)):
@@ -612,8 +647,11 @@ async def run_flow_node(flow_id: str, node_id: str, request: Request, background
     try:
         if "application/json" in request.headers.get("content-type", ""):
             flow_override = await request.json()
-    except Exception:
+    except (json.JSONDecodeError, KeyError, TypeError):
+        # JSONDecodeError: Invalid JSON in request body
+        # KeyError/TypeError: Unexpected JSON structure
         pass
+
 
     async def _run():
         try:
@@ -625,8 +663,12 @@ async def run_flow_node(flow_id: str, node_id: str, request: Request, background
                 "manual": True
             }
             await runner.run(payload, start_node_id=node_id)
-        except Exception as e:
-            print(f"Manual trigger failed: {e}")
+        except (RuntimeError, ValueError, TypeError, KeyError) as e:
+            # RuntimeError: Flow execution failed at runtime
+            # ValueError: Invalid flow ID or node ID
+            # TypeError/KeyError: Data structure issues during execution
+            print(f"[Manual Trigger] Warning: Flow execution failed: {e}")
+
 
     background_tasks.add_task(_run)
     return Response(status_code=200, headers={"HX-Trigger": json.dumps({"showMessage": {"level": "success", "message": "Node triggered"}})})
@@ -679,8 +721,11 @@ async def import_config(request: Request, file: UploadFile = File(...), settings
         return Response(status_code=200, headers={"HX-Trigger": json.dumps({"settingsChanged": None, "showMessage": {"level": "success", "message": "Configuration imported successfully"}})})
     except json.JSONDecodeError:
         return Response(status_code=400, headers={"HX-Trigger": json.dumps({"showMessage": {"level": "error", "message": "Invalid JSON file"}})})
-    except Exception as e:
-        return Response(status_code=500, headers={"HX-Trigger": json.dumps({"showMessage": {"level": "error", "message": str(e)}})})
+    except (OSError, PermissionError, TypeError, KeyError) as e:
+        # OSError/PermissionError: File system issues during import
+        # TypeError/KeyError: Invalid settings structure
+        return Response(status_code=500, headers={"HX-Trigger": json.dumps({"showMessage": {"level": "error", "message": f"Import failed: {e}"}})})
+
 
 @router.get("/settings/export/flows")
 async def export_flows():
@@ -708,8 +753,12 @@ async def import_flows(request: Request, file: UploadFile = File(...)):
         return Response(status_code=200, headers={"HX-Trigger": json.dumps({"showMessage": {"level": "success", "message": "Flows imported successfully"}})})
     except json.JSONDecodeError:
         return Response(status_code=400, headers={"HX-Trigger": json.dumps({"showMessage": {"level": "error", "message": "Invalid JSON file"}})})
-    except Exception as e:
-        return Response(status_code=500, headers={"HX-Trigger": json.dumps({"showMessage": {"level": "error", "message": str(e)}})})
+    except (OSError, PermissionError, TypeError, KeyError, ValueError) as e:
+        # OSError/PermissionError: File system issues during import
+        # TypeError/KeyError: Invalid flow data structure
+        # ValueError: Invalid flow ID or configuration values
+        return Response(status_code=500, headers={"HX-Trigger": json.dumps({"showMessage": {"level": "error", "message": f"Import failed: {e}"}})})
+
 
 @router.post("/settings/reset")
 async def reset_settings(request: Request, settings_man: SettingsManager = Depends(get_settings_manager)):
