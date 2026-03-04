@@ -246,13 +246,21 @@
                 <!-- System Prompt Editor -->
                 <div id="config-system-prompt" class="hidden">
                     <label class="block text-sm font-medium text-slate-400 mb-2">System Prompt</label>
-                    <textarea id="system-prompt-input" rows="10" class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all custom-scrollbar" placeholder="You are a helpful AI..."></textarea>
+                    <textarea id="system-prompt-input" rows="8" class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all custom-scrollbar" placeholder="You are a helpful AI..."></textarea>
                     <p class="text-xs text-slate-500 mt-2">Define the persona and instructions for the AI.</p>
-                    
-                    <div class="mt-4 pt-4 border-t border-slate-800">
+                        
+                        <div class="mt-4 pt-4 border-t border-slate-800">
                         <label class="block text-sm font-medium text-slate-400 mb-2">Available Tools</label>
                         <p class="text-xs text-slate-500 mb-3">Select which tools to include in the system prompt:</p>
-                        <div id="system-prompt-tools-checklist" class="space-y-2 max-h-40 overflow-y-auto custom-scrollbar bg-slate-950 border border-slate-700 rounded-xl p-3"></div>
+                        <div id="system-prompt-tools-checklist" class="space-y-2 max-h-32 overflow-y-auto custom-scrollbar bg-slate-950 border border-slate-700 rounded-xl p-3"></div>
+                    </div>
+
+                    <div class="mt-4 pt-4 border-t border-slate-800">
+                        <label class="block text-sm font-medium text-slate-400 mb-2">Available Skills</label>
+                        <p class="text-xs text-slate-500 mb-3">Select which skills/guidelines to include:</p>
+                        <div id="system-prompt-skills-checklist" class="space-y-2 max-h-32 overflow-y-auto custom-scrollbar bg-slate-950 border border-slate-700 rounded-xl p-3">
+                            <div class="animate-pulse text-slate-600 text-xs">Loading skills...</div>
+                        </div>
                     </div>
                 </div>
                 <!-- Python Script Editor -->
