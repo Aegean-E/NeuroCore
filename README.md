@@ -119,8 +119,10 @@ At its heart, NeuroCore is a **flow-based execution engine** that treats AI work
 
 
 ```
+```
 ┌──────────────────────────────────────────────────────────────┐
 │           🌐 Web Layer                                       │
+
 │   HTMX + Jinja2 (40+ templates) + TailwindCSS                │
 │   Zero heavy JS frameworks — server-driven UI updates        │
 ├──────────────────────────────────────────────────────────────┤
