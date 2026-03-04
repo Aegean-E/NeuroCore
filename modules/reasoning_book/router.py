@@ -1,4 +1,5 @@
 import ast
+import logging
 from fastapi import APIRouter, Request, Depends
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
@@ -7,6 +8,8 @@ from .service import service
 
 router = APIRouter()
 templates = Jinja2Templates(directory="web/templates")
+
+logger = logging.getLogger(__name__)
 
 def format_reasoning_content(content):
     """Extracts the actual content from a raw LLM response dictionary string."""
@@ -20,7 +23,10 @@ def format_reasoning_content(content):
                     message = data["choices"][0].get("message", {})
                     if "content" in message:
                         return message["content"]
-        except Exception:
+        except (ValueError, SyntaxError, KeyError, IndexError) as e:
+            # ValueError/SyntaxError: ast.literal_eval failed to parse
+            # KeyError/IndexError: Missing expected keys in parsed structure
+            logger.debug(f"Failed to parse reasoning content: {e}")
             pass
     return content
 

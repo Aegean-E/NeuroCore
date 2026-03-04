@@ -1,5 +1,8 @@
 import json
 import os
+import logging
+
+logger = logging.getLogger(__name__)
 
 class SystemPromptExecutor:
     # Class-level cache: avoids re-reading tools.json on every receive() call
@@ -16,8 +19,11 @@ class SystemPromptExecutor:
                         self.__class__._tools_cache["data"] = json.load(f)
                     self.__class__._tools_cache["mtime"] = mtime
                 return self.__class__._tools_cache["data"]
-        except Exception:
-            pass
+        except (json.JSONDecodeError, OSError, KeyError) as e:
+            # JSONDecodeError: Corrupted JSON file
+            # OSError: File read permissions or I/O issues
+            # KeyError: Missing expected keys in JSON structure
+            logger.warning(f"Failed to load available tools: {e}")
         return {}
 
     def _format_tools_section(self, enabled_tool_names: list) -> str:
@@ -65,8 +71,11 @@ class SystemPromptExecutor:
             if os.path.exists(metadata_file):
                 with open(metadata_file, "r", encoding="utf-8") as f:
                     metadata = json.load(f)
-        except Exception:
-            pass
+        except (json.JSONDecodeError, OSError, KeyError) as e:
+            # JSONDecodeError: Corrupted JSON file
+            # OSError: File read permissions or I/O issues
+            # KeyError: Missing expected keys in JSON structure
+            logger.warning(f"Failed to load skills metadata: {e}")
         
         for skill_id in enabled_skills:
             skill_path = os.path.join(storage_path, f"{skill_id}.md")
@@ -76,7 +85,10 @@ class SystemPromptExecutor:
                         content = f.read()
                         skill_name = metadata.get(skill_id, {}).get("name", skill_id)
                         skills_content.append(f"### {skill_name}\n{content}")
-                except Exception:
+                except (OSError, UnicodeDecodeError) as e:
+                    # OSError: File read permissions or I/O issues
+                    # UnicodeDecodeError: File encoding issues
+                    logger.warning(f"Failed to load skill {skill_id}: {e}")
                     continue
         
         if skills_content:

@@ -1,11 +1,15 @@
 import numpy as np
 import json
+import logging
 from typing import List, Dict, Tuple
 from core.llm import LLMBridge
 from core.settings import settings
 from .backend import memory_store
 import asyncio
 from functools import partial
+
+logger = logging.getLogger(__name__)
+
 
 class MemoryConsolidator:
     """
@@ -144,5 +148,9 @@ class MemoryConsolidator:
         try:
             content = response["choices"][0]["message"]["content"].strip().upper()
             return "YES" in content
-        except:
+        except (KeyError, IndexError, AttributeError) as e:
+            # KeyError: Missing expected keys in response structure
+            # IndexError: Empty choices list
+            # AttributeError: NoneType or missing attributes
+            logger.warning(f"Failed to parse LLM entailment response: {e}")
             return False

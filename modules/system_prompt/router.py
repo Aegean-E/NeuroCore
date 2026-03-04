@@ -1,10 +1,14 @@
 import json
 import os
-from fastapi import APIRouter, Request, Form, Depends
+import logging
+from fastapi import APIRouter, Request, Depends
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
 from core.dependencies import get_module_manager
+
+logger = logging.getLogger(__name__)
+
 
 router = APIRouter()
 templates = Jinja2Templates(directory="web/templates")
@@ -16,7 +20,11 @@ def _load_tools():
         try:
             with open(tools_file, "r") as f:
                 return json.load(f)
-        except:
+        except (json.JSONDecodeError, OSError, KeyError) as e:
+            # JSONDecodeError: Corrupted JSON file
+            # OSError: File read permissions or I/O issues
+            # KeyError: Missing expected keys in JSON structure
+            logger.warning(f"Failed to load tools from {tools_file}: {e}")
             return {}
     return {}
 

@@ -3,6 +3,7 @@ import ast
 import sys
 import platform
 import asyncio
+import logging
 from datetime import datetime
 from fastapi import APIRouter, Request, Form, Depends, HTTPException, Response, BackgroundTasks, UploadFile, File
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
@@ -14,6 +15,9 @@ from core.module_manager import ModuleManager
 from core.flow_manager import flow_manager
 from core.llm import LLMBridge
 from core.debug import debug_logger
+
+logger = logging.getLogger(__name__)
+
 
 router = APIRouter()
 templates = Jinja2Templates(directory="web/templates")
@@ -125,19 +129,20 @@ async def get_dashboard_stats(request: Request):
     # Tools count
     tools_count = 0
     tools_path = base_dir / "modules" / "tools" / "library"
-    print(f"DEBUG: Checking tools_path: {tools_path}, exists: {tools_path.exists()}")
+    logger.debug(f"Checking tools_path: {tools_path}, exists: {tools_path.exists()}")
     if tools_path.exists():
         try:
             files = list(tools_path.iterdir())
             py_files = [f for f in files if f.suffix == '.py' and not f.name.startswith('_') and f.name != '__init__.py']
             tools_count = len(py_files)
-            print(f"DEBUG: Found {tools_count} tools: {[f.name for f in py_files]}")
+            logger.info(f"Found {tools_count} tools: {[f.name for f in py_files]}")
         except (OSError, PermissionError) as e:
             # OSError: Directory iteration failed
             # PermissionError: Insufficient permissions to read directory
-            print(f"[Dashboard Stats] Warning: Error counting tools: {e}")
+            logger.warning(f"Error counting tools: {e}")
     else:
-        print(f"DEBUG: tools_path does not exist!")
+        logger.warning(f"Tools path does not exist: {tools_path}")
+
 
     
     html = f"""

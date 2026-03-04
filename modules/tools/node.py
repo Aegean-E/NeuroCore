@@ -1,9 +1,12 @@
-import json
+ import json
 import os
 import asyncio
+import logging
 import httpx
 from .router import TOOLS_FILE, LIBRARY_DIR
 from .sandbox import ToolSandbox, SecurityError, ResourceLimitError, TimeoutError
+
+logger = logging.getLogger(__name__)
 
 class ToolDispatcherExecutor:
     def __init__(self):
@@ -17,8 +20,13 @@ class ToolDispatcherExecutor:
     def _load_tools(self):
         if os.path.exists(TOOLS_FILE):
             with open(TOOLS_FILE, "r") as f:
-                try: return json.load(f)
-                except: return {}
+                try:
+                    return json.load(f)
+                except (json.JSONDecodeError, OSError) as e:
+                    # JSONDecodeError: Corrupted JSON file
+                    # OSError: File read permissions or I/O issues
+                    logger.warning(f"Failed to load tools from {TOOLS_FILE}: {e}")
+                    return {}
         return {}
 
     async def receive(self, input_data: dict, config: dict = None) -> dict:

@@ -1,8 +1,11 @@
 import re
 import asyncio
 import json
+import logging
 from core.debug import debug_logger
 from core.settings import settings
+
+logger = logging.getLogger(__name__)
 
 class DelayExecutor:
     async def receive(self, input_data: dict, config: dict = None) -> dict:
@@ -10,7 +13,10 @@ class DelayExecutor:
         config = config or {}
         try:
             seconds = float(config.get("seconds", 1.0))
-        except:
+        except (ValueError, TypeError) as e:
+            # ValueError: Invalid string format for float conversion
+            # TypeError: Non-numeric type in config
+            logger.warning(f"Invalid delay seconds value, using default: {e}")
             seconds = 1.0
         
         if seconds < 0:
@@ -45,7 +51,7 @@ class ScriptExecutor:
             exec(code, local_scope)
             return local_scope.get("result")
         except Exception as e:
-            print(f"Script Node Error: {e}")
+            logger.error(f"Script execution failed: {e}")
             # Return error in data stream so it can be debugged
             if isinstance(input_data, dict):
                 err_data = input_data.copy()
@@ -97,7 +103,7 @@ class RepeaterExecutor:
                     next_data["_repeat_count"] = count + 1
                     await runner.run(next_data, start_node_id=start_node)
                 except Exception as e:
-                    print(f"Repeater failed to trigger next run: {e}")
+                    logger.error(f"Repeater failed to trigger next run: {e}")
                     debug_logger.log(fid, "repeater_node", "Repeater", "error", f"Loop failed: {str(e)}")
             
             # Store the task reference to prevent it from being garbage-collected
@@ -156,7 +162,10 @@ class ConditionalRouterExecutor:
                         message = choices[0].get("message")
                         if isinstance(message, dict) and message.get("tool_calls"):
                             condition_met = True
-                except Exception:
+                except (AttributeError, TypeError) as e:
+                    # AttributeError: Object doesn't have expected attributes
+                    # TypeError: Invalid type operations during access
+                    logger.debug(f"Error checking tool_calls in OpenAI format: {e}")
                     pass
         
         if config.get("invert", False):
@@ -214,7 +223,7 @@ class ScheduleStartExecutor:
             
             return input_data
         except Exception as e:
-            print(f"ScheduleStart Error: {e}")
+            logger.error(f"ScheduleStart error: {e}")
             return input_data
 
     async def send(self, processed_data: dict) -> dict:

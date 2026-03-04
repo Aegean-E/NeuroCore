@@ -1,6 +1,9 @@
 import json
 import os
+import logging
 from .bridge import TelegramBridge
+
+logger = logging.getLogger(__name__)
 
 class ConfigLoader:
     @staticmethod
@@ -8,7 +11,11 @@ class ConfigLoader:
         try:
             with open("modules/telegram/module.json", "r") as f:
                 return json.load(f).get("config", {})
-        except:
+        except (json.JSONDecodeError, OSError, KeyError) as e:
+            # JSONDecodeError: Corrupted JSON file
+            # OSError: File read permissions or I/O issues
+            # KeyError: Missing expected keys in JSON structure
+            logger.warning(f"Failed to load telegram config: {e}")
             return {}
 
     @staticmethod
@@ -16,7 +23,11 @@ class ConfigLoader:
         try:
             with open("modules/telegram/module.json", "r") as f:
                 return json.load(f).get("enabled", False)
-        except:
+        except (json.JSONDecodeError, OSError, KeyError) as e:
+            # JSONDecodeError: Corrupted JSON file
+            # OSError: File read permissions or I/O issues
+            # KeyError: Missing expected keys in JSON structure
+            logger.warning(f"Failed to check telegram enabled status: {e}")
             return False
 
 class TelegramInputExecutor:
