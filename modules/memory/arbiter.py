@@ -10,6 +10,8 @@ from .backend import MemoryStore
 from core.llm import LLMBridge
 from core.settings import settings
 
+logger = logging.getLogger(__name__)
+
 class MemoryArbiter:
     """
     Autonomous bridge between Reasoning and MemoryStore.
@@ -40,7 +42,7 @@ class MemoryArbiter:
         # 1. Confidence Gate
         min_conf = float(self.config.get("save_confidence_threshold", 0.75))
         if confidence < min_conf:
-            print(f"❌ [Arbiter] Confidence gate failed: {confidence} < {min_conf}")
+            logger.debug(f"[Arbiter] Confidence gate failed: {confidence} < {min_conf}")
             return None
 
         valid_types = ["BELIEF", "FACT", "RULE", "EXPERIENCE", "PREFERENCE", "IDENTITY"]
@@ -59,6 +61,8 @@ class MemoryArbiter:
         # but we can do a quick check here if needed, or rely on backend's return -1)
         
         # 3. Semantic Similarity Check - Reject if >90% similar to existing memory
+        # Note: We do NOT exclude same source - we want to deduplicate within same source
+        # (e.g., user telling the same fact twice in chat should be deduplicated)
         if embedding:
             similarity_threshold = float(self.config.get("similarity_threshold", 0.9))
             loop = asyncio.get_running_loop()
@@ -69,15 +73,15 @@ class MemoryArbiter:
                     embedding=embedding,
                     threshold=similarity_threshold,
                     limit=5,
-                    exclude_source=source  # Don't reject based on same source memories
+                    exclude_source=None  # Check ALL memories for deduplication (including same source)
                 )
             )
             
             if similar_memories:
                 top_match = similar_memories[0]
-                print(f"⚠️ [Arbiter] Similar memory found (ID: {top_match['id']}, score: {top_match['score']:.2f}): \"{top_match['text'][:60]}...\"")
-                print(f"   New text: \"{text[:60]}...\"")
-                print(f"   Rejecting due to semantic similarity >{similarity_threshold*100:.0f}%")
+                logger.debug(f"[Arbiter] Similar memory found (ID: {top_match['id']}, score: {top_match['score']:.2f}): \"{top_match['text'][:60]}...\"")
+                logger.debug(f"   New text: \"{text[:60]}...\"")
+                logger.debug(f"   Rejecting due to semantic similarity >{similarity_threshold*100:.0f}%")
                 return None
 
         # 4. Save
@@ -98,10 +102,10 @@ class MemoryArbiter:
         )
 
         if memory_id == -1:
-            print(f"❌ [Arbiter] Duplicate or rejected by backend.")
+            logger.debug(f"[Arbiter] Duplicate or rejected by backend.")
             return None
 
-        print(f"✅ [Arbiter] Memory saved (ID: {memory_id}, source: {source})")
+        logger.info(f"[Arbiter] Memory saved (ID: {memory_id}, source: {source})")
         return memory_id
 
     async def consider_batch(self, candidates: List[Dict]) -> List[int]:
@@ -115,7 +119,10 @@ class MemoryArbiter:
                 confidence=c.get("confidence", 1.0),
                 subject=c.get("subject", "User"),
                 source=c.get("source", "reasoning"),
-                embedding=c.get("embedding")
+                embedding=c.get("embedding"),
+                mem_type=c.get("mem_type", c.get("type", "BELIEF")),  # Support both "mem_type" and "type" keys
+                verified=c.get("verified", False),
+                expires_at=c.get("expires_at")
             )
             if mid:
                 promoted_ids.append(mid)
