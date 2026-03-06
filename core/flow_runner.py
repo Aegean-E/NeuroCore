@@ -7,6 +7,8 @@ from .flow_manager import flow_manager
 from core.settings import settings
 from core.debug import debug_logger
 
+logger = logging.getLogger(__name__)
+
 class FlowRunner:
     _executor_cache = {}
     _max_cache_size = 100  # Maximum number of cached executor classes
@@ -51,7 +53,7 @@ class FlowRunner:
             for key in keys_to_remove:
                 del cls._executor_cache[key]
             if settings.get("debug_mode"):
-                print(f"[FlowRunner] Cache size limit reached. Removed {len(keys_to_remove)} oldest entries.")
+                logger.debug(f"[FlowRunner] Cache size limit reached. Removed {len(keys_to_remove)} oldest entries.")
 
     def __init__(self, flow_id: str, flow_override: dict = None):
         self.flow_id = flow_id
@@ -70,7 +72,7 @@ class FlowRunner:
         self.execution_order = self._compute_execution_order()
         
         if settings.get("debug_mode"):
-            print(f"[FlowRunner] Initialized for flow {flow_id}")
+            logger.debug(f"[FlowRunner] Initialized for flow {flow_id}")
 
     def _build_bridge_groups(self):
         """
@@ -254,20 +256,12 @@ class FlowRunner:
             remaining_nodes = list(set(self.nodes.keys()) - set(sorted_order))
             
             # Log warning about cycle detection - always log in production
-            cycle_warning = f"[FlowRunner] Cycle detected in flow. Breaking by adding remaining nodes: {remaining_nodes}"
-            print(cycle_warning)
-            
-            # Also log to debug logger if debug mode is enabled
-            if settings.get("debug_mode"):
-                print(f"[FlowRunner] Cycle detected in flow. Breaking by adding remaining nodes: {remaining_nodes}")
+            logger.warning(f"[FlowRunner] Cycle detected in flow. Breaking by adding remaining nodes: {remaining_nodes}")
             
             # Check for intentional loops (nodes with isReverted flag indicating loop nodes)
             loop_nodes = [nid for nid, node in self.nodes.items() if node.get('isReverted', False)]
             if loop_nodes:
-                loop_warning = f"[FlowRunner] Note: Flow contains {len(loop_nodes)} node(s) marked as loop (isReverted): {loop_nodes}"
-                print(loop_warning)
-                if settings.get("debug_mode"):
-                    print(f"[FlowRunner] Note: Flow contains {len(loop_nodes)} node(s) marked as loop (isReverted): {loop_nodes}")
+                logger.warning(f"[FlowRunner] Note: Flow contains {len(loop_nodes)} node(s) marked as loop (isReverted): {loop_nodes}")
             
             while len(sorted_order) < len(self.nodes):
                 # Pick the first remaining node to break the deadlock
@@ -476,7 +470,7 @@ class FlowRunner:
                 node_id = execution_queue.popleft()
                 
                 if max_loops > 0 and node_run_counts[node_id] >= max_loops:
-                    print(f"Warning: Node {node_id} hit max execution limit ({max_loops}). Stopping branch.")
+                    logger.warning(f"Warning: Node {node_id} hit max execution limit ({max_loops}). Stopping branch.")
                     continue
                 
                 node_run_counts[node_id] += 1
@@ -537,8 +531,8 @@ class FlowRunner:
                                     # - AttributeError: Executor class or method missing
                                     # - RuntimeError: Node execution failed at runtime
                                     import traceback
-                                    print(f"[Bridge Error] Node {bridge_node_id} failed: {bridge_err}")
-                                    print(f"[Bridge Error] Traceback: {traceback.format_exc()}")
+                                    logger.error(f"[Bridge Error] Node {bridge_node_id} failed: {bridge_err}")
+                                    logger.error(f"[Bridge Error] Traceback: {traceback.format_exc()}")
                                     if settings.get("debug_mode"):
                                         debug_logger.log(self.flow_id, bridge_node_id, bridge_meta.get('name', bridge_node_id), "bridge_error", {"error": str(bridge_err), "traceback": traceback.format_exc()})
                                     # Continue without bridge output - don't fail the whole flow
@@ -704,14 +698,14 @@ class FlowRunner:
 
                 except (ImportError, AttributeError) as e:
                     # Module import issues or missing executor classes
-                    print(f"Warning: Could not find or use node logic for {module_id}/{node_type_id}. Error: {e}. Passing data through.")
+                    logger.warning(f"Warning: Could not find or use node logic for {module_id}/{node_type_id}. Error: {e}. Passing data through.")
                     node_outputs[node_id] = node_input
                 except (RuntimeError, ValueError, TypeError) as e:
                     # Node execution errors: runtime failures, invalid values, type mismatches
                     error_msg = f"Execution failed at node '{node_meta['name']}': {e}"
                     if settings.get("debug_mode"):
                         debug_logger.log(self.flow_id, node_id, node_meta['name'], "error", {"error": str(e), "error_type": type(e).__name__})
-                    print(f"Error in FlowRunner: {error_msg}")
+                    logger.error(f"Error in FlowRunner: {error_msg}")
                     # Return a structured error that the chat UI can display
                     return {"error": error_msg}
 
@@ -735,7 +729,7 @@ class FlowRunner:
                 error_msg = f"Flow execution timed out after {timeout} seconds"
                 if settings.get("debug_mode"):
                     debug_logger.log(self.flow_id, "SYSTEM", "FlowRunner", "flow_timeout", {"timeout": timeout})
-                print(f"[FlowRunner] {error_msg}")
+                logger.error(f"[FlowRunner] {error_msg}")
                 return {"error": error_msg}
         else:
             return await run_impl()

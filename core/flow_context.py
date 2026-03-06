@@ -186,22 +186,8 @@ class FlowContext(BaseModel):
         if not isinstance(data, dict):
             return cls()
         
-        # Extract known fields
-        known_fields = {
-            "messages", "content", "plan", "current_step", "original_request",
-            "plan_needed", "plan_context", "plan_complete", "next_step",
-            "step_completed", "completed_steps", "dependency_error",
-            "reflection", "satisfied", "reflection_retry_count",
-            "iterations", "agent_loop_trace", "agent_loop_error",
-            "replan_needed", "replan_count", "replan_reason",
-            "suggested_approach", "replan_depth_exceeded", "response",
-            "memory_context", "knowledge_context", "reasoning_context",
-            "reasoning_history", "reasoning_structured",
-            "tool_count", "remaining_tool_calls", "requires_continuation",
-            "choices", "tools", "available_tools", "route_targets",
-            "trace_id", "repeat_count", "input_source", "current_goal",
-            "error", "planning_error", "extra",
-        }
+        # Extract known fields - use Pydantic introspection to avoid drift
+        known_fields = set(cls.model_fields.keys())
         
         # Separate known fields from extra
         known_data = {}

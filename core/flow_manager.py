@@ -14,6 +14,7 @@ FLOWS_FILE = "ai_flows.json"
 # Validation constants
 REQUIRED_FLOW_KEYS = {"id", "nodes", "connections"}
 REQUIRED_NODE_KEYS = {"id", "moduleId", "nodeTypeId"}
+MAX_BACKUP_COUNT = 5  # Maximum number of default flow backups to keep
 
 
 class FlowManager:
@@ -270,6 +271,16 @@ class FlowManager:
                 backup_id = f"default-flow-backup-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
                 self.flows[backup_id] = copy.deepcopy(self.flows[default_id])
                 logger.info(f"Backed up default flow to {backup_id}")
+                
+                # Cleanup old backups - keep only the most recent MAX_BACKUP_COUNT backups
+                backup_keys = [k for k in self.flows.keys() if k.startswith("default-flow-backup-")]
+                if len(backup_keys) > MAX_BACKUP_COUNT:
+                    # Sort by timestamp (newest first)
+                    backup_keys.sort(reverse=True)
+                    # Remove oldest backups exceeding the limit
+                    for old_backup in backup_keys[MAX_BACKUP_COUNT:]:
+                        del self.flows[old_backup]
+                        logger.info(f"Removed old backup flow: {old_backup}")
             
             active_flow["id"] = default_id
             active_flow["name"] = "Default Chat Flow"

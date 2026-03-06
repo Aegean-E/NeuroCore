@@ -144,6 +144,9 @@ class ModuleManager:
 
     def reorder_modules(self, module_ids: list):
         """Updates the 'order' of only modules whose order actually changed."""
+        import time
+        start_time = time.time()
+        
         with self.lock:
             # Create a map for quick lookups
             id_to_meta = {m['id']: m for m in self.modules.values()}
@@ -167,6 +170,11 @@ class ModuleManager:
                     meta_to_save = {k: v for k, v in id_to_meta[module_id].items() if k != 'load_error'}
                     with open(meta_path, "w") as f:
                         json.dump(meta_to_save, f, indent=4)
+        
+        # Log warning if operation took too long (potential lock contention)
+        elapsed = time.time() - start_time
+        if elapsed > 1.0:  # Warn if taking more than 1 second
+            logger.warning(f"reorder_modules took {elapsed:.2f}s - consider optimizing to reduce lock hold time")
 
     def enable_module(self, module_id: str):
         return self._toggle_module(module_id, True)

@@ -80,20 +80,12 @@ class LLMBridge:
             payload["response_format"] = response_format
         
         try:
-            # Use injected client, shared client, or create new one
-            client_to_use = self.client
-            if not client_to_use:
-                client_to_use = await get_shared_client(self.timeout)
+            # Use injected client if provided, otherwise use shared client
+            client_to_use = self.client if self.client else await get_shared_client(self.timeout)
             
-            if client_to_use:
-                response = await client_to_use.post(url, json=payload, headers=headers, timeout=self.timeout)
-                response.raise_for_status()
-                return response.json()
-            else:
-                async with httpx.AsyncClient(timeout=self.timeout) as client:
-                    response = await client.post(url, json=payload, headers=headers)
-                    response.raise_for_status()
-                    return response.json()
+            response = await client_to_use.post(url, json=payload, headers=headers, timeout=self.timeout)
+            response.raise_for_status()
+            return response.json()
         except Exception as e:
             logger.error(f"Chat completion error: {e}")
             return {"error": str(e)}
@@ -106,20 +98,12 @@ class LLMBridge:
             headers["Authorization"] = f"Bearer {self.api_key}"
 
         try:
-            # Use injected client, shared client, or create new one
-            client_to_use = self.client
-            if not client_to_use:
-                client_to_use = await get_shared_client(self.timeout)
+            # Use injected client if provided, otherwise use shared client
+            client_to_use = self.client if self.client else await get_shared_client(self.timeout)
             
-            if client_to_use:
-                response = await client_to_use.get(url, headers=headers)
-                response.raise_for_status()
-                return response.json()
-            else:
-                async with httpx.AsyncClient() as client:
-                    response = await client.get(url, headers=headers)
-                    response.raise_for_status()
-                    return response.json()
+            response = await client_to_use.get(url, headers=headers)
+            response.raise_for_status()
+            return response.json()
         except Exception as e:
             logger.error(f"Get models error: {e}")
             return {"error": str(e)}
@@ -138,17 +122,10 @@ class LLMBridge:
         }
 
         try:
-            # Use injected client, shared client, or create new one
-            client_to_use = self.client
-            if not client_to_use:
-                client_to_use = await get_shared_client(self.timeout)
+            # Use injected client if provided, otherwise use shared client
+            client_to_use = self.client if self.client else await get_shared_client(self.timeout)
             
-            # FIX: Use self.timeout instead of hardcoded 30.0
-            if client_to_use:
-                response = await client_to_use.post(url, json=payload, headers=headers, timeout=self.timeout)
-            else:
-                async with httpx.AsyncClient(timeout=self.timeout) as client:
-                    response = await client.post(url, json=payload, headers=headers)
+            response = await client_to_use.post(url, json=payload, headers=headers, timeout=self.timeout)
             
             response.raise_for_status()
             data = response.json()
