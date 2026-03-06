@@ -110,10 +110,7 @@ async def structured_completion(
             
             # Add strict JSON schema if supported by the model
             # Note: This depends on the LLM provider support
-            try:
-                response_format["schema"] = schema_json
-            except Exception as e:
-                logger.debug(f"Could not add schema to response_format: {e}")
+            response_format["schema"] = schema_json
             
             # Make the LLM call
             response = await llm_bridge.chat_completion(

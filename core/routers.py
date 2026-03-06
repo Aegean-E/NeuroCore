@@ -591,6 +591,8 @@ async def set_active_flow(request: Request, flow_id: str, action: str = Form("to
             
             if hasattr(request.app.state, 'background_tasks'):
                 task = asyncio.create_task(run_flow())
+                # Add callback to remove task from set when done to prevent memory leak
+                task.add_done_callback(request.app.state.background_tasks.discard)
                 request.app.state.background_tasks.add(task)
     
     return templates.TemplateResponse(request, "ai_flow_list.html", {

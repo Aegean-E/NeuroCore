@@ -24,6 +24,8 @@ DEFAULT_SETTINGS = {
 class SettingsManager:
     def __init__(self, file_path=SETTINGS_FILE):
         self.file_path = file_path
+        # IMPORTANT: lock must be initialized before load_settings() 
+        # as load_settings() uses self.lock internally
         self.lock = threading.RLock()  # Use RLock for reentrant locking
         self.settings = self.load_settings()
 

@@ -138,6 +138,10 @@ class TraceContext:
         if exc_type:
             if self.current_span:
                 self.current_span.finish(status="error", error=str(exc_val))
+        else:
+            # Finish the current span on normal (non-exception) exit
+            if self.current_span:
+                self.current_span.finish(status="ok")
         return False
 
 
