@@ -226,8 +226,23 @@ async def send_message(
         try:
             # Construct a prompt to summarize the conversation
             # We use the first user message and the AI response
-            user_text = active_session["history"][0]["content"] if isinstance(active_session["history"][0]["content"], str) else "Image/Multimodal Content"
-            ai_text = active_session["history"][1]["content"]
+            # Find first user message and first assistant message robustly
+            user_text = None
+            ai_text = None
+            for msg in active_session["history"]:
+                content = msg.get("content", "")
+                if msg.get("role") == "user" and user_text is None:
+                    user_text = content if isinstance(content, str) else "Image/Multimodal Content"
+                elif msg.get("role") == "assistant" and ai_text is None:
+                    ai_text = content if isinstance(content, str) else "Image/Multimodal Content"
+                if user_text and ai_text:
+                    break
+            
+            # Fallback if not found
+            if user_text is None:
+                user_text = "Image/Multimodal Content"
+            if ai_text is None:
+                ai_text = "Response"
             
             # Truncate to avoid huge context if messages are long
             summary_context = f"User: {user_text[:500]}\nAI: {ai_text[:500]}"

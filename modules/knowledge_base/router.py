@@ -333,7 +333,7 @@ async def check_integrity(request: Request):
     
     # Check for ghost files
     raw_docs = document_store.list_documents()
-    db_filenames = {r[1] for r in raw_docs}
+    db_filenames = {r["filename"] for r in raw_docs}
     disk_files = set(os.listdir(UPLOAD_DIR))
     
     ghost_files = [f for f in disk_files if f not in db_filenames]

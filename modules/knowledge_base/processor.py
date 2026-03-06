@@ -17,7 +17,7 @@ class DocumentProcessor:
         self.llm = llm_bridge
         self.chunk_size = chunk_size
         self.chunk_overlap = chunk_overlap
-        self.log = logging.getLogger("NeuroCore.DocumentProcessor").info
+        self.log = logging.getLogger("NeuroCore.DocumentProcessor")
 
     async def process_document(self, file_path: str, progress_callback=None) -> Tuple[List[Dict], Optional[int], str]:
         """Auto-detect file type and process."""
@@ -74,21 +74,21 @@ class DocumentProcessor:
                 
                 # OCR FALLBACK
                 if not text.strip() and OCR_AVAILABLE:
-                    print(f"⚠️ Page {page_num + 1} seems empty. Attempting OCR...")
+                    self.log.warning(f"Page {page_num + 1} seems empty. Attempting OCR...")
                     try:
                         pix = page.get_pixmap()
                         img_data = pix.tobytes("png")
                         image = Image.open(io.BytesIO(img_data))
                         text = pytesseract.image_to_string(image)
                     except Exception as e:
-                        print(f"❌ OCR failed for page {page_num + 1}: {e}")
+                        self.log.error(f"OCR failed for page {page_num + 1}: {e}")
 
                 pages.append({
                     'page_number': page_num + 1,
                     'text': self.clean_text(text)
                 })
             except Exception as e:
-                print(f"⚠️ Warning: Skipping page {page_num + 1} due to error: {e}")
+                self.log.warning(f"Skipping page {page_num + 1} due to error: {e}")
                 continue
 
         doc.close()

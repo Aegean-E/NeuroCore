@@ -1,3 +1,4 @@
+import asyncio
 import copy
 import json
 import os
@@ -30,7 +31,8 @@ def _estimate_tokens(messages: list) -> int:
 class SessionManager:
     def __init__(self, storage_file=SESSIONS_FILE):
         self.storage_file = storage_file
-        self.lock = threading.Lock()
+        self._sync_lock = threading.Lock()  # For sync methods
+        self._async_lock = asyncio.Lock()   # For async methods
         self.sessions = self._load_sessions()
 
     def _load_sessions(self):
@@ -57,7 +59,7 @@ class SessionManager:
             raise e
 
     def create_session(self, name=None):
-        with self.lock:
+        with self._sync_lock:
             session_id = str(uuid.uuid4())
             now = datetime.now().isoformat()
             self.sessions[session_id] = {
@@ -71,12 +73,12 @@ class SessionManager:
             return self.sessions[session_id]
 
     def get_session(self, session_id):
-        with self.lock:
+        with self._sync_lock:
             session = self.sessions.get(session_id)
             return copy.deepcopy(session) if session is not None else None
 
     def delete_session(self, session_id):
-        with self.lock:
+        with self._sync_lock:
             if session_id in self.sessions:
                 del self.sessions[session_id]
                 self._save_sessions()
@@ -84,7 +86,7 @@ class SessionManager:
             return False
 
     def rename_session(self, session_id, new_name):
-        with self.lock:
+        with self._sync_lock:
             if session_id in self.sessions:
                 self.sessions[session_id]["name"] = new_name
                 self._save_sessions()
@@ -92,11 +94,11 @@ class SessionManager:
             return False
 
     def list_sessions(self):
-        with self.lock:
+        with self._sync_lock:
             return sorted(self.sessions.values(), key=lambda x: x.get('updated_at', x['created_at']), reverse=True)
 
     def add_message(self, session_id, role, content):
-        with self.lock:
+        with self._sync_lock:
             if session_id in self.sessions:
                 self.sessions[session_id]["history"].append({"role": role, "content": content})
                 self.sessions[session_id]["updated_at"] = datetime.now().isoformat()
@@ -171,7 +173,7 @@ class SessionManager:
             }
         ] + recent_messages
 
-        with self.lock:
+        async with self._async_lock:
             if session_id in self.sessions:
                 self.sessions[session_id]["history"] = new_history
                 self.sessions[session_id]["updated_at"] = datetime.now().isoformat()

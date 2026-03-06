@@ -2,14 +2,28 @@ from core.settings import settings
 from core.llm import LLMBridge
 from .backend import document_store
 
-class KnowledgeQueryExecutor:
-    def __init__(self):
-        self.llm = LLMBridge(
+# Module-level cached LLM bridge instance for KnowledgeQueryExecutor
+_llm_bridge_instance = None
+
+
+def get_knowledge_llm_bridge():
+    """Get or create a cached LLMBridge instance for knowledge base queries."""
+    global _llm_bridge_instance
+    if _llm_bridge_instance is None:
+        from core.settings import settings
+        _llm_bridge_instance = LLMBridge(
             base_url=settings.get("llm_api_url"),
             api_key=settings.get("llm_api_key"),
             embedding_base_url=settings.get("embedding_api_url"),
             embedding_model=settings.get("embedding_model")
         )
+    return _llm_bridge_instance
+
+
+class KnowledgeQueryExecutor:
+    def __init__(self):
+        # Use shared cached LLMBridge instead of creating a new one each time
+        self.llm = get_knowledge_llm_bridge()
 
     async def receive(self, input_data: dict, config: dict = None) -> dict:
         if input_data is None: return None

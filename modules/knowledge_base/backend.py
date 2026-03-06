@@ -315,6 +315,10 @@ class FaissDocumentStore(QueryExpansionMixin):
         con.execute("PRAGMA journal_mode=WAL;")
         try:
             yield con
+            con.commit()  # Auto-commit on clean exit
+        except Exception:
+            con.rollback()  # Rollback on error
+            raise
         finally:
             con.close()
 
@@ -383,6 +387,11 @@ class FaissDocumentStore(QueryExpansionMixin):
 
     def _load_faiss_index(self):
         """Load or create FAISS index"""
+        # Guard: If FAISS is not available, create empty index and return
+        if not FAISS_AVAILABLE:
+            self._create_empty_index()
+            return
+            
         index_path = self.db_path.replace(".sqlite3", ".faiss")
         
         if os.path.exists(index_path):
@@ -852,9 +861,11 @@ class FaissDocumentStore(QueryExpansionMixin):
             con.execute("DELETE FROM documents")
             con.commit()
         
-        # Clear FAISS index
+        # Clear FAISS index - use default dimension since all data is cleared
+        # _detect_embedding_dimension() returns 768 as default fallback
         dimension = self._detect_embedding_dimension()
-        self.faiss_index = faiss.IndexIDMap(faiss.IndexFlatIP(dimension))
+        with self.index_lock:
+            self.faiss_index = faiss.IndexIDMap(faiss.IndexFlatIP(dimension))
         self._save_faiss_index()
 
     def get_total_documents(self) -> int:
