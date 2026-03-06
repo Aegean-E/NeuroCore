@@ -18,6 +18,38 @@ async def test_delay_executor_valid():
     elapsed = time.time() - start_time
     assert elapsed >= delay
 
+
+@pytest.mark.asyncio
+async def test_delay_executor_max_delay_cap():
+    """Test that DelayExecutor caps delay to MAX_DELAY (1 hour)."""
+    executor = DelayExecutor()
+    
+    # Test that delay is capped to MAX_DELAY
+    original_max = executor.MAX_DELAY
+    
+    with patch("modules.logic.node.asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
+        # Request a 10-hour delay (should be capped to 1 hour)
+        await executor.receive({"data": "test"}, config={"seconds": 36000})
+        
+        # Verify sleep was called with capped value (MAX_DELAY = 3600)
+        mock_sleep.assert_called_once_with(original_max)
+
+
+@pytest.mark.asyncio
+async def test_delay_executor_max_delay_warning():
+    """Test that DelayExecutor logs warning when delay exceeds MAX_DELAY."""
+    executor = DelayExecutor()
+    
+    with patch("modules.logic.node.logger") as mock_logger:
+        # Request a delay larger than MAX_DELAY
+        await executor.receive({"data": "test"}, config={"seconds": 7200})
+        
+        # Verify warning was logged
+        mock_logger.warning.assert_called_once()
+        assert "7200" in mock_logger.warning.call_args[0][0]
+        assert "3600" in mock_logger.warning.call_args[0][0]
+
+
 @pytest.mark.asyncio
 async def test_delay_executor_invalid_config():
     """Test that DelayExecutor handles invalid config gracefully."""
@@ -211,6 +243,36 @@ async def test_schedule_start_executor_end_of_month():
         result = await executor.receive({"data": "test"}, config={"schedule_time": "23:58"})
 
     assert result == {"data": "test"}
+
+
+@pytest.mark.asyncio
+async def test_schedule_start_executor_long_sleep_warning():
+    """ScheduleStartExecutor should warn when wait time exceeds LONG_SLEEP_WARNING_THRESHOLD."""
+    executor = ScheduleStartExecutor()
+    
+    # Simulate scheduling for a time far in the future (> 1 hour from now)
+    from datetime import datetime as real_datetime
+    
+    # Set "now" to 10 AM, schedule for 5 PM (7 hours later = 25200 seconds > 3600)
+    fake_now = real_datetime(2024, 6, 15, 10, 0)
+    
+    with patch("modules.logic.node.asyncio.sleep", new_callable=AsyncMock) as mock_sleep, \
+         patch("modules.logic.node.logger") as mock_logger, \
+         patch("datetime.datetime") as mock_dt:
+        mock_dt.now.return_value = fake_now
+        mock_dt.strptime.side_effect = real_datetime.strptime
+        
+        # Schedule for 7 hours later (should trigger warning)
+        result = await executor.receive(
+            {"data": "test"}, 
+            config={"schedule_time": "17:00"}  # 7 hours from 10:00
+        )
+        
+        # Verify warning was logged
+        mock_logger.warning.assert_called_once()
+        warning_msg = mock_logger.warning.call_args[0][0]
+        assert "ScheduleStartExecutor" in warning_msg
+        assert "exceeds" in warning_msg.lower() or "threshold" in warning_msg.lower()
 
 
 @pytest.mark.asyncio

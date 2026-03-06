@@ -13,6 +13,8 @@ logger = logging.getLogger(__name__)
 _active_tasks: set = set()
 
 class DelayExecutor:
+    MAX_DELAY = 3600  # 1 hour cap to prevent flow workers from being stuck
+    
     async def receive(self, input_data: dict, config: dict = None) -> dict:
         if input_data is None: return None
         config = config or {}
@@ -26,6 +28,12 @@ class DelayExecutor:
         
         if seconds < 0:
             seconds = 0
+        
+        # Cap the delay to MAX_DELAY to prevent flow workers from being stuck
+        if seconds > self.MAX_DELAY:
+            logger.warning(f"Delay capped from {seconds}s to {self.MAX_DELAY}s (1 hour) to prevent flow worker from being stuck")
+            seconds = self.MAX_DELAY
+            
         await asyncio.sleep(seconds)
         return input_data
 
@@ -229,6 +237,8 @@ class TriggerExecutor:
         return processed_data
 
 class ScheduleStartExecutor:
+    LONG_SLEEP_WARNING_THRESHOLD = 3600  # 1 hour - warn if longer
+    
     async def receive(self, input_data: dict, config: dict = None) -> dict:
         if input_data is None: return None
         config = config or {}
@@ -257,6 +267,13 @@ class ScheduleStartExecutor:
             wait_seconds = (target_dt - now).total_seconds()
             
             if wait_seconds > 0:
+                # Warn if wait time is longer than threshold (for long-running scheduled tasks)
+                if wait_seconds > self.LONG_SLEEP_WARNING_THRESHOLD:
+                    logger.warning(
+                        f"ScheduleStartExecutor: wait_seconds={wait_seconds:.0f}s ({wait_seconds/3600:.1f}h) exceeds "
+                        f"{self.LONG_SLEEP_WARNING_THRESHOLD}s threshold. This blocks the event loop worker for the "
+                        f"entire duration with no persistence. Consider using external scheduling (APScheduler, Celery beat, cron)."
+                    )
                 debug_logger.log(config.get("_flow_id"), "schedule_node", "ScheduleStart", "waiting", f"Waiting until {target_dt}")
                 await asyncio.sleep(wait_seconds)
             

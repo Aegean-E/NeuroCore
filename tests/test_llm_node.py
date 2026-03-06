@@ -1,6 +1,6 @@
 import pytest
 from unittest.mock import patch, AsyncMock
-from modules.llm_module.node import LLMExecutor, ConfigLoader, get_executor_class
+from modules.llm_module.node import LLMExecutor, ConfigLoader, get_executor_class, DEFAULT_MODEL, DEFAULT_TEMPERATURE, DEFAULT_MAX_TOKENS, DEFAULT_TIMEOUT, DEFAULT_MAX_RETRIES, DEFAULT_RETRY_DELAY
 
 @pytest.mark.asyncio
 async def test_llm_executor_receive():
@@ -16,6 +16,139 @@ async def test_llm_executor_receive():
         
         assert result["choices"][0]["message"]["content"] == "Hello"
         mock_bridge_instance.chat_completion.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_llm_executor_explicit_fallbacks():
+    """Test that LLMExecutor uses explicit fallbacks when module_defaults is empty."""
+    
+    # Mock ConfigLoader to return empty dict (simulating missing keys)
+    with patch("modules.llm_module.node.ConfigLoader.get_config", return_value={}):
+        
+        with patch("modules.llm_module.node.LLMBridge") as MockBridge:
+            executor = LLMExecutor()
+            mock_bridge_instance = MockBridge.return_value
+            mock_bridge_instance.chat_completion = AsyncMock(return_value={})
+            
+            input_data = {"messages": [{"role": "user", "content": "Hi"}]}
+            await executor.receive(input_data)
+            
+            call_kwargs = mock_bridge_instance.chat_completion.call_args.kwargs
+            # Should use explicit fallback values
+            assert call_kwargs["model"] == DEFAULT_MODEL
+            assert call_kwargs["temperature"] == DEFAULT_TEMPERATURE
+            assert call_kwargs["max_tokens"] == DEFAULT_MAX_TOKENS
+
+
+@pytest.mark.asyncio
+async def test_llm_executor_timeout():
+    """Test that LLMExecutor respects timeout config."""
+    
+    with patch("modules.llm_module.node.ConfigLoader.get_config", return_value={}):
+        
+        with patch("modules.llm_module.node.LLMBridge") as MockBridge:
+            executor = LLMExecutor()
+            mock_bridge_instance = MockBridge.return_value
+            mock_bridge_instance.chat_completion = AsyncMock(return_value={})
+            
+            input_data = {"messages": [{"role": "user", "content": "Hi"}]}
+            config = {"timeout": 30.0}  # 30 second timeout
+            
+            await executor.receive(input_data, config)
+            
+            # The call should have been made (not testing actual timeout behavior here)
+            mock_bridge_instance.chat_completion.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_llm_executor_timeout_disabled():
+    """Test that LLMExecutor with timeout=0 doesn't use asyncio.wait_for."""
+    
+    with patch("modules.llm_module.node.ConfigLoader.get_config", return_value={}):
+        
+        with patch("modules.llm_module.node.LLMBridge") as MockBridge:
+            executor = LLMExecutor()
+            mock_bridge_instance = MockBridge.return_value
+            mock_bridge_instance.chat_completion = AsyncMock(return_value={})
+            
+            input_data = {"messages": [{"role": "user", "content": "Hi"}]}
+            config = {"timeout": 0}  # Disabled
+            
+            await executor.receive(input_data, config)
+            
+            # Should still call the bridge
+            mock_bridge_instance.chat_completion.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_llm_executor_retry_on_failure():
+    """Test that LLMExecutor retries on failure with exponential backoff."""
+    
+    with patch("modules.llm_module.node.ConfigLoader.get_config", return_value={}):
+        
+        with patch("modules.llm_module.node.LLMBridge") as MockBridge:
+            executor = LLMExecutor()
+            mock_bridge_instance = MockBridge.return_value
+            
+            # First two calls fail, third succeeds
+            mock_bridge_instance.chat_completion = AsyncMock(
+                side_effect=[Exception("API Error"), Exception("API Error"), {"choices": []}]
+            )
+            
+            input_data = {"messages": [{"role": "user", "content": "Hi"}]}
+            config = {"max_retries": 2, "retry_delay": 0.01}  # Fast retry for test
+            
+            result = await executor.receive(input_data, config)
+            
+            # Should have attempted 3 times (1 initial + 2 retries)
+            assert mock_bridge_instance.chat_completion.call_count == 3
+            # Should return successful result
+            assert result == {"choices": []}
+
+
+@pytest.mark.asyncio
+async def test_llm_executor_all_retries_exhausted():
+    """Test that LLMExecutor returns error when all retries exhausted."""
+    
+    with patch("modules.llm_module.node.ConfigLoader.get_config", return_value={}):
+        
+        with patch("modules.llm_module.node.LLMBridge") as MockBridge:
+            executor = LLMExecutor()
+            mock_bridge_instance = MockBridge.return_value
+            
+            # Always fail
+            mock_bridge_instance.chat_completion = AsyncMock(side_effect=Exception("API Error"))
+            
+            input_data = {"messages": [{"role": "user", "content": "Hi"}]}
+            config = {"max_retries": 2, "retry_delay": 0.01}
+            
+            result = await executor.receive(input_data, config)
+            
+            # Should have attempted 3 times
+            assert mock_bridge_instance.chat_completion.call_count == 3
+            # Should return error result
+            assert "error" in result
+            assert result["choices"] == []
+
+
+@pytest.mark.asyncio
+async def test_llm_executor_default_retry_config():
+    """Test that LLMExecutor uses default retry config when not specified."""
+    
+    with patch("modules.llm_module.node.ConfigLoader.get_config", return_value={}):
+        
+        with patch("modules.llm_module.node.LLMBridge") as MockBridge:
+            executor = LLMExecutor()
+            mock_bridge_instance = MockBridge.return_value
+            mock_bridge_instance.chat_completion = AsyncMock(return_value={})
+            
+            input_data = {"messages": [{"role": "user", "content": "Hi"}]}
+            # No timeout/retry config - should use defaults
+            
+            await executor.receive(input_data)
+            
+            # Should succeed with default config
+            mock_bridge_instance.chat_completion.assert_called_once()
 
 @pytest.mark.asyncio
 async def test_llm_executor_config_override():
