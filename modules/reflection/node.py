@@ -10,6 +10,18 @@ class ReflectionExecutor:
             base_url=settings.get("llm_api_url"),
             api_key=settings.get("llm_api_key")
         )
+        # Lazy import to avoid circular dependencies
+        self._reasoning_service = None
+    
+    def _get_reasoning_service(self):
+        """Lazy load ReasoningBookService to avoid circular imports."""
+        if self._reasoning_service is None:
+            try:
+                from modules.reasoning_book.service import service as reasoning_service
+                self._reasoning_service = reasoning_service
+            except ImportError:
+                self._reasoning_service = None
+        return self._reasoning_service
 
     def _extract_user_message(self, input_data: dict) -> str:
         """Extract the original user request from messages."""
@@ -112,6 +124,12 @@ class ReflectionExecutor:
                 "needs_improvement": None
             }
             result["satisfied"] = True
+            
+            # Log max retries to Reasoning Book
+            if reasoning_service := self._get_reasoning_service():
+                entry = f"Reflection: Max retries ({max_reflection_retries}) exceeded, forcing completion"
+                await reasoning_service.log_thought(entry, source="Reflection")
+            
             return result
 
         if not user_request or not assistant_response:
@@ -123,6 +141,12 @@ class ReflectionExecutor:
                 "needs_improvement": None
             }
             result["satisfied"] = True
+            
+            # Log no-content case to Reasoning Book
+            if reasoning_service := self._get_reasoning_service():
+                entry = "Reflection: No content to evaluate, defaulting to satisfied"
+                await reasoning_service.log_thought(entry, source="Reflection")
+            
             return result
 
         # Build reflection prompt - check for custom prompt first, then default
@@ -184,6 +208,11 @@ class ReflectionExecutor:
             result["reflection"] = reflection_result
             result["satisfied"] = reflection_result["satisfied"]
 
+            # Log reflection result to Reasoning Book
+            if reasoning_service := self._get_reasoning_service():
+                entry = f"Reflection on step: satisfied={reflection_result['satisfied']}. {reflection_result['reason']}"
+                await reasoning_service.log_thought(entry, source="Reflection")
+
             # When not satisfied and improvement hint is available, inject a
             # feedback message so the agent_loop can act on it on retry.
             inject = config.get("inject_improvement", True)
@@ -203,6 +232,12 @@ class ReflectionExecutor:
                 "needs_improvement": None
             }
             result["satisfied"] = True
+            
+            # Log error to Reasoning Book
+            if reasoning_service := self._get_reasoning_service():
+                entry = f"Reflection error: {str(e)}"
+                await reasoning_service.log_thought(entry, source="Reflection")
+            
             return result
 
     async def send(self, processed_data: dict) -> dict:

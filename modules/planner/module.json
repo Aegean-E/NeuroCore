@@ -11,8 +11,8 @@
         "enabled": true,
         "default_planner_prompt": "You are a task planner. Analyze the user's request and create a step-by-step execution plan if needed.\n\nRules:\n- If the request is simple (one question, greeting, or single action), return an empty JSON array: []\n- If the request requires multiple steps, return a JSON array with each step: [{\"action\": \"step description\", \"target\": \"what it applies to\"}]\n- Keep plans simple and actionable\n- Maximum {max_steps} steps\n\nRequest: {request}\n\nRespond with JSON array only.",
         "planner_prompt": "You are a task planner. Analyze the user's request and create a step-by-step execution plan if needed.\n\nRules:\n- If the request is simple (one question, greeting, or single action), return an empty JSON array: []\n- If the request requires multiple steps, return a JSON array with each step: [{\"action\": \"step description\", \"target\": \"what it applies to\"}]\n- Keep plans simple and actionable\n- Maximum {max_steps} steps\n\nRequest: {request}\n\nRespond with JSON array only.",
-        "log_to_reasoning_book": false,
-        "include_reasoning_context": false
+        "log_to_reasoning_book": true,
+        "include_reasoning_context": true
     },
     "provides_nodes": [
         {
