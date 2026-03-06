@@ -545,7 +545,8 @@ async def rename_flow(request: Request, flow_id: str, name: str = Form(...), set
 
 @router.post("/ai-flow/{flow_id}/set-active", response_class=HTMLResponse)
 async def set_active_flow(request: Request, flow_id: str, action: str = Form("toggle"), settings_man: SettingsManager = Depends(get_settings_manager)):
-    active_flows = settings_man.get("active_ai_flows", [])
+    # Create a copy to avoid mutating the internal settings list
+    active_flows = list(settings_man.get("active_ai_flows", []))
     
     if action == "activate":
         if flow_id not in active_flows:
@@ -625,7 +626,8 @@ async def stop_active_flow(request: Request, settings_man: SettingsManager = Dep
 
 @router.post("/ai-flow/{flow_id}/delete", response_class=HTMLResponse)
 async def delete_flow(request: Request, flow_id: str, settings_man: SettingsManager = Depends(get_settings_manager)):
-    active_flows = settings_man.get("active_ai_flows", [])
+    # Create a copy to avoid mutating the internal settings list
+    active_flows = list(settings_man.get("active_ai_flows", []))
     if flow_id in active_flows:
         active_flows.remove(flow_id)
         settings_man.save_settings({"active_ai_flows": active_flows})
@@ -734,10 +736,8 @@ async def import_config(request: Request, file: UploadFile = File(...), settings
 async def export_flows():
     """Downloads the current ai_flows.json file."""
     flows = flow_manager.list_flows()
-    # Convert list back to dict format for the file, or just dump the list? 
-    # The FlowManager loads a dict, so let's dump the internal dict structure if possible, 
-    # but flow_manager.flows is available.
-    data = flow_manager.flows
+    # Use thread-safe method to get flows dict with lock held
+    data = flow_manager.get_all_flows_dict()
     return JSONResponse(
         content=data,
         headers={"Content-Disposition": 'attachment; filename="ai_flows_backup.json"'}

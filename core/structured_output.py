@@ -98,8 +98,8 @@ async def structured_completion(
     schema_name = schema.__name__
     schema_json = schema.model_json_schema() if hasattr(schema, 'model_json_schema') else schema.schema()
     
-    # Track original messages for retry context
-    original_messages = messages.copy()
+    # Create a working copy to avoid mutating the caller's messages list
+    working_messages = list(messages)
     
     for attempt in range(max_retries):
         try:
@@ -117,7 +117,7 @@ async def structured_completion(
             
             # Make the LLM call
             response = await llm_bridge.chat_completion(
-                messages=messages,
+                messages=working_messages,
                 model=model or settings.get("default_model"),
                 temperature=temperature if temperature is not None else settings.get("temperature", 0.3),
                 max_tokens=max_tokens or settings.get("max_tokens", 4096),
@@ -130,7 +130,7 @@ async def structured_completion(
                 logger.warning(f"LLM API error (attempt {attempt + 1}/{max_retries}): {error_msg}")
                 
                 # Add error context and retry
-                messages.append({
+                working_messages.append({
                     "role": "user",
                     "content": f"API Error: {error_msg}. Please retry with valid JSON output."
                 })
@@ -149,7 +149,7 @@ async def structured_completion(
             
             if not content:
                 logger.warning(f"Empty response (attempt {attempt + 1}/{max_retries})")
-                messages.append({
+                working_messages.append({
                     "role": "user", 
                     "content": "Empty response. Please provide valid JSON output."
                 })
@@ -171,11 +171,11 @@ async def structured_completion(
                 logger.warning(f"Validation error (attempt {attempt + 1}/{max_retries}): {error_summary}")
                 
                 # Inject error feedback and retry
-                messages.append({
+                working_messages.append({
                     "role": "assistant",
                     "content": content
                 })
-                messages.append({
+                working_messages.append({
                     "role": "user",
                     "content": f"Invalid format for {schema_name} schema: {error_summary}. Please fix and output valid JSON matching this schema: {schema_json}"
                 })
@@ -184,7 +184,7 @@ async def structured_completion(
         except asyncio.TimeoutError:
             logger.warning(f"Timeout (attempt {attempt + 1}/{max_retries})")
             if attempt < max_retries - 1:
-                messages.append({
+                working_messages.append({
                     "role": "user",
                     "content": "Request timed out. Please retry with a shorter response."
                 })
@@ -193,7 +193,7 @@ async def structured_completion(
         except Exception as e:
             logger.error(f"Unexpected error (attempt {attempt + 1}/{max_retries}): {e}")
             if attempt < max_retries - 1:
-                messages.append({
+                working_messages.append({
                     "role": "user",
                     "content": f"Error: {str(e)}. Please retry with valid JSON."
                 })

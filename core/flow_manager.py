@@ -246,6 +246,11 @@ class FlowManager:
         with self.lock:
             return sorted(self.flows.values(), key=lambda x: x.get('created_at', ''), reverse=True)
 
+    def get_all_flows_dict(self):
+        """Get a copy of all flows as a dictionary (thread-safe)."""
+        with self.lock:
+            return copy.deepcopy(self.flows)
+
     def delete_flow(self, flow_id):
         with self.lock:
             if flow_id in self.flows:

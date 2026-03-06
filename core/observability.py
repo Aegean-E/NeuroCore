@@ -347,13 +347,18 @@ class Metrics:
                 if timings:
                     sorted_timings = sorted(timings)
                     n = len(sorted_timings)
+                    
+                    def percentile(p: float) -> float:
+                        idx = int(n * p)
+                        return sorted_timings[min(idx, n - 1)]
+                    
                     result["timings"][key] = {
                         "count": n,
                         "min": sorted_timings[0],
                         "max": sorted_timings[-1],
                         "avg": sum(timings) / n,
-                        "p50": sorted_timings[int(n * 0.5)],
-                        "p95": sorted_timings[int(n * 0.95)] if n > 1 else sorted_timings[0],
+                        "p50": percentile(0.5),
+                        "p95": percentile(0.95),
                     }
             return result
     
