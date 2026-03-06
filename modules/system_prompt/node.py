@@ -10,6 +10,10 @@ class SystemPromptExecutor:
     _tools_lock = asyncio.Lock()
     _tools_cache = {"mtime": 0.0, "data": {}}
     _tools_path = os.path.join(os.path.dirname(__file__), "..", "tools", "tools.json")
+    
+    # Skills cache with mtime-based caching (matching tools pattern)
+    _skills_lock = asyncio.Lock()
+    _skills_cache = {"mtime": 0.0, "data": ""}
 
     async def _load_available_tools(self):
         """Load available tools from the tools module (cached by mtime with async lock)."""
@@ -41,15 +45,33 @@ class SystemPromptExecutor:
         return tools_list
 
     def _load_skills_content(self, enabled_skills: list) -> str:
-        """Load content from enabled skills."""
+        """Load content from enabled skills (cached by mtime)."""
         if not enabled_skills:
             return ""
         
-        skills_content = []
         # Use absolute path based on this file's location for consistency
         storage_path = os.path.join(os.path.dirname(__file__), "..", "skills", "data")
         metadata_file = os.path.join(storage_path, "skills_metadata.json")
         
+        try:
+            # Check if we need to reload (based on metadata file mtime)
+            if os.path.exists(metadata_file):
+                mtime = os.path.getmtime(metadata_file)
+                # Note: Using sync lock pattern (since _load_skills_content is sync)
+                # The skills cache is simple enough that we can use a basic check
+                if mtime > self._skills_cache["mtime"]:
+                    # Load all skills content
+                    skills_content = self._load_skills_from_disk(storage_path, metadata_file, enabled_skills)
+                    self._skills_cache["data"] = skills_content
+                    self._skills_cache["mtime"] = mtime
+                return self._skills_cache["data"]
+        except (json.JSONDecodeError, OSError, KeyError) as e:
+            logger.warning(f"Failed to load skills metadata: {e}")
+        
+        return ""
+    
+    def _load_skills_from_disk(self, storage_path: str, metadata_file: str, enabled_skills: list) -> str:
+        """Helper to load skills content from disk."""
         # Load metadata to get skill names
         metadata = {}
         try:
@@ -57,11 +79,9 @@ class SystemPromptExecutor:
                 with open(metadata_file, "r", encoding="utf-8") as f:
                     metadata = json.load(f)
         except (json.JSONDecodeError, OSError, KeyError) as e:
-            # JSONDecodeError: Corrupted JSON file
-            # OSError: File read permissions or I/O issues
-            # KeyError: Missing expected keys in JSON structure
             logger.warning(f"Failed to load skills metadata: {e}")
         
+        skills_content = []
         for skill_id in enabled_skills:
             skill_path = os.path.join(storage_path, f"{skill_id}.md")
             if os.path.exists(skill_path):
@@ -71,8 +91,6 @@ class SystemPromptExecutor:
                         skill_name = metadata.get(skill_id, {}).get("name", skill_id)
                         skills_content.append(f"### {skill_name}\n{content}")
                 except (OSError, UnicodeDecodeError) as e:
-                    # OSError: File read permissions or I/O issues
-                    # UnicodeDecodeError: File encoding issues
                     logger.warning(f"Failed to load skill {skill_id}: {e}")
                     continue
         

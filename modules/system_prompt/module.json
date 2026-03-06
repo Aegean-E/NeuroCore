@@ -11,6 +11,7 @@
     "config": {
         "system_prompt": "You are NeuroCore, a helpful and intelligent AI assistant.",
         "enabled_tools": [],
-        "enabled_skills": []
+        "enabled_skills": [],
+        "max_token_budget": 4000
     }
 }

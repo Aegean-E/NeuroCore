@@ -8,6 +8,6 @@
     "order": 7,
     "config": {
         "storage_path": "modules/skills/data"
-    },
-    "load_error": null
+    }
 }
+

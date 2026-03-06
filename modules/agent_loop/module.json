@@ -26,36 +26,6 @@
             "description": "Autonomous agent that loops between LLM and tools until no more tool calls.",
             "singleton": false,
             "configurable": true
-        },
-        {
-            "id": "repl_environment",
-            "name": "REPL Environment",
-            "description": "Initializes a persistent REPL state. Extracts user input from context and stores as prompt_var, building metadata-only system prompt. Foundation for RLM processing.",
-            "singleton": false,
-            "configurable": true,
-            "config": {
-                "max_recursion_depth": 3,
-                "max_cost_usd": 1.0,
-                "max_sub_calls": 50,
-                "sub_call_model": ""
-            }
-        },
-        {
-            "id": "recursive_lm",
-            "name": "Recursive LM",
-            "description": "Processes arbitrarily long inputs by treating the prompt as an environment variable. The LLM writes code to examine, decompose, and recursively process content beyond context window limits.",
-            "singleton": false,
-            "configurable": true,
-            "config": {
-                "max_iterations": 20,
-                "max_tokens": 2000,
-                "temperature": 0.1,
-                "stdout_preview_length": 500,
-                "sub_call_model": "",
-                "max_recursion_depth": 3,
-                "max_sub_calls": 50,
-                "max_cost_usd": 1.0
-            }
         }
     ]
 }

@@ -11,6 +11,6 @@
         "max_tokens": 8192
     },
     "singleton": true,
-    "configurable": false,
-    "load_error": null
+    "configurable": false
 }
+
