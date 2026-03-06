@@ -3,6 +3,23 @@ import re
 from collections import deque
 from core.llm import LLMBridge
 from core.settings import settings
+from core.flow_data import (
+    FlowData,
+    get_messages,
+    get_reasoning_context,
+    set_plan,
+    set_current_step,
+    set_original_request,
+    set_plan_needed,
+    set_plan_context,
+    set_plan_complete,
+    set_step_completed,
+    set_completed_steps,
+    set_dependency_error,
+    set_next_step,
+    set_planning_error,
+    ensure_flow_data,
+)
 
 
 class PlannerExecutor:
@@ -24,12 +41,12 @@ class PlannerExecutor:
                 self._reasoning_service = None
         return self._reasoning_service
 
-    def _extract_user_message(self, input_data: dict) -> str:
+    def _extract_user_message(self, input_data: FlowData) -> str:
         """Extract the latest user message from input data."""
         if not input_data:
             return ""
         
-        messages = input_data.get("messages", [])
+        messages = get_messages(input_data)
         
         for msg in reversed(messages):
             if isinstance(msg, dict) and msg.get("role") == "user":
@@ -61,12 +78,15 @@ class PlannerExecutor:
         if input_data is None:
             input_data = {}
         
+        # Ensure flow data type safety
+        data = ensure_flow_data(input_data)
+        
         config = config or {}
         
         if not config.get("enabled", True):
             return input_data
         
-        user_request = self._extract_user_message(input_data)
+        user_request = self._extract_user_message(data)
         
         if not user_request:
             return input_data
@@ -88,7 +108,7 @@ class PlannerExecutor:
         
         # Include reasoning context if enabled and available
         if config.get("include_reasoning_context", False):
-            reasoning_context = input_data.get("reasoning_context", "")
+            reasoning_context = get_reasoning_context(data)
             if reasoning_context:
                 planner_prompt += f"\n\nPrevious reasoning context:\n{reasoning_context}\n\nConsider this context when creating your plan."
         
