@@ -50,14 +50,75 @@ class SettingsManager:
                 return DEFAULT_SETTINGS.copy()
 
     def save_settings(self, new_settings):
+        # Validate critical fields before saving
+        validated_settings = self._validate_settings(new_settings)
+        
         with self.lock:
-            self.settings.update(new_settings)
+            self.settings.update(validated_settings)
             # Use atomic write-to-temp-then-rename pattern
             dir_path = os.path.dirname(self.file_path) or "."
             with tempfile.NamedTemporaryFile("w", dir=dir_path, delete=False, suffix=".tmp") as tmp:
                 json.dump(self.settings, tmp, indent=4)
                 tmp_path = tmp.name
             os.replace(tmp_path, self.file_path)  # Atomic on POSIX, works on Windows too
+    
+    def _validate_settings(self, new_settings: dict) -> dict:
+        """Validate settings before saving. Returns validated settings or raises ValueError."""
+        validated = {}
+        
+        # temperature: float between 0 and 2
+        if "temperature" in new_settings:
+            temp = new_settings["temperature"]
+            if not isinstance(temp, (int, float)):
+                raise ValueError("temperature must be a number")
+            if temp < 0 or temp > 2:
+                raise ValueError("temperature must be between 0 and 2")
+            validated["temperature"] = float(temp)
+        
+        # max_tokens: positive integer
+        if "max_tokens" in new_settings:
+            tokens = new_settings["max_tokens"]
+            if not isinstance(tokens, (int, float)):
+                raise ValueError("max_tokens must be an integer")
+            if int(tokens) <= 0:
+                raise ValueError("max_tokens must be a positive integer")
+            validated["max_tokens"] = int(tokens)
+        
+        # request_timeout: positive float
+        if "request_timeout" in new_settings:
+            timeout = new_settings["request_timeout"]
+            if not isinstance(timeout, (int, float)):
+                raise ValueError("request_timeout must be a number")
+            if float(timeout) <= 0:
+                raise ValueError("request_timeout must be positive")
+            validated["request_timeout"] = float(timeout)
+        
+        # max_node_loops: positive integer
+        if "max_node_loops" in new_settings:
+            loops = new_settings["max_node_loops"]
+            if not isinstance(loops, (int, float)):
+                raise ValueError("max_node_loops must be an integer")
+            if int(loops) <= 0:
+                raise ValueError("max_node_loops must be a positive integer")
+            validated["max_node_loops"] = int(loops)
+        
+        # debug_mode, ui_wide_mode, ui_show_footer: booleans
+        for bool_field in ["debug_mode", "ui_wide_mode", "ui_show_footer"]:
+            if bool_field in new_settings:
+                validated[bool_field] = bool(new_settings[bool_field])
+        
+        # String fields that should remain strings
+        for str_field in ["llm_api_url", "llm_api_key", "embedding_api_url", "default_model", "embedding_model"]:
+            if str_field in new_settings:
+                validated[str_field] = str(new_settings[str_field])
+        
+        # active_ai_flows: list
+        if "active_ai_flows" in new_settings:
+            if not isinstance(new_settings["active_ai_flows"], list):
+                raise ValueError("active_ai_flows must be a list")
+            validated["active_ai_flows"] = new_settings["active_ai_flows"]
+        
+        return validated
 
     def get(self, key, default=None):
         with self.lock:

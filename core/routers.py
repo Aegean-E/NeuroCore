@@ -193,6 +193,7 @@ async def get_dashboard_stats(request: Request):
 async def get_recent_sessions(request: Request):
     import json
     import os
+    import html
     from datetime import datetime
     
     sessions_path = "chat_sessions.json"
@@ -218,13 +219,16 @@ async def get_recent_sessions(request: Request):
             except:
                 time_ago = updated[:10] if len(updated) >= 10 else 'Unknown'
             
+            # Escape user-supplied session name to prevent XSS
+            session_name = html.escape(s.get('name', 'Untitled'))
+            
             html += f"""
             <button onclick="htmx.ajax('GET', '/chat/gui?session_id={s['id']}', '#module-content')" class="w-full flex items-center justify-between p-3 rounded-lg hover:bg-slate-700/50 border border-transparent hover:border-slate-600/50 transition-all group text-left">
                 <div class="flex items-center gap-3 min-w-0">
                     <div class="w-8 h-8 rounded-lg bg-slate-700 flex items-center justify-center flex-shrink-0">
                         <svg class="w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"></path></svg>
                     </div>
-                    <span class="text-sm text-slate-300 truncate">{s.get('name', 'Untitled')}</span>
+                    <span class="text-sm text-slate-300 truncate">{session_name}</span>
                 </div>
                 <span class="text-xs text-slate-500 flex-shrink-0">{time_ago}</span>
             </button>
@@ -624,7 +628,6 @@ async def stop_active_flow(request: Request, settings_man: SettingsManager = Dep
         "active_flow_ids": []
     }, headers={"HX-Trigger": json.dumps({"showMessage": {"level": "info", "message": "All active flows stopped"}})})
 
-# Also need to import asyncio at the top of routers.py
 
 @router.post("/ai-flow/{flow_id}/delete", response_class=HTMLResponse)
 async def delete_flow(request: Request, flow_id: str, settings_man: SettingsManager = Depends(get_settings_manager)):

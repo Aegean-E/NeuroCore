@@ -441,6 +441,8 @@ class StructuredLogger:
             handler.setFormatter(JsonFormatter())
             self.logger.addHandler(handler)
             self.logger.setLevel(logging.INFO)
+            # Prevent log records from propagating to root handlers to avoid double-output
+            self.logger.propagate = False
     
     def _log(self, level: int, event: str, message: str = "", 
              trace_id: Optional[str] = None, **kwargs):

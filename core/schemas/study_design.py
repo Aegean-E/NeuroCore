@@ -5,7 +5,7 @@ Pydantic model for representing research study designs.
 """
 
 from pydantic import BaseModel, Field
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Literal
 from datetime import datetime
 
 
@@ -29,10 +29,9 @@ class StudyDesign(BaseModel):
         max_length=300
     )
     
-    study_type: str = Field(
+    study_type: Literal["experimental", "observational", "quasi-experimental", "correlational", "case_study", "longitudinal", "cross-sectional", "meta_analysis"] = Field(
         ...,
-        description="Type of study: experimental, observational, quasi-experimental, etc.",
-        pattern="^(experimental|observational|quasi-experimental|correlational|case_study|longitudinal|cross-sectional|meta_analysis)$"
+        description="Type of study: experimental, observational, quasi-experimental, etc."
     )
     
     hypothesis_id: Optional[str] = Field(
