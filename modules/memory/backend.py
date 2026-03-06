@@ -161,19 +161,48 @@ class MemoryStore:
         if os.path.exists(index_path):
             try:
                 self.faiss_index = faiss.read_index(index_path)
-                return True
-            except Exception:
+                # Validate: Check if index is usable
+                if self.faiss_index is None:
+                    return False
+                # Verify dimension is set (IndexFlatIP sets this)
+                if hasattr(self.faiss_index, 'd') and self.faiss_index.d > 0:
+                    return True
+                # If dimension is 0 or not set, index is invalid
+                print(f"Warning: FAISS index has invalid dimension, rebuilding...")
+                self.faiss_index = None
+                return False
+            except Exception as e:
+                print(f"Warning: Failed to load FAISS index: {e}. Will rebuild.")
+                self.faiss_index = None
                 return False
         return False
 
     def _sync_faiss_index(self):
         """Ensures FAISS index count matches DB count on startup."""
         if not FAISS_AVAILABLE or not self.faiss_index: return
-        with self._connect() as con:
-            db_count = con.execute("SELECT COUNT(*) FROM memories WHERE deleted = 0 AND parent_id IS NULL AND embedding IS NOT NULL").fetchone()[0]
         
-        if self.faiss_index.ntotal != db_count:
-            print(f"Memory Index out of sync (Index: {self.faiss_index.ntotal}, DB: {db_count}). Rebuilding...")
+        try:
+            with self._connect() as con:
+                db_count = con.execute("SELECT COUNT(*) FROM memories WHERE deleted = 0 AND parent_id IS NULL AND embedding IS NOT NULL").fetchone()[0]
+            
+            # Handle edge case: FAISS has entries but DB has none
+            if self.faiss_index.ntotal > 0 and db_count == 0:
+                print(f"Warning: FAISS index has {self.faiss_index.ntotal} entries but DB has 0. Rebuilding...")
+                self._build_faiss_index()
+                return
+            
+            # Handle edge case: DB has entries but FAISS is empty
+            if self.faiss_index.ntotal == 0 and db_count > 0:
+                print(f"Warning: FAISS index is empty but DB has {db_count} entries. Rebuilding...")
+                self._build_faiss_index()
+                return
+            
+            # Normal case: counts don't match
+            if self.faiss_index.ntotal != db_count:
+                print(f"Memory Index out of sync (Index: {self.faiss_index.ntotal}, DB: {db_count}). Rebuilding...")
+                self._build_faiss_index()
+        except Exception as e:
+            print(f"Error during FAISS index sync: {e}. Rebuilding...")
             self._build_faiss_index()
 
     def _build_faiss_index(self):
@@ -526,6 +555,15 @@ class MemoryStore:
                 with self.faiss_lock:
                     self.faiss_index.reset()
                     self._save_faiss_index(force=True)
+            
+            # Also delete the FAISS index file to prevent stale index issues
+            index_path = self.db_path.replace(".sqlite3", ".faiss")
+            if os.path.exists(index_path):
+                try:
+                    os.remove(index_path)
+                    print(f"Deleted stale FAISS index file: {index_path}")
+                except Exception as e:
+                    print(f"Warning: Failed to delete FAISS index file: {e}")
 
     def get_memory_stats(self) -> Dict[str, Any]:
         """Returns statistics about the stored memories."""
