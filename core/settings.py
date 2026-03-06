@@ -13,11 +13,11 @@ DEFAULT_SETTINGS = {
     "active_ai_flows": [],
     "temperature": 0.7,
     "max_tokens": 2048,
-    "debug_mode": True,
+    "debug_mode": False,
     "ui_wide_mode": False,
     "ui_show_footer": True,
     "request_timeout": 60.0,
-    "max_node_loops": 1000
+    "max_node_loops": 100
 }
 
 class SettingsManager:
