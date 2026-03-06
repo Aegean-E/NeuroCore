@@ -11,12 +11,14 @@ import numpy as np
 from datetime import datetime
 import concurrent.futures
 
+logger = logging.getLogger(__name__)
+
 try:
     import faiss
     FAISS_AVAILABLE = True
 except ImportError:
     FAISS_AVAILABLE = False
-    print("Warning: FAISS not installed. Vector search will fall back to linear scan (slow).")
+    logger.warning("FAISS not installed. Vector search will fall back to linear scan (slow).")
 
 class MemoryStore:
     """
@@ -153,7 +155,7 @@ class MemoryStore:
             faiss.write_index(self.faiss_index, index_path)
             self.unsaved_changes = 0
         except Exception as e:
-            print(f"Failed to save FAISS index: {e}")
+            logger.error(f"Failed to save FAISS index: {e}")
 
     def _load_faiss_index(self) -> bool:
         if not FAISS_AVAILABLE: return False
@@ -168,11 +170,11 @@ class MemoryStore:
                 if hasattr(self.faiss_index, 'd') and self.faiss_index.d > 0:
                     return True
                 # If dimension is 0 or not set, index is invalid
-                print(f"Warning: FAISS index has invalid dimension, rebuilding...")
+                logger.warning("FAISS index has invalid dimension, rebuilding...")
                 self.faiss_index = None
                 return False
             except Exception as e:
-                print(f"Warning: Failed to load FAISS index: {e}. Will rebuild.")
+                logger.warning(f"Failed to load FAISS index: {e}. Will rebuild.")
                 self.faiss_index = None
                 return False
         return False
@@ -187,22 +189,22 @@ class MemoryStore:
             
             # Handle edge case: FAISS has entries but DB has none
             if self.faiss_index.ntotal > 0 and db_count == 0:
-                print(f"Warning: FAISS index has {self.faiss_index.ntotal} entries but DB has 0. Rebuilding...")
+                logger.warning(f"FAISS index has {self.faiss_index.ntotal} entries but DB has 0. Rebuilding...")
                 self._build_faiss_index()
                 return
             
             # Handle edge case: DB has entries but FAISS is empty
             if self.faiss_index.ntotal == 0 and db_count > 0:
-                print(f"Warning: FAISS index is empty but DB has {db_count} entries. Rebuilding...")
+                logger.warning(f"FAISS index is empty but DB has {db_count} entries. Rebuilding...")
                 self._build_faiss_index()
                 return
             
             # Normal case: counts don't match
             if self.faiss_index.ntotal != db_count:
-                print(f"Memory Index out of sync (Index: {self.faiss_index.ntotal}, DB: {db_count}). Rebuilding...")
+                logger.warning(f"Memory Index out of sync (Index: {self.faiss_index.ntotal}, DB: {db_count}). Rebuilding...")
                 self._build_faiss_index()
         except Exception as e:
-            print(f"Error during FAISS index sync: {e}. Rebuilding...")
+            logger.error(f"Error during FAISS index sync: {e}. Rebuilding...")
             self._build_faiss_index()
 
     def _build_faiss_index(self):
@@ -233,7 +235,7 @@ class MemoryStore:
                 self.faiss_index.add_with_ids(embs_np, ids_np)
                 self._save_faiss_index(force=True)
             except Exception as e:
-                print(f"Failed to build FAISS index: {e}")
+                logger.error(f"Failed to build FAISS index: {e}")
 
     def compute_identity(self, text: str) -> str:
         text_lower = " ".join(text.lower().strip().split())

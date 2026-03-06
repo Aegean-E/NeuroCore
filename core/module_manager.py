@@ -1,11 +1,15 @@
 import os
 import json
 import importlib
+import sys
 import threading
 from fastapi import FastAPI
 from starlette.routing import Mount
+import logging
 
 from core.flow_runner import FlowRunner
+logger = logging.getLogger(__name__)
+
 MODULES_DIR = "modules"
 
 class ModuleManager:
@@ -14,6 +18,8 @@ class ModuleManager:
         self.app = app
         self.lock = threading.Lock()
         self.modules = self._discover_modules()
+        # Runtime-only tracking for load errors (not persisted)
+        self._load_errors = {}
 
     def _discover_modules(self):
         """Finds all potential modules in the modules directory."""
@@ -34,9 +40,11 @@ class ModuleManager:
                         try:
                             meta = json.load(f)
                             meta['id'] = name
+                            # Don't persist load_error from file - it's runtime-only
+                            meta.pop('load_error', None)
                             modules[name] = meta
                         except json.JSONDecodeError:
-                            print(f"Warning: Could not decode module.json for {name}")
+                            logger.warning(f"Could not decode module.json for {name}")
         return modules
 
     def load_enabled_modules(self):
@@ -52,15 +60,27 @@ class ModuleManager:
             if any(isinstance(r, Mount) and r.path == f"/{module_id}" for r in self.app.router.routes):
                 return True
 
+            # FIX: Properly reload all submodules by removing them from sys.modules first
+            # This ensures hot-reload actually picks up changes in node.py, router.py, service.py, etc.
+            modules_to_remove = [
+                key for key in list(sys.modules.keys())
+                if key.startswith(f"modules.{module_id}")
+            ]
+            for key in modules_to_remove:
+                del sys.modules[key]
+
             module = importlib.import_module(f"modules.{module_id}")
-            importlib.reload(module)  # Reload to pick up any changes
             if hasattr(module, "router"):
                 self.app.include_router(module.router, prefix=f"/{module_id}", tags=[module_id])
-                print(f"Hot-loaded module router: {module_id}")
+                logger.info(f"Hot-loaded module router: {module_id}")
+                # Clear runtime load error
+                self._load_errors[module_id] = None
                 self.modules[module_id]['load_error'] = None
                 return True
         except Exception as e:
-            print(f"Failed to load module router for {module_id}: {e}")
+            logger.error(f"Failed to load module router for {module_id}: {e}")
+            # Store load error in runtime-only tracking, not in module metadata
+            self._load_errors[module_id] = str(e)
             self.modules[module_id]['load_error'] = str(e)
         return False
 
@@ -68,15 +88,23 @@ class ModuleManager:
         """Finds and removes a module's router from the app."""
         initial_route_count = len(self.app.router.routes)
         
-        # Filter out routes that have the module_id as a tag. This is how
-        # include_router makes them identifiable.
-        self.app.router.routes = [
-            route for route in self.app.router.routes
-            if not (hasattr(route, "tags") and module_id in route.tags)
-        ]
+        # FIX: Handle both regular routes (have tags) and Mount objects (don't have tags)
+        # Mount objects are identified by path pattern
+        module_prefix = f"/{module_id}"
+        
+        def should_keep_route(route):
+            # Check regular routes by tags
+            if hasattr(route, "tags") and module_id in route.tags:
+                return False
+            # Check Mount objects by path - mounted sub-apps have path prefix
+            if isinstance(route, Mount) and route.path.startswith(module_prefix):
+                return False
+            return True
+        
+        self.app.router.routes = [route for route in self.app.router.routes if should_keep_route(route)]
         
         if len(self.app.router.routes) < initial_route_count:
-            print(f"Hot-unloaded module router: {module_id}")
+            logger.info(f"Hot-unloaded module router: {module_id}")
             return True
         return False
 
@@ -98,9 +126,13 @@ class ModuleManager:
                 self._unload_module_router(module_id)
 
             self.modules[module_id]['enabled'] = enabled
+            
+            # FIX: When saving, don't include load_error (runtime-only)
+            meta_to_save = {k: v for k, v in self.modules[module_id].items() if k != 'load_error'}
+            
             meta_path = os.path.join(self.modules_dir, module_id, "module.json")
             with open(meta_path, "w") as f:
-                json.dump(self.modules[module_id], f, indent=4)
+                json.dump(meta_to_save, f, indent=4)
                 
             # Clear the FlowRunner cache to ensure no stale executor classes are used
             # (FlowRunner handles its own internal state, so calling this static method is safe)
@@ -109,21 +141,30 @@ class ModuleManager:
         return self.modules[module_id]
 
     def reorder_modules(self, module_ids: list):
-        """Updates the 'order' of all modules based on a provided list of IDs."""
+        """Updates the 'order' of only modules whose order actually changed."""
         with self.lock:
             # Create a map for quick lookups
             id_to_meta = {m['id']: m for m in self.modules.values()}
-
+            
+            # FIX: Build diff first - only write to modules whose order actually changed
+            modules_to_write = []
+            
             for index, module_id in enumerate(module_ids):
                 if module_id in id_to_meta:
-                    # Update the order in the in-memory representation
-                    id_to_meta[module_id]['order'] = index
-                    
-                    # Write the change to the module.json file
-                    meta_path = os.path.join(self.modules_dir, module_id, "module.json")
-                    if os.path.exists(meta_path):
-                        with open(meta_path, "w") as f:
-                            json.dump(id_to_meta[module_id], f, indent=4)
+                    current_order = id_to_meta[module_id].get('order')
+                    # Only track if order is different
+                    if current_order != index:
+                        id_to_meta[module_id]['order'] = index
+                        modules_to_write.append(module_id)
+            
+            # Write only the modules whose order changed
+            for module_id in modules_to_write:
+                meta_path = os.path.join(self.modules_dir, module_id, "module.json")
+                if os.path.exists(meta_path):
+                    # Don't include load_error in saved metadata
+                    meta_to_save = {k: v for k, v in id_to_meta[module_id].items() if k != 'load_error'}
+                    with open(meta_path, "w") as f:
+                        json.dump(meta_to_save, f, indent=4)
 
     def enable_module(self, module_id: str):
         return self._toggle_module(module_id, True)
@@ -138,7 +179,15 @@ class ModuleManager:
                 return None
             
             self.modules[module_id]['config'] = new_config
+            
+            # FIX: Don't persist load_error - it's runtime-only
+            # Only save config, enabled, order - not load_error
+            meta_to_save = {
+                k: v for k, v in self.modules[module_id].items() 
+                if k not in ('load_error',)
+            }
+            
             meta_path = os.path.join(self.modules_dir, module_id, "module.json")
             with open(meta_path, "w") as f:
-                json.dump(self.modules[module_id], f, indent=4)
+                json.dump(meta_to_save, f, indent=4)
             return self.modules[module_id]

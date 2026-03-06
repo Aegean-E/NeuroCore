@@ -5,8 +5,16 @@ import copy
 from datetime import datetime
 import threading
 from core.settings import settings
+import logging
+
+logger = logging.getLogger(__name__)
 
 FLOWS_FILE = "ai_flows.json"
+
+# Validation constants
+REQUIRED_FLOW_KEYS = {"id", "nodes", "connections"}
+REQUIRED_NODE_KEYS = {"id", "moduleId", "nodeTypeId"}
+
 
 class FlowManager:
     def __init__(self, storage_file=FLOWS_FILE):
@@ -16,24 +24,89 @@ class FlowManager:
 
     def _load_flows(self):
         if not os.path.exists(self.storage_file):
-            default_flows = self._create_default_flows()
-            self._save_flows_to_disk(default_flows)
-            self._ensure_default_active()
-            return default_flows
+            with self.lock:
+                default_flows = self._create_default_flows()
+                self._save_flows_to_disk(default_flows)
+                self._ensure_default_active()
+                return default_flows
         
         with open(self.storage_file, "r") as f:
             try:
                 flows = json.load(f)
                 if not flows:
-                    flows = self._create_default_flows()
-                    self._save_flows_to_disk(flows)
-                    self._ensure_default_active()
+                    with self.lock:
+                        flows = self._create_default_flows()
+                        self._save_flows_to_disk(flows)
+                        self._ensure_default_active()
+                    return flows
+                # Validate loaded flows - if invalid, reset to defaults
+                validation_result = self._validate_flows(flows)
+                if not validation_result["valid"]:
+                    logger.warning(f"Flow validation failed: {validation_result['errors']}. Resetting to defaults.")
+                    with self.lock:
+                        flows = self._create_default_flows()
+                        self._save_flows_to_disk(flows)
+                        self._ensure_default_active()
+                    return flows
                 return flows
             except json.JSONDecodeError:
-                default_flows = self._create_default_flows()
-                self._save_flows_to_disk(default_flows)
-                self._ensure_default_active()
-                return default_flows
+                with self.lock:
+                    default_flows = self._create_default_flows()
+                    self._save_flows_to_disk(default_flows)
+                    self._ensure_default_active()
+                    return default_flows
+
+    def _validate_flows(self, flows: dict) -> dict:
+        """Validate flows structure and integrity. Returns {valid: bool, errors: list}."""
+        errors = []
+        
+        if not isinstance(flows, dict):
+            return {"valid": False, "errors": ["flows_data must be a dictionary"]}
+        
+        if not flows:
+            return {"valid": False, "errors": ["flows_data cannot be empty"]}
+        
+        for flow_id, flow in flows.items():
+            # Check required keys
+            missing_keys = REQUIRED_FLOW_KEYS - set(flow.keys())
+            if missing_keys:
+                errors.append(f"Flow '{flow_id}' missing required keys: {missing_keys}")
+                continue
+            
+            # Validate nodes
+            if not isinstance(flow.get("nodes"), list):
+                errors.append(f"Flow '{flow_id}' nodes must be a list")
+            else:
+                node_ids = set()
+                for node in flow["nodes"]:
+                    if not isinstance(node, dict):
+                        errors.append(f"Flow '{flow_id}' node must be a dictionary")
+                        continue
+                    missing_node_keys = REQUIRED_NODE_KEYS - set(node.keys())
+                    if missing_node_keys:
+                        errors.append(f"Flow '{flow_id}' node missing keys: {missing_node_keys}")
+                    if "id" in node:
+                        node_ids.add(node["id"])
+            
+            # Validate connections
+            if not isinstance(flow.get("connections"), list):
+                errors.append(f"Flow '{flow_id}' connections must be a list")
+            else:
+                for conn in flow["connections"]:
+                    if not isinstance(conn, dict):
+                        errors.append(f"Flow '{flow_id}' connection must be a dictionary")
+                        continue
+                    if "from" not in conn or "to" not in conn:
+                        errors.append(f"Flow '{flow_id}' connection missing 'from' or 'to'")
+                    else:
+                        # Validate node references
+                        if node_ids:
+                            if conn["from"] not in node_ids:
+                                errors.append(f"Flow '{flow_id}' connection references non-existent node: {conn['from']}")
+                            if conn["to"] not in node_ids:
+                                errors.append(f"Flow '{flow_id}' connection references non-existent node: {conn['to']}")
+        
+        return {"valid": len(errors) == 0, "errors": errors}
 
     def _create_default_flows(self):
         flow_id = "default-flow-001"
@@ -108,7 +181,6 @@ class FlowManager:
             settings.save_settings({"active_ai_flows": []})
 
     def _save_flows_to_disk(self, flows):
-        # Lock should be held by caller
         with open(self.storage_file, "w") as f:
             json.dump(flows, f, indent=4)
 
@@ -132,11 +204,18 @@ class FlowManager:
             return self.flows[flow_id]
 
     def import_flows(self, flows_data: dict):
-        """Replaces all flows with the provided dictionary."""
+        """Replaces all flows with the provided dictionary after validation."""
         with self.lock:
+            # Validate before importing
+            validation_result = self._validate_flows(flows_data)
+            if not validation_result["valid"]:
+                logger.error(f"Flow import validation failed: {validation_result['errors']}")
+                return {"success": False, "errors": validation_result["errors"]}
+            
             self.flows = flows_data
             self._save_flows()
             self._ensure_default_active()
+            return {"success": True}
 
     def rename_flow(self, flow_id, new_name):
         with self.lock:
@@ -163,7 +242,7 @@ class FlowManager:
             return False
 
     def make_active_flow_default(self):
-        """Overwrites the default flow with the first active flow."""
+        """Overwrites the default flow with the first active flow after backing up current default."""
         with self.lock:
             active_ids = settings.get("active_ai_flows", [])
             if not active_ids or active_ids[0] not in self.flows:
@@ -173,6 +252,13 @@ class FlowManager:
             active_flow = copy.deepcopy(self.flows[active_id])
             
             default_id = "default-flow-001"
+            
+            # Backup current default flow before overwriting
+            if default_id in self.flows:
+                backup_id = f"default-flow-backup-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+                self.flows[backup_id] = copy.deepcopy(self.flows[default_id])
+                logger.info(f"Backed up default flow to {backup_id}")
+            
             active_flow["id"] = default_id
             active_flow["name"] = "Default Chat Flow"
             active_flow["created_at"] = datetime.now().isoformat()
