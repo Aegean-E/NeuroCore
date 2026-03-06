@@ -8,6 +8,10 @@ from modules.tools.sandbox import ToolSandbox, SecurityError, ResourceLimitError
 
 logger = logging.getLogger(__name__)
 
+# Module-level set to store active tasks and prevent garbage collection
+# This ensures tasks survive even when the executor instance is collected
+_active_tasks: set = set()
+
 class DelayExecutor:
     async def receive(self, input_data: dict, config: dict = None) -> dict:
         if input_data is None: return None
@@ -104,10 +108,10 @@ class RepeaterExecutor:
         
         flow_id = config.get("_flow_id")
         active_flow_ids = settings.get("active_ai_flows", [])
-        print(f"[Repeater] flow_id={flow_id}, active_flow_ids={active_flow_ids}")
+        logger.debug(f"[Repeater] flow_id={flow_id}, active_flow_ids={active_flow_ids}")
         if flow_id is not None and flow_id not in active_flow_ids:
             debug_logger.log(flow_id, "repeater_node", "Repeater", "stopped", "Flow no longer active")
-            print(f"[Repeater] Stopping - flow {flow_id} is no longer active")
+            logger.debug(f"[Repeater] Stopping - flow {flow_id} is no longer active")
             return input_data
         
         try:
@@ -116,8 +120,8 @@ class RepeaterExecutor:
         except (ValueError, TypeError):
             delay = 5.0
             max_repeats = 1
-            
-        flow_id = config.get("_flow_id")
+        
+        # Use flow_id from earlier read; no need to re-read from config
         node_id = config.get("_node_id")
         current_repeat = input_data.get("_repeat_count", 0)
         
@@ -125,10 +129,10 @@ class RepeaterExecutor:
             async def trigger_next(fid, data, count, start_node):
                 await asyncio.sleep(delay)
                 active_flow_ids = settings.get("active_ai_flows", [])
-                print(f"[Repeater trigger_next] fid={fid}, active_flow_ids={active_flow_ids}")
+                logger.debug(f"[Repeater trigger_next] fid={fid}, active_flow_ids={active_flow_ids}")
                 if fid not in active_flow_ids:
                     debug_logger.log(fid, "repeater_node", "Repeater", "stopped", "Flow no longer active")
-                    print(f"[Repeater] Stopping - flow {fid} is no longer active")
+                    logger.debug(f"[Repeater] Stopping - flow {fid} is no longer active")
                     return
                 try:
                     from core.flow_runner import FlowRunner
@@ -140,11 +144,12 @@ class RepeaterExecutor:
                     logger.error(f"Repeater failed to trigger next run: {e}")
                     debug_logger.log(fid, "repeater_node", "Repeater", "error", f"Loop failed: {str(e)}")
             
-            # Store the task reference to prevent it from being garbage-collected
-            # before it has a chance to run.
-            self._pending_task = asyncio.create_task(
-                trigger_next(flow_id, input_data, current_repeat, node_id)
-            )
+            # Store the task reference in module-level set to prevent garbage collection
+            # The instance may be collected after this method returns, but the task
+            # must survive to complete its execution.
+            task = asyncio.create_task(trigger_next(flow_id, input_data, current_repeat, node_id))
+            _active_tasks.add(task)
+            task.add_done_callback(_active_tasks.discard)
             
         return input_data
 
