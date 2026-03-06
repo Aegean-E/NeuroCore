@@ -20,7 +20,9 @@ class FlowRunner:
         """Ensure cache doesn't grow indefinitely by removing oldest entries when limit reached."""
         if len(cls._executor_cache) >= cls._max_cache_size:
             # Remove oldest 20% of entries (FIFO eviction)
-            keys_to_remove = list(cls._executor_cache.keys())[:20]
+            # Cap at len(cache) // 5 to avoid issues when cache is small
+            num_to_remove = max(1, len(cls._executor_cache) // 5)
+            keys_to_remove = list(cls._executor_cache.keys())[:num_to_remove]
             for key in keys_to_remove:
                 del cls._executor_cache[key]
             if settings.get("debug_mode"):
@@ -378,12 +380,19 @@ class FlowRunner:
             'warnings': warnings
         }
 
-    async def run(self, initial_input: dict, start_node_id: str = None):
-        """Executes the flow in order, passing data between nodes."""
-        if settings.get("debug_mode"):
-            debug_logger.log(self.flow_id, "SYSTEM", "FlowRunner", "flow_start", {"start_node": start_node_id, "input_source": initial_input.get("_input_source") if isinstance(initial_input, dict) else None})
+    async def run(self, initial_input: dict, start_node_id: str = None, timeout: float = None):
+        """
+        Executes the flow in order, passing data between nodes.
         
-        try:
+        Args:
+            initial_input: Input data for the flow
+            start_node_id: Optional specific node to start from
+            timeout: Optional timeout in seconds for the entire flow execution
+        """
+        if settings.get("debug_mode"):
+            debug_logger.log(self.flow_id, "SYSTEM", "FlowRunner", "flow_start", {"start_node": start_node_id, "input_source": initial_input.get("_input_source") if isinstance(initial_input, dict) else None, "timeout": timeout})
+        
+        async def run_impl():
             node_outputs = {}
             
             # Determine start nodes based on input source
@@ -486,6 +495,10 @@ class FlowRunner:
                                         break
                                     bridge_output = await bridge_executor.send(bridge_processed)
                                     node_outputs[bridge_node_id] = bridge_output
+                                    
+                                    # If send() returns None, stop the bridge chain to avoid stale input
+                                    if bridge_output is None:
+                                        break
                                     
                                     # Merge bridge output into input for next node in chain
                                     # This allows bridge nodes to progressively build context
@@ -630,9 +643,14 @@ class FlowRunner:
                     # If input had 'messages' (chat history) and output is a dict that missed it,
                     # preserve it. This ensures chains like System -> LLM -> Router -> Tools -> LLM
                     # maintain the conversation context.
+                    # Nodes can opt-out by setting _strip_messages: true in their output
                     if isinstance(node_input, dict) and "messages" in node_input:
                         if isinstance(output, dict) and "messages" not in output:
-                            output["messages"] = node_input["messages"]
+                            # Check if node intentionally stripped messages
+                            if not output.get("_strip_messages", False):
+                                output["messages"] = node_input["messages"]
+                            # Remove the marker if present
+                            output.pop("_strip_messages", None)
 
                     node_outputs[node_id] = output
 
@@ -696,15 +714,16 @@ class FlowRunner:
                     return out
                     
             return {}
-        except asyncio.CancelledError:
-            # Flow was explicitly cancelled (e.g., user stopped active flows)
-            if settings.get("debug_mode"):
-                debug_logger.log(self.flow_id, "SYSTEM", "FlowRunner", "flow_cancelled", {})
-            print(f"[FlowRunner] Flow {self.flow_id} cancelled")
-            raise
-        except (RuntimeError, ValueError) as e:
-            # Flow-level execution errors
-            if settings.get("debug_mode"):
-                debug_logger.log(self.flow_id, "SYSTEM", "FlowRunner", "flow_error", {"error": str(e), "error_type": type(e).__name__})
-            print(f"[FlowRunner] Flow {self.flow_id} failed: {e}")
-            raise
+        
+        # Execute with optional timeout
+        if timeout is not None and timeout > 0:
+            try:
+                return await asyncio.wait_for(run_impl(), timeout=timeout)
+            except asyncio.TimeoutError:
+                error_msg = f"Flow execution timed out after {timeout} seconds"
+                if settings.get("debug_mode"):
+                    debug_logger.log(self.flow_id, "SYSTEM", "FlowRunner", "flow_timeout", {"timeout": timeout})
+                print(f"[FlowRunner] {error_msg}")
+                return {"error": error_msg}
+        else:
+            return await run_impl()
