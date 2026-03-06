@@ -1,3 +1,4 @@
+import html
 import json
 import os
 import logging
@@ -44,15 +45,19 @@ async def get_available_tools(request: Request, module_manager = Depends(get_mod
             func_def = tool_data["definition"]["function"]
             desc = func_def.get("description", "No description available")
             
+            # Escape HTML to prevent XSS attacks
+            safe_tool_name = html.escape(tool_name)
+            safe_desc = html.escape(desc)
+            
             tools_html += f"""
             <div class="flex items-start space-x-3 p-3 rounded-lg hover:bg-slate-800/50 transition-colors">
-                <input type="checkbox" id="tool_{tool_name}" value="{tool_name}" 
+                <input type="checkbox" id="tool_{safe_tool_name}" value="{safe_tool_name}" 
                        class="mt-1 w-4 h-4 rounded border-slate-600 bg-slate-950 text-blue-600 focus:ring-blue-500 cursor-pointer tool-checkbox"
                        {checked_attr}
                        onchange="updateEnabledTools()">
-                <label for="tool_{tool_name}" class="cursor-pointer flex-1">
-                    <div class="text-sm font-medium text-slate-300">{tool_name}</div>
-                    <div class="text-xs text-slate-500">{desc}</div>
+                <label for="tool_{safe_tool_name}" class="cursor-pointer flex-1">
+                    <div class="text-sm font-medium text-slate-300">{safe_tool_name}</div>
+                    <div class="text-xs text-slate-500">{safe_desc}</div>
                 </label>
             </div>
             """

@@ -1,3 +1,4 @@
+import asyncio
 import json
 import os
 import logging
@@ -5,20 +6,22 @@ import logging
 logger = logging.getLogger(__name__)
 
 class SystemPromptExecutor:
-    # Class-level cache: avoids re-reading tools.json on every receive() call
+    # Module-level cache with asyncio lock for thread-safety
+    _tools_lock = asyncio.Lock()
     _tools_cache = {"mtime": 0.0, "data": {}}
     _tools_path = os.path.join(os.path.dirname(__file__), "..", "tools", "tools.json")
 
-    def _load_available_tools(self):
-        """Load available tools from the tools module (cached by mtime)."""
+    async def _load_available_tools(self):
+        """Load available tools from the tools module (cached by mtime with async lock)."""
         try:
             if os.path.exists(self._tools_path):
                 mtime = os.path.getmtime(self._tools_path)
-                if mtime > self.__class__._tools_cache["mtime"]:
-                    with open(self._tools_path, "r") as f:
-                        self.__class__._tools_cache["data"] = json.load(f)
-                    self.__class__._tools_cache["mtime"] = mtime
-                return self.__class__._tools_cache["data"]
+                async with self._tools_lock:
+                    if mtime > self._tools_cache["mtime"]:
+                        with open(self._tools_path, "r") as f:
+                            self._tools_cache["data"] = json.load(f)
+                        self._tools_cache["mtime"] = mtime
+                return self._tools_cache["data"]
         except (json.JSONDecodeError, OSError, KeyError) as e:
             # JSONDecodeError: Corrupted JSON file
             # OSError: File read permissions or I/O issues
@@ -28,7 +31,7 @@ class SystemPromptExecutor:
 
     def _get_tools_in_openai_format(self, enabled_tool_names: list) -> list:
         """Convert enabled tools to OpenAI tool format."""
-        all_tools = self._load_available_tools()
+        all_tools = await self._load_available_tools()
         tools_list = []
         
         for tool_name in enabled_tool_names:
@@ -121,7 +124,9 @@ class SystemPromptExecutor:
         if memory_context:
             # Extract just the memory content (after "Relevant memories retrieved...")
             if "Relevant memories retrieved" in memory_context:
-                context_parts.append(f"## User Memories\n{memory_context}")
+                # Split on the marker and take the content after it
+                memory_content = memory_context.split("Relevant memories retrieved", 1)[1].strip()
+                context_parts.append(f"## User Memories\n{memory_content}")
             else:
                 context_parts.append(f"## User Memories\n{memory_context}")
         
@@ -151,7 +156,7 @@ class SystemPromptExecutor:
         new_messages = [system_message] + messages
         
         # Get tools in OpenAI format for the LLM to use
-        tools = self._get_tools_in_openai_format(enabled_tools)
+        tools = await self._get_tools_in_openai_format(enabled_tools)
         
         # Return the updated data structure with tools
         # We use **input_data to preserve any other keys flowing through the system
@@ -197,6 +202,7 @@ class SystemPromptExecutor:
                     truncated = part[:max_chars] + "\n\n[... content truncated due to token budget]"
                     result_parts.append(truncated)
                     remaining_tokens = 0
+                    break  # Short-circuit after truncation since we used up budget
                 
                 # For lower priority parts (skills, reasoning), we can skip entirely
                 # if they don't fit. Higher priority parts (plan, memory) were added first.
@@ -215,3 +221,4 @@ async def get_executor_class(node_type_id: str):
     if node_type_id == "system_prompt":
         return SystemPromptExecutor
     return None
+
