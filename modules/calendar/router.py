@@ -1,9 +1,10 @@
 import calendar
 from datetime import datetime
-from fastapi import APIRouter, Request, Form
+from fastapi import APIRouter, Request, Form, Depends
 from fastapi.responses import HTMLResponse, Response
 from fastapi.templating import Jinja2Templates
 from core.settings import settings
+from core.dependencies import get_module_manager
 from .events import event_manager
 
 router = APIRouter()
@@ -28,8 +29,7 @@ def get_enriched_upcoming_events():
     return events
 
 @router.get("", response_class=HTMLResponse)
-async def calendar_page(request: Request):
-    module_manager = request.app.state.module_manager
+async def calendar_page(request: Request, module_manager = Depends(get_module_manager)):
     enabled_modules = [m for m in module_manager.get_all_modules() if m.get("enabled")]
     
     return templates.TemplateResponse(request, "index.html", {
@@ -95,6 +95,13 @@ async def calendar_gui(request: Request, year: int = None, month: int = None):
 
 @router.post("/events/save", response_class=HTMLResponse)
 async def save_event(request: Request, title: str = Form(...), date: str = Form(...), time: str = Form(...)):
+    # Validate date and time format before saving
+    try:
+        datetime.strptime(f"{date} {time}", "%Y-%m-%d %H:%M")
+    except ValueError:
+        # Return error response for invalid date/time
+        return HTMLResponse(content="<div class='alert alert-danger'>Invalid date or time format</div>", status_code=400)
+    
     start_time = f"{date} {time}"
     event_manager.add_event(title, start_time)
     
@@ -106,6 +113,11 @@ async def save_event(request: Request, title: str = Form(...), date: str = Form(
 @router.delete("/events/{event_id}", response_class=HTMLResponse)
 async def delete_event_route(request: Request, event_id: str):
     event = event_manager.get_event_by_id(event_id)
+    
+    # Return 404 if event doesn't exist
+    if event is None:
+        return HTMLResponse(content="<div class='alert alert-danger'>Event not found</div>", status_code=404)
+    
     event_manager.delete_event(event_id)
     
     if event and event.get("start_time"):

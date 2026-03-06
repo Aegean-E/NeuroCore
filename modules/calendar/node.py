@@ -1,8 +1,7 @@
 import json
 import os
 from datetime import datetime
-
-EVENTS_FILE = "calendar_events.json"
+from .events import event_manager, EVENTS_FILE
 
 class CalendarWatcherExecutor:
     async def receive(self, input_data: dict, config: dict = None) -> dict:

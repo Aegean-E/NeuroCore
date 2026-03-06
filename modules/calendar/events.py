@@ -1,6 +1,8 @@
 import json
 import os
 import uuid
+import threading
+import tempfile
 from datetime import datetime
 
 EVENTS_FILE = "calendar_events.json"
@@ -8,23 +10,31 @@ EVENTS_FILE = "calendar_events.json"
 class EventManager:
     def __init__(self, storage_file=EVENTS_FILE):
         self.storage_file = storage_file
+        self.lock = threading.Lock()  # Thread safety for concurrent access
         self._ensure_file()
 
     def _ensure_file(self):
         if not os.path.exists(self.storage_file):
-            with open(self.storage_file, "w") as f:
-                json.dump([], f)
+            with self.lock:
+                with open(self.storage_file, "w") as f:
+                    json.dump([], f)
 
     def _load_events(self):
         try:
-            with open(self.storage_file, "r") as f:
-                return json.load(f)
-        except:
+            with self.lock:
+                with open(self.storage_file, "r") as f:
+                    return json.load(f)
+        except (json.JSONDecodeError, OSError):
             return []
 
     def _save_events(self, events):
-        with open(self.storage_file, "w") as f:
-            json.dump(events, f, indent=4)
+        """Save events using atomic temp-file-then-rename pattern."""
+        with self.lock:
+            dir_path = os.path.dirname(self.storage_file) or "."
+            with tempfile.NamedTemporaryFile("w", dir=dir_path, delete=False, suffix=".tmp") as tmp:
+                json.dump(events, tmp, indent=4)
+                tmp_path = tmp.name
+            os.replace(tmp_path, self.storage_file)  # Atomic on POSIX, works on Windows
 
     def add_event(self, title, start_time):
         events = self._load_events()
@@ -53,8 +63,10 @@ class EventManager:
             except (ValueError, TypeError):
                 return datetime.max
 
-        upcoming = [e for e in events if _parse_dt(e) >= now]
-        upcoming.sort(key=_parse_dt)
+        # Pre-compute parsed datetimes to avoid double parsing in filter and sort
+        parsed_events = [(e, _parse_dt(e)) for e in events]
+        upcoming = [e for e, dt in parsed_events if dt >= now]
+        upcoming.sort(key=lambda e: _parse_dt(e))
         return upcoming[:limit]
 
     def get_event_by_id(self, event_id):
