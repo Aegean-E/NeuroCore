@@ -1,6 +1,6 @@
 import httpx
 import logging
-import threading
+import asyncio
 
 from core.settings import settings
 
@@ -8,18 +8,21 @@ logger = logging.getLogger(__name__)
 
 # Module-level shared client for connection pooling
 _shared_client: httpx.AsyncClient = None
-_client_lock = threading.Lock()
+_client_lock = asyncio.Lock()
 
 
 async def get_shared_client(timeout: float = 60.0) -> httpx.AsyncClient:
     """Get or create a shared AsyncClient for connection pooling."""
-    global _shared_client, _client_lock
+    global _shared_client
     
     if _shared_client is None:
-        _shared_client = httpx.AsyncClient(
-            timeout=httpx.Timeout(timeout),
-            limits=httpx.Limits(max_keepalive_connections=20, max_connections=100)
-        )
+        async with _client_lock:
+            # Double-check after acquiring lock to prevent race condition
+            if _shared_client is None:
+                _shared_client = httpx.AsyncClient(
+                    timeout=httpx.Timeout(timeout),
+                    limits=httpx.Limits(max_keepalive_connections=20, max_connections=100)
+                )
     return _shared_client
 
 

@@ -444,9 +444,6 @@ class FlowRunner:
                 node_meta = self.nodes[node_id]
                 module_id = node_meta['moduleId']
                 node_type_id = node_meta['nodeTypeId']
-                
-                if settings.get("debug_mode"):
-                    debug_logger.log(self.flow_id, node_id, node_meta['name'], "start", {"input": node_input if 'node_input' in locals() else "Pending Input Resolution"})
 
                 # 1. Determine Input Data (DAG Logic)
                 incoming_edges = [c for c in self.connections if c['to'] == node_id]

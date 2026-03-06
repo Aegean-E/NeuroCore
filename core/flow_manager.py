@@ -23,38 +23,40 @@ class FlowManager:
         self.flows = self._load_flows()
 
     def _load_flows(self):
+        # Note: lock is already created in __init__ before this is called
+        # This method may acquire the lock for writing default flows
         if not os.path.exists(self.storage_file):
-            with self.lock:
-                default_flows = self._create_default_flows()
-                self._save_flows_to_disk(default_flows)
-                self._ensure_default_active()
-                return default_flows
+            default_flows = self._create_default_flows()
+            self._ensure_default_active()
+            # Save without holding lock - file doesn't exist yet so no race
+            self._save_flows_to_disk_unsafe(default_flows)
+            return default_flows
         
         with open(self.storage_file, "r") as f:
             try:
                 flows = json.load(f)
                 if not flows:
-                    with self.lock:
-                        flows = self._create_default_flows()
-                        self._save_flows_to_disk(flows)
-                        self._ensure_default_active()
-                    return flows
+                    default_flows = self._create_default_flows()
+                    self._ensure_default_active()
+                    # Save without holding lock - file is empty so no race
+                    self._save_flows_to_disk_unsafe(default_flows)
+                    return default_flows
                 # Validate loaded flows - if invalid, reset to defaults
                 validation_result = self._validate_flows(flows)
                 if not validation_result["valid"]:
                     logger.warning(f"Flow validation failed: {validation_result['errors']}. Resetting to defaults.")
-                    with self.lock:
-                        flows = self._create_default_flows()
-                        self._save_flows_to_disk(flows)
-                        self._ensure_default_active()
-                    return flows
+                    default_flows = self._create_default_flows()
+                    self._ensure_default_active()
+                    # Save without holding lock - we're replacing invalid data
+                    self._save_flows_to_disk_unsafe(default_flows)
+                    return default_flows
                 return flows
             except json.JSONDecodeError:
-                with self.lock:
-                    default_flows = self._create_default_flows()
-                    self._save_flows_to_disk(default_flows)
-                    self._ensure_default_active()
-                    return default_flows
+                default_flows = self._create_default_flows()
+                self._ensure_default_active()
+                # Save without holding lock - file is corrupt so no race
+                self._save_flows_to_disk_unsafe(default_flows)
+                return default_flows
 
     def _validate_flows(self, flows: dict) -> dict:
         """Validate flows structure and integrity. Returns {valid: bool, errors: list}."""
@@ -180,9 +182,18 @@ class FlowManager:
         if not settings.get("active_ai_flows"):
             settings.save_settings({"active_ai_flows": []})
 
-    def _save_flows_to_disk(self, flows):
+    def _save_flows_to_disk_unsafe(self, flows):
+        """Internal method to save flows to disk without acquiring lock.
+        Caller must hold self.lock when calling this method.
+        """
         with open(self.storage_file, "w") as f:
             json.dump(flows, f, indent=4)
+
+    def _save_flows_to_disk(self, flows):
+        """Save flows to disk. Acquires lock before writing."""
+        with self.lock:
+            with open(self.storage_file, "w") as f:
+                json.dump(flows, f, indent=4)
 
     def _save_flows(self):
         self._save_flows_to_disk(self.flows)

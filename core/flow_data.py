@@ -359,11 +359,30 @@ def get_response(data: FlowData) -> Optional[Dict[str, Any]]:
 
 
 def get_memory_context(data: FlowData) -> Optional[str]:
-    """Get _memory_context from flow data."""
+    """Get memory_context from flow data.
+    
+    Checks both _memory_context (FlowData) and memory_context (FlowContext) for compatibility.
+    """
+    # Check FlowContext canonical name first
+    result = data.get("memory_context")
+    if result is not None:
+        return str(result)
+    # Fall back to FlowData name
     result = data.get("_memory_context")
-    if result is None:
-        return None
-    return str(result)
+    if result is not None:
+        return str(result)
+    return None
+
+
+def set_memory_context(data: FlowData, context: str) -> FlowData:
+    """Set memory_context in flow data.
+    
+    Sets both _memory_context (FlowData) and memory_context (FlowContext) for compatibility.
+    """
+    result = data.copy() if data else {}
+    result["memory_context"] = context
+    result["_memory_context"] = context  # For backward compatibility
+    return result
 
 
 def get_knowledge_context(data: FlowData) -> Optional[str]:
@@ -407,25 +426,66 @@ def get_reasoning_structured(data: FlowData, default: List[Dict[str, Any]] = Non
 
 
 def get_tool_count(data: FlowData, default: int = 0) -> int:
-    """Get _tool_count from flow data."""
+    """Get tool_count from flow data.
+    
+    Checks both _tool_count (FlowData) and tool_count (FlowContext) for compatibility.
+    """
+    # Check FlowContext canonical name first
+    result = data.get("tool_count")
+    if result is not None:
+        try:
+            return int(result)
+        except (ValueError, TypeError):
+            pass
+    # Fall back to FlowData name
     result = data.get("_tool_count")
-    if result is None:
-        return default
-    try:
-        return int(result)
-    except (ValueError, TypeError):
-        return default
+    if result is not None:
+        try:
+            return int(result)
+        except (ValueError, TypeError):
+            pass
+    return default
+
+
+def set_tool_count(data: FlowData, count: int) -> FlowData:
+    """Set tool_count in flow data.
+    
+    Sets both _tool_count (FlowData) and tool_count (FlowContext) for compatibility.
+    """
+    result = data.copy() if data else {}
+    result["tool_count"] = count
+    result["_tool_count"] = count  # For backward compatibility
+    return result
 
 
 def get_remaining_tool_calls(data: FlowData, default: List[ToolCall] = None) -> List[ToolCall]:
-    """Get _remaining_tool_calls from flow data."""
+    """Get remaining_tool_calls from flow data.
+    
+    Checks both _remaining_tool_calls (FlowData) and remaining_tool_calls (FlowContext) for compatibility.
+    """
     if default is None:
         default = []
+    # Check FlowContext canonical name first
+    result = data.get("remaining_tool_calls")
+    if result is not None:
+        if isinstance(result, list):
+            return result
+    # Fall back to FlowData name
     result = data.get("_remaining_tool_calls")
-    if result is None:
-        return default
-    if not isinstance(result, list):
-        return default
+    if result is not None:
+        if isinstance(result, list):
+            return result
+    return default
+
+
+def set_remaining_tool_calls(data: FlowData, calls: List[ToolCall]) -> FlowData:
+    """Set remaining_tool_calls in flow data.
+    
+    Sets both _remaining_tool_calls (FlowData) and remaining_tool_calls (FlowContext) for compatibility.
+    """
+    result = data.copy() if data else {}
+    result["remaining_tool_calls"] = calls
+    result["_remaining_tool_calls"] = calls  # For backward compatibility
     return result
 
 
