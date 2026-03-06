@@ -153,8 +153,13 @@ class SystemPromptExecutor:
         # Create the system message
         system_message = {"role": "system", "content": full_prompt}
         
-        # Prepend the system message to the history
-        new_messages = [system_message] + messages
+        # Deduplication guard: if messages[0] is already a system message, replace it
+        # This prevents stacking duplicate system messages in agent loops
+        if messages and messages[0].get("role") == "system":
+            new_messages = [system_message] + messages[1:]
+        else:
+            # Prepend the system message to the history
+            new_messages = [system_message] + messages
         
         # Get tools in OpenAI format for the LLM to use
         tools = await self._get_tools_in_openai_format(enabled_tools)
@@ -169,8 +174,27 @@ class SystemPromptExecutor:
         return result
 
     def _estimate_tokens(self, text: str) -> int:
-        """Rough token estimation: ~4 characters per token."""
-        return len(text) // 4
+        """
+        Rough token estimation with CJK support.
+        - English/ASCII: ~4 characters per token
+        - CJK (Chinese/Japanese/Korean): 1 token per character
+        """
+        if not text:
+            return 0
+        
+        # Count CJK characters (Unicode ranges)
+        # Chinese: 4E00-9FFF, Japanese Hiragana/Katakana: 3040-309F, 30A0-30FF
+        # Korean: AC00-D7AF, Hangul
+        cjk_count = sum(1 for char in text if (
+            '\u4e00' <= char <= '\u9fff' or  # Chinese
+            '\u3040' <= char <= '\u309f' or  # Japanese Hiragana
+            '\u30a0' <= char <= '\u30ff' or  # Japanese Katakana
+            '\uac00' <= char <= '\uacff'     # Korean Hangul
+        ))
+        
+        # ASCII characters (roughly 4 chars per token)
+        ascii_len = len(text) - cjk_count
+        return cjk_count + (ascii_len // 4)
 
     def _apply_token_budget(self, base_prompt: str, context_parts: list, max_tokens: int) -> str:
         """

@@ -78,13 +78,15 @@ async def get_available_tools(request: Request, module_manager = Depends(get_mod
         {tools_html}
     </div>
     <script>
-        function updateEnabledTools() {{
-            const checked = Array.from(document.querySelectorAll('#tools-container .tool-checkbox:checked'))
-                .map(c => c.value);
-            const hiddenField = document.getElementById('enabled_tools');
-            if (hiddenField) {{
-                hiddenField.value = JSON.stringify(checked);
-            }}
+        if (!window.updateEnabledTools) {{
+            window.updateEnabledTools = function() {{
+                const checked = Array.from(document.querySelectorAll('#tools-container .tool-checkbox:checked'))
+                    .map(c => c.value);
+                const hiddenField = document.getElementById('enabled_tools');
+                if (hiddenField) {{
+                    hiddenField.value = JSON.stringify(checked);
+                }}
+            }};
         }}
     </script>
     """
