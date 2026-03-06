@@ -226,6 +226,16 @@ class FlowRunner:
             # This is a heuristic to allow execution even with malformed flows.
             remaining_nodes = list(set(self.nodes.keys()) - set(sorted_order))
             
+            # Log warning about cycle detection
+            if settings.get("debug_mode"):
+                print(f"[FlowRunner] Cycle detected in flow. Breaking by adding remaining nodes: {remaining_nodes}")
+            
+            # Check for intentional loops (nodes with isReverted flag indicating loop nodes)
+            loop_nodes = [nid for nid, node in self.nodes.items() if node.get('isReverted', False)]
+            if loop_nodes:
+                if settings.get("debug_mode"):
+                    print(f"[FlowRunner] Note: Flow contains {len(loop_nodes)} node(s) marked as loop (isReverted): {loop_nodes}")
+            
             while len(sorted_order) < len(self.nodes):
                 # Pick the first remaining node to break the deadlock
                 candidates = [n for n in self.nodes if n not in sorted_order]
@@ -630,9 +640,12 @@ class FlowRunner:
                         debug_logger.log(self.flow_id, node_id, node_meta['name'], "end", {"output": output})
                     
                     # Routing Logic: Check if the node specified specific downstream targets
+                    # Consume _route_targets at the point it's read - this ensures routing
+                    # only applies to children of the node that set the routing, then clears
+                    # so grandchildren run freely
                     allowed_targets = None
                     if isinstance(output, dict) and "_route_targets" in output:
-                        allowed_targets = output["_route_targets"]
+                        allowed_targets = output.pop("_route_targets")  # Consume it
                         if settings.get("debug_mode"):
                             debug_logger.log(self.flow_id, node_id, node_meta['name'], "routing", {"targets": allowed_targets})
                     
@@ -646,16 +659,8 @@ class FlowRunner:
                     for child_id in downstream_nodes:
                         # If routing is active, check if child is allowed
                         if allowed_targets is not None:
-                            # If the current node (parent) was the routing target, clear routing for its children
-                            # This ensures routing only applies one level deep
-                            parent_was_routed_to = node_id in allowed_targets
-                            
-                            if parent_was_routed_to:
-                                # Clear routing so children can be processed normally
-                                if isinstance(output, dict) and "_route_targets" in output:
-                                    del output["_route_targets"]
-                                allowed_targets = None
-                            elif child_id not in allowed_targets:
+                            # Check if this child is in the allowed targets from the router
+                            if child_id not in allowed_targets:
                                 if settings.get("debug_mode"):
                                     child_name = self.nodes.get(child_id, {}).get('name', child_id)
                                     debug_logger.log(self.flow_id, node_id, node_meta['name'], "routing_skip", {"skipped": child_name})

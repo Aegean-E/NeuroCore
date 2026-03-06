@@ -1,6 +1,7 @@
 import json
 import os
 import threading
+import tempfile
 
 SETTINGS_FILE = "settings.json"
 
@@ -23,7 +24,7 @@ DEFAULT_SETTINGS = {
 class SettingsManager:
     def __init__(self, file_path=SETTINGS_FILE):
         self.file_path = file_path
-        self.lock = threading.Lock()
+        self.lock = threading.RLock()  # Use RLock for reentrant locking
         self.settings = self.load_settings()
 
     def load_settings(self):
@@ -49,8 +50,12 @@ class SettingsManager:
     def save_settings(self, new_settings):
         with self.lock:
             self.settings.update(new_settings)
-            with open(self.file_path, "w") as f:
-                json.dump(self.settings, f, indent=4)
+            # Use atomic write-to-temp-then-rename pattern
+            dir_path = os.path.dirname(self.file_path) or "."
+            with tempfile.NamedTemporaryFile("w", dir=dir_path, delete=False, suffix=".tmp") as tmp:
+                json.dump(self.settings, tmp, indent=4)
+                tmp_path = tmp.name
+            os.replace(tmp_path, self.file_path)  # Atomic on POSIX, works on Windows too
 
     def get(self, key, default=None):
         with self.lock:
