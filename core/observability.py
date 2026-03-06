@@ -193,6 +193,35 @@ def trace(span_name: str, kind: SpanKind = SpanKind.INTERNAL,
         ctx.end_span()
 
 
+# Thread-local trace context for async operations
+_trace_ctx_async: contextvars.ContextVar[Optional['TraceContext']] = contextvars.ContextVar('trace_ctx_async', default=None)
+
+
+@contextlib.contextmanager
+def trace_async(span_name: str, kind: SpanKind = SpanKind.INTERNAL, 
+                attributes: Optional[Dict[str, Any]] = None):
+    """
+    Context manager for creating spans in async context.
+    Creates a new TraceContext per async call to avoid concurrent span clobbering.
+    
+    Usage:
+        with trace_async("process_request") as ctx:
+            ctx.add_span("database_query", attributes={"query": "SELECT *"})
+    """
+    # Create a new TraceContext for this async operation
+    ctx = TraceContext(trace_id=uuid.uuid4().hex)
+    _trace_ctx_async.set(ctx)
+    span = ctx.add_span(span_name, kind=kind, attributes=attributes)
+    try:
+        yield ctx
+    except Exception as e:
+        span.finish(status="error", error=str(e))
+        raise
+    finally:
+        ctx.end_span()
+        _trace_ctx_async.set(None)
+
+
 def traced(span_name: str = None, kind: SpanKind = SpanKind.INTERNAL):
     """
     Decorator for automatic tracing of functions.
@@ -213,7 +242,9 @@ def traced(span_name: str = None, kind: SpanKind = SpanKind.INTERNAL):
         
         @wraps(func)
         async def async_wrapper(*args, **kwargs):
-            with trace(name, kind=kind) as ctx:
+            # Use trace_async to create a new TraceContext for each async call
+            # to avoid concurrent coroutines clobbering each other's current_span
+            with trace_async(name, kind=kind) as ctx:
                 ctx.current_span.attributes["function"] = func.__name__
                 return await func(*args, **kwargs)
         
@@ -578,22 +609,23 @@ def instrument_llm_calls():
     
     This should be called during app initialization.
     """
-    from core.llm import llm_bridge
+    from core.llm import LLMBridge, get_shared_client
     
-    if hasattr(llm_bridge, 'generate'):
-        original_generate = llm_bridge.generate
+    # Patch the chat_completion method on LLMBridge class
+    if hasattr(LLMBridge, 'chat_completion'):
+        original_chat_completion = LLMBridge.chat_completion
         
-        @wraps(original_generate)
-        async def traced_generate(*args, **kwargs):
+        @wraps(original_chat_completion)
+        async def traced_chat_completion(self, *args, **kwargs):
             ctx = get_or_create_trace_context()
             span = ctx.add_span("llm_call", SpanKind.CLIENT, attributes={
-                "model": kwargs.get("model", "unknown"),
+                "model": kwargs.get("model", args[1] if len(args) > 1 else None),
             })
             
             start_time = time.time()
             try:
-                result = await original_generate(*args, **kwargs)
-                elapsed_ms = ( time.time() - start_time) * 1000
+                result = await original_chat_completion(self, *args, **kwargs)
+                elapsed_ms = (time.time() - start_time) * 1000
                 
                 # Extract token usage if available
                 if isinstance(result, dict):
@@ -615,7 +647,19 @@ def instrument_llm_calls():
                 span.finish(status="error", error=str(e))
                 raise
         
-        llm_bridge.generate = traced_generate
+        LLMBridge.chat_completion = traced_chat_completion
+    
+    # Also patch get_shared_client to return instrumented client
+    original_get_shared_client = get_shared_client
+    
+    async def instrumented_get_shared_client(*args, **kwargs):
+        client = await original_get_shared_client(*args, **kwargs)
+        # The client is an httpx.AsyncClient, we can't easily instrument it
+        # Instead, we rely on patching LLMBridge methods which is done above
+        return client
+    
+    # Note: We don't replace get_shared_client as it returns the raw httpx client
+    # The actual LLM calls go through LLMBridge.chat_completion which is patched above
 
 
 def instrument_tools():

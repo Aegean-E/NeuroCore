@@ -83,11 +83,10 @@ async def get_dashboard_stats(request: Request):
     if memory_path.exists():
         try:
             import sqlite3
-            conn = sqlite3.connect(str(memory_path))
-            cursor = conn.cursor()
-            cursor.execute("SELECT COUNT(*) FROM memories WHERE is_archived = 0")
-            memory_count = cursor.fetchone()[0]
-            conn.close()
+            with sqlite3.connect(str(memory_path)) as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT COUNT(*) FROM memories WHERE is_archived = 0")
+                memory_count = cursor.fetchone()[0]
         except (sqlite3.Error, OSError) as e:
             # sqlite3.Error: Database connection or query failed
             # OSError: File system issues (permissions, disk full, etc.)
@@ -115,11 +114,10 @@ async def get_dashboard_stats(request: Request):
     if kb_path.exists():
         try:
             import sqlite3
-            conn = sqlite3.connect(str(kb_path))
-            cursor = conn.cursor()
-            cursor.execute("SELECT COUNT(*) FROM documents")
-            docs_count = cursor.fetchone()[0]
-            conn.close()
+            with sqlite3.connect(str(kb_path)) as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT COUNT(*) FROM documents")
+                docs_count = cursor.fetchone()[0]
         except (sqlite3.Error, OSError) as e:
             # sqlite3.Error: Database connection or query failed
             # OSError: File system issues
