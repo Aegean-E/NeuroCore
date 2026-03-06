@@ -312,3 +312,113 @@ async def test_get_executor_class_all_types():
     assert await get_executor_class("trigger_node") is TriggerExecutor
     assert await get_executor_class("schedule_start_node") is ScheduleStartExecutor
     assert await get_executor_class("unknown") is None
+
+
+# Security tests for ScriptExecutor sandbox
+@pytest.mark.asyncio
+async def test_script_executor_blocks_os_import():
+    """ScriptExecutor should block import of dangerous 'os' module."""
+    executor = ScriptExecutor()
+    code = "import os\nresult['has_os'] = True"
+    
+    result = await executor.receive({}, config={"code": code})
+    
+    assert "error" in result
+    assert "security violation" in result["error"].lower() or "not allowed" in result["error"].lower()
+
+
+@pytest.mark.asyncio
+async def test_script_executor_blocks_subprocess():
+    """ScriptExecutor should block import of dangerous 'subprocess' module."""
+    executor = ScriptExecutor()
+    code = "import subprocess\nresult['has_subprocess'] = True"
+    
+    result = await executor.receive({}, config={"code": code})
+    
+    assert "error" in result
+    assert "security violation" in result["error"].lower() or "not allowed" in result["error"].lower()
+
+
+@pytest.mark.asyncio
+async def test_script_executor_blocks_sys_import():
+    """ScriptExecutor should block import of dangerous 'sys' module."""
+    executor = ScriptExecutor()
+    code = "import sys\nresult['has_sys'] = True"
+    
+    result = await executor.receive({}, config={"code": code})
+    
+    assert "error" in result
+    assert "security violation" in result["error"].lower() or "not allowed" in result["error"].lower()
+
+
+@pytest.mark.asyncio
+async def test_script_executor_blocks_dunder_import():
+    """ScriptExecutor should block __import__ builtin."""
+    executor = ScriptExecutor()
+    code = "__import__('os')\nresult['imported'] = True"
+    
+    result = await executor.receive({}, config={"code": code})
+    
+    assert "error" in result
+    assert "security violation" in result["error"].lower() or "not allowed" in result["error"].lower()
+
+
+@pytest.mark.asyncio
+async def test_script_executor_blocks_eval():
+    """ScriptExecutor should block eval() builtin."""
+    executor = ScriptExecutor()
+    code = "eval('1+1')\nresult['evaluated'] = True"
+    
+    result = await executor.receive({}, config={"code": code})
+    
+    assert "error" in result
+    assert "security violation" in result["error"].lower() or "not allowed" in result["error"].lower()
+
+
+@pytest.mark.asyncio
+async def test_script_executor_blocks_exec():
+    """ScriptExecutor should block exec() builtin."""
+    executor = ScriptExecutor()
+    code = "exec('x=1')\nresult['executed'] = True"
+    
+    result = await executor.receive({}, config={"code": code})
+    
+    assert "error" in result
+    assert "security violation" in result["error"].lower() or "not allowed" in result["error"].lower()
+
+
+@pytest.mark.asyncio
+async def test_script_executor_allows_safe_code():
+    """ScriptExecutor should allow safe code to execute."""
+    executor = ScriptExecutor()
+    code = "result['doubled'] = data['value'] * 2\nresult['text_len'] = len(data['text'])"
+    
+    result = await executor.receive({"value": 5, "text": "hello"}, config={"code": code})
+    
+    assert "error" not in result
+    assert result["doubled"] == 10
+    assert result["text_len"] == 5
+
+
+@pytest.mark.asyncio
+async def test_script_executor_allows_json_module():
+    """ScriptExecutor should allow json module usage."""
+    executor = ScriptExecutor()
+    code = "result['parsed'] = json.dumps({'key': 'value'})"
+    
+    result = await executor.receive({}, config={"code": code})
+    
+    assert "error" not in result
+    assert result["parsed"] == '{"key": "value"}'
+
+
+@pytest.mark.asyncio
+async def test_script_executor_allows_re_module():
+    """ScriptExecutor should allow re module usage."""
+    executor = ScriptExecutor()
+    code = "result['match'] = bool(re.match(r'\\d+', '123abc'))"
+    
+    result = await executor.receive({}, config={"code": code})
+    
+    assert "error" not in result
+    assert result["match"] is True

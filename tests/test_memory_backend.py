@@ -1,0 +1,230 @@
+"""
+Tests for modules/memory/backend.py - specifically the FAISS index handling improvements.
+"""
+import pytest
+import os
+import tempfile
+import numpy as np
+from unittest.mock import MagicMock, patch
+
+# Mock FAISS before importing backend
+mock_faiss = MagicMock()
+mock_index = MagicMock()
+mock_index.ntotal = 0
+mock_index.d = 384
+mock_faiss.read_index = MagicMock(return_value=mock_index)
+mock_faiss.write_index = MagicMock()
+mock_faiss.IndexFlatIP = MagicMock(return_value=MagicMock())
+mock_faiss.IndexIDMap = MagicMock(return_value=MagicMock())
+mock_faiss.normalize_L2 = MagicMock()
+
+# Mock the faiss module
+import sys
+sys.modules['faiss'] = mock_faiss
+
+
+class TestFaissIndexValidation:
+    """Tests for FAISS index loading and validation."""
+
+    def test_load_faiss_index_validates_dimension(self):
+        """_load_faiss_index should reject indexes with invalid dimension."""
+        from modules.memory.backend import MemoryStore
+        
+        # Create a mock index with invalid dimension (0)
+        mock_bad_index = MagicMock()
+        mock_bad_index.d = 0
+        mock_faiss.read_index.return_value = mock_bad_index
+        
+        with patch('os.path.exists', return_value=True):
+            with patch('modules.memory.backend.MemoryStore._build_faiss_index') as mock_build:
+                store = MemoryStore.__new__(MemoryStore)
+                store.db_path = "data/memory.sqlite3"
+                store.faiss_lock = MagicMock()
+                
+                result = store._load_faiss_index()
+                
+                # Should return False for invalid dimension
+                assert result == False
+                # Should have called build to rebuild
+                mock_build.assert_called()
+
+    def test_load_faiss_index_handles_corrupted_file(self):
+        """_load_faiss_index should handle corrupted files gracefully."""
+        from modules.memory.backend import MemoryStore
+        
+        mock_faiss.read_index.side_effect = Exception("Corrupted file")
+        
+        with patch('os.path.exists', return_value=True):
+            with patch('modules.memory.backend.MemoryStore._build_faiss_index') as mock_build:
+                store = MemoryStore.__new__(MemoryStore)
+                store.db_path = "data/memory.sqlite3"
+                store.faiss_lock = MagicMock()
+                
+                result = store._load_faiss_index()
+                
+                # Should return False and trigger rebuild
+                assert result == False
+                mock_build.assert_called()
+
+
+class TestFaissIndexSync:
+    """Tests for FAISS index synchronization."""
+
+    def test_sync_rebuilds_when_faiss_has_entries_but_db_empty(self):
+        """_sync_faiss_index should rebuild when FAISS has entries but DB is empty."""
+        from modules.memory.backend import MemoryStore
+        
+        store = MemoryStore.__new__(MemoryStore)
+        store.faiss_index = MagicMock()
+        store.faiss_index.ntotal = 2  # FAISS has 2 entries
+        
+        # Mock DB connection to return 0 memories
+        mock_con = MagicMock()
+        mock_con.execute.return_value.fetchone.return_value = [0]
+        
+        with patch.object(store, '_connect', return_value=mock_con):
+            with patch.object(store, '_build_faiss_index') as mock_build:
+                store._sync_faiss_index()
+                
+                # Should trigger rebuild
+                mock_build.assert_called()
+
+    def test_sync_rebuilds_when_db_has_entries_but_faiss_empty(self):
+        """_sync_faiss_index should rebuild when DB has entries but FAISS is empty."""
+        from modules.memory.backend import MemoryStore
+        
+        store = MemoryStore.__new__(MemoryStore)
+        store.faiss_index = MagicMock()
+        store.faiss_index.ntotal = 0  # FAISS is empty
+        
+        # Mock DB connection to return 5 memories
+        mock_con = MagicMock()
+        mock_con.execute.return_value.fetchone.return_value = [5]
+        
+        with patch.object(store, '_connect', return_value=mock_con):
+            with patch.object(store, '_build_faiss_index') as mock_build:
+                store._sync_faiss_index()
+                
+                # Should trigger rebuild
+                mock_build.assert_called()
+
+    def test_sync_handles_exception_gracefully(self):
+        """_sync_faiss_index should handle exceptions and rebuild."""
+        from modules.memory.backend import MemoryStore
+        
+        store = MemoryStore.__new__(MemoryStore)
+        store.faiss_index = MagicMock()
+        
+        with patch.object(store, '_connect', side_effect=Exception("DB Error")):
+            with patch.object(store, '_build_faiss_index') as mock_build:
+                store._sync_faiss_index()
+                
+                # Should handle exception and rebuild
+                mock_build.assert_called()
+
+
+class TestWipeAll:
+    """Tests for wipe_all method including FAISS file deletion."""
+
+    @patch('os.path.exists')
+    @patch('os.remove')
+    def test_wipe_all_deletes_faiss_file(self, mock_remove, mock_exists):
+        """wipe_all should delete the FAISS index file."""
+        from modules.memory.backend import MemoryStore
+        
+        mock_exists.return_value = True
+        
+        store = MemoryStore.__new__(MemoryStore)
+        store.write_lock = MagicMock()
+        store.faiss_index = MagicMock()
+        store.faiss_lock = MagicMock()
+        store.db_path = "data/memory.sqlite3"
+        
+        # Mock context manager for DB connection
+        mock_con = MagicMock()
+        
+        with patch.object(store, '_connect', return_value=mock_con):
+            with patch.object(store, '_save_faiss_index'):
+                store.wipe_all()
+                
+                # Should have tried to delete the FAISS file
+                mock_remove.assert_called()
+
+    @patch('os.path.exists')
+    @patch('os.remove')
+    def test_wipe_all_handles_missing_faiss_file(self, mock_remove, mock_exists):
+        """wipe_all should handle missing FAISS file gracefully."""
+        from modules.memory.backend import MemoryStore
+        
+        mock_exists.return_value = False
+        mock_remove.side_effect = Exception("File not found")
+        
+        store = MemoryStore.__new__(MemoryStore)
+        store.write_lock = MagicMock()
+        store.faiss_index = MagicMock()
+        store.faiss_lock = MagicMock()
+        store.db_path = "data/memory.sqlite3"
+        
+        mock_con = MagicMock()
+        
+        with patch.object(store, '_connect', return_value=mock_con):
+            with patch.object(store, '_save_faiss_index'):
+                # Should not raise exception
+                try:
+                    store.wipe_all()
+                except Exception as e:
+                    pytest.fail(f"wipe_all raised exception: {e}")
+
+
+class TestBuildFaissIndex:
+    """Tests for _build_faiss_index method."""
+
+    def test_build_faiss_index_empty_db(self):
+        """_build_faiss_index should handle empty database gracefully."""
+        from modules.memory.backend import MemoryStore
+        
+        store = MemoryStore.__new__(MemoryStore)
+        store.faiss_lock = MagicMock()
+        
+        # Mock DB with no memories
+        mock_con = MagicMock()
+        mock_con.execute.return_value.fetchall.return_value = []
+        
+        with patch.object(store, '_connect', return_value=mock_con):
+            with patch.object(store, '_save_faiss_index') as mock_save:
+                store._build_faiss_index()
+                
+                # Should not save if no embeddings
+                mock_save.assert_not_called()
+
+    def test_build_faiss_index_with_memories(self):
+        """_build_faiss_index should build index from existing memories."""
+        from modules.memory.backend import MemoryStore
+        
+        store = MemoryStore.__new__(MemoryStore)
+        store.faiss_lock = MagicMock()
+        
+        # Create mock embedding data
+        embedding = np.array([0.1] * 384, dtype='float32')
+        
+        mock_con = MagicMock()
+        mock_con.execute.return_value.fetchall.return_value = [
+            (1, embedding.tobytes())
+        ]
+        
+        # Create mock index
+        mock_index_instance = MagicMock()
+        mock_faiss.IndexIDMap.return_value = mock_index_instance
+        mock_faiss.IndexFlatIP.return_value = MagicMock()
+        
+        with patch.object(store, '_connect', return_value=mock_con):
+            with patch.object(store, '_save_faiss_index') as mock_save:
+                store._build_faiss_index()
+                
+                # Should have added to index
+                mock_index_instance.add_with_ids.assert_called()
+
+
+if __name__ == "__main__":
+    pytest.main([__file__, "-v"])
+

@@ -4,6 +4,7 @@ import json
 import logging
 from core.debug import debug_logger
 from core.settings import settings
+from modules.tools.sandbox import ToolSandbox, SecurityError, ResourceLimitError, TimeoutError as SandboxTimeoutError
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +29,10 @@ class DelayExecutor:
         return processed_data
 
 class ScriptExecutor:
+    # Sandbox configuration for script execution
+    DEFAULT_TIMEOUT = 10.0  # seconds
+    DEFAULT_MAX_MEMORY_MB = 50  # MB
+    
     async def receive(self, input_data: dict, config: dict = None) -> dict:
         if input_data is None: return None
         config = config or {}
@@ -44,12 +49,41 @@ class ScriptExecutor:
             # Handle non-dict inputs (lists, strings, etc.) gracefully
             data_val = input_data
             result_val = {}
-            
-        local_scope = {"data": data_val, "result": result_val, "json": json, "re": re}
+        
+        # Create sandbox for secure execution
+        sandbox = ToolSandbox(
+            timeout=self.DEFAULT_TIMEOUT,
+            max_memory_mb=self.DEFAULT_MAX_MEMORY_MB
+        )
         
         try:
-            exec(code, local_scope)
-            return local_scope.get("result")
+            # Execute code in sandbox with data and result in local scope
+            result = sandbox.execute(code, {'data': data_val, 'result': result_val})
+            return result.get('result')
+        except SecurityError as e:
+            logger.error(f"Script security violation: {e}")
+            if isinstance(input_data, dict):
+                err_data = input_data.copy()
+            else:
+                err_data = {"original_input": input_data}
+            err_data["error"] = f"Script security violation: {str(e)}"
+            return err_data
+        except ResourceLimitError as e:
+            logger.error(f"Script resource limit exceeded: {e}")
+            if isinstance(input_data, dict):
+                err_data = input_data.copy()
+            else:
+                err_data = {"original_input": input_data}
+            err_data["error"] = f"Script resource limit exceeded: {str(e)}"
+            return err_data
+        except SandboxTimeoutError as e:
+            logger.error(f"Script timeout: {e}")
+            if isinstance(input_data, dict):
+                err_data = input_data.copy()
+            else:
+                err_data = {"original_input": input_data}
+            err_data["error"] = f"Script timeout: {str(e)}"
+            return err_data
         except Exception as e:
             logger.error(f"Script execution failed: {e}")
             # Return error in data stream so it can be debugged
