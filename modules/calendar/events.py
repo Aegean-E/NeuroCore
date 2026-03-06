@@ -85,6 +85,18 @@ class EventManager:
                     event["title"] = title
                 if start_time is not None:
                     event["start_time"] = start_time
+                event["updated_at"] = datetime.now().isoformat()
+                self._save_events(events)
+                return event
+        return None
+
+    def mark_notified(self, event_id):
+        """Mark an event as notified."""
+        events = self._load_events()
+        for event in events:
+            if event.get("id") == event_id:
+                event["notified"] = True
+                event["updated_at"] = datetime.now().isoformat()
                 self._save_events(events)
                 return event
         return None

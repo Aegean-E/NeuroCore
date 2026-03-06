@@ -10,8 +10,16 @@ from .events import event_manager
 router = APIRouter()
 templates = Jinja2Templates(directory="web/templates")
 
-def get_enriched_upcoming_events():
-    """Enriches events with nav_year and nav_month for UI navigation."""
+def get_enriched_upcoming_events(event_manager=None):
+    """Enriches events with nav_year and nav_month for UI navigation.
+    
+    Args:
+        event_manager: Optional EventManager instance. If not provided, uses the module-level singleton.
+    """
+    if event_manager is None:
+        from .events import event_manager as default_event_manager
+        event_manager = default_event_manager
+    
     events = []
     for e in event_manager.get_upcoming():
         evt = e.copy()
@@ -54,13 +62,13 @@ async def calendar_gui(request: Request, year: int = None, month: int = None):
     if month is None:
         month = today.month
         
-    # Normalize month (handle navigation overflow)
+    # Normalize month (handle navigation overflow/underflow)
     if month > 12:
         year += (month - 1) // 12
         month = (month - 1) % 12 + 1
     elif month < 1:
-        year += (month - 12) // 12
-        month = (month - 12) % 12 + 12
+        year += (month - 1) // 12
+        month = (month - 1) % 12 + 1
 
     cal = calendar.Calendar(firstweekday=6) # Start on Sunday
     month_days = []
@@ -126,7 +134,7 @@ async def delete_event_route(request: Request, event_id: str):
             dt = datetime.strptime(dt_str, "%Y-%m-%d")
             year = dt.year
             month = dt.month
-        except:
+        except (ValueError, AttributeError):
             now = datetime.now()
             year = now.year
             month = now.month

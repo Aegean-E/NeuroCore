@@ -75,15 +75,17 @@ class ModuleManager:
                 if hasattr(module, "router"):
                     self.app.include_router(module.router, prefix=f"/{module_id}", tags=[module_id])
                     logger.info(f"Hot-loaded module router: {module_id}")
-                    # Clear runtime load error
+                    # Clear runtime load error (use runtime-only dict, don't touch module metadata)
                     self._load_errors[module_id] = None
-                    self.modules[module_id]['load_error'] = None
+                    # Also clear from in-memory module to ensure it's never persisted
+                    self.modules[module_id].pop('load_error', None)
                     return True
             except Exception as e:
                 logger.error(f"Failed to load module router for {module_id}: {e}")
-                # Store load error in runtime-only tracking, not in module metadata
+                # Store load error in runtime-only tracking only, NOT in module metadata
                 self._load_errors[module_id] = str(e)
-                self.modules[module_id]['load_error'] = str(e)
+                # IMPORTANT: Do NOT set self.modules[module_id]['load_error'] here!
+                # This ensures it can never be persisted to disk
             return False
 
     def _unload_module_router(self, module_id: str):

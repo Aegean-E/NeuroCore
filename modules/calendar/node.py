@@ -15,7 +15,7 @@ class CalendarWatcherExecutor:
         try:
             with open(EVENTS_FILE, "r") as f:
                 events = json.load(f)
-        except Exception:
+        except (json.JSONDecodeError, OSError):
             return None
 
         now = datetime.now()
@@ -47,6 +47,11 @@ class CalendarWatcherExecutor:
             # No events found for this minute. Return None to stop the flow.
             # The Repeater node will trigger this again later.
             return None
+        
+        # Mark all triggered events as notified to prevent re-firing
+        for event in triggered_events:
+            if event.get("id"):
+                event_manager.mark_notified(event["id"])
             
         # Events found! Construct the output.
         titles = [e.get("title", "Untitled Event") for e in triggered_events]
