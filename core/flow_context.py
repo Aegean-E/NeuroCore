@@ -156,7 +156,16 @@ class FlowContext(BaseModel):
         Returns:
             Dict with all values including None
         """
-        return self.model_dump()
+        # Get all fields including extras at top level
+        # Use model_dump() which with extra="allow" includes extra fields at top level
+        dump = self.model_dump()
+        # Merge extra fields back to top level to preserve access semantics for copy()
+        # This ensures that if ctx.some_custom_field = "x" was set as a Pydantic extra,
+        # after copy() it's still accessible as ctx.some_custom_field, not ctx.extra["some_custom_field"]
+        if 'extra' in dump and isinstance(dump['extra'], dict):
+            extra_fields = dump.pop('extra')
+            dump.update(extra_fields)
+        return dump
     
     @classmethod
     def from_dict(cls, data: Optional[Dict[str, Any]]) -> "FlowContext":
@@ -191,7 +200,7 @@ class FlowContext(BaseModel):
             "tool_count", "remaining_tool_calls", "requires_continuation",
             "choices", "tools", "available_tools", "route_targets",
             "trace_id", "repeat_count", "input_source", "current_goal",
-            "error", "planning_error",
+            "error", "planning_error", "extra",
         }
         
         # Separate known fields from extra
@@ -218,7 +227,9 @@ class FlowContext(BaseModel):
             if old_key in data and new_key not in known_data:
                 known_data[new_key] = data[old_key]
         
-        known_data["extra"] = extra_data
+        # Only set extra if there are extra fields (to avoid overwriting with empty dict)
+        if extra_data:
+            known_data["extra"] = extra_data
         
         return cls(**known_data)
     

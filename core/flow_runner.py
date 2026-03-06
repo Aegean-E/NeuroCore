@@ -253,13 +253,19 @@ class FlowRunner:
             # This is a heuristic to allow execution even with malformed flows.
             remaining_nodes = list(set(self.nodes.keys()) - set(sorted_order))
             
-            # Log warning about cycle detection
+            # Log warning about cycle detection - always log in production
+            cycle_warning = f"[FlowRunner] Cycle detected in flow. Breaking by adding remaining nodes: {remaining_nodes}"
+            print(cycle_warning)
+            
+            # Also log to debug logger if debug mode is enabled
             if settings.get("debug_mode"):
                 print(f"[FlowRunner] Cycle detected in flow. Breaking by adding remaining nodes: {remaining_nodes}")
             
             # Check for intentional loops (nodes with isReverted flag indicating loop nodes)
             loop_nodes = [nid for nid, node in self.nodes.items() if node.get('isReverted', False)]
             if loop_nodes:
+                loop_warning = f"[FlowRunner] Note: Flow contains {len(loop_nodes)} node(s) marked as loop (isReverted): {loop_nodes}"
+                print(loop_warning)
                 if settings.get("debug_mode"):
                     print(f"[FlowRunner] Note: Flow contains {len(loop_nodes)} node(s) marked as loop (isReverted): {loop_nodes}")
             
@@ -330,33 +336,42 @@ class FlowRunner:
                 })
         
         # Check 3: Tools enabled in System Prompt that don't exist or are disabled
+        # Load tools once outside the loop to avoid O(nodes × tools) disk reads
+        tools = {}
+        try:
+            from modules.tools.router import load_tools
+            tools = load_tools()
+        except Exception as e:
+            warnings.append({
+                'type': 'tool_load_error',
+                'node_id': None,
+                'node_name': None,
+                'tool_name': None,
+                'message': f"Failed to load tools: {str(e)}"
+            })
+        
         for node_id, node in self.nodes.items():
             if node.get('nodeTypeId') == 'system_prompt':
                 enabled_tools = node.get('config', {}).get('enabled_tools', [])
                 for tool_name in enabled_tools:
-                    # Check if tool exists in tools.json
-                    try:
-                        from modules.tools.router import load_tools
-                        tools = load_tools()
-                        tool_config = tools.get(tool_name, {})
-                        if tool_name not in tools:
-                            warnings.append({
-                                'type': 'missing_tool',
-                                'node_id': node_id,
-                                'node_name': node.get('name'),
-                                'tool_name': tool_name,
-                                'message': f"Node '{node.get('name')}' enables non-existent tool '{tool_name}'"
-                            })
-                        elif tool_config.get('enabled', True) == False:
-                            warnings.append({
-                                'type': 'disabled_tool',
-                                'node_id': node_id,
-                                'node_name': node.get('name'),
-                                'tool_name': tool_name,
-                                'message': f"Node '{node.get('name')}' enables disabled tool '{tool_name}'"
-                            })
-                    except Exception:
-                        pass
+                    # Check if tool exists in tools.json (using cached tools)
+                    tool_config = tools.get(tool_name, {})
+                    if tool_name not in tools:
+                        warnings.append({
+                            'type': 'missing_tool',
+                            'node_id': node_id,
+                            'node_name': node.get('name'),
+                            'tool_name': tool_name,
+                            'message': f"Node '{node.get('name')}' enables non-existent tool '{tool_name}'"
+                        })
+                    elif tool_config.get('enabled', True) == False:
+                        warnings.append({
+                            'type': 'disabled_tool',
+                            'node_id': node_id,
+                            'node_name': node.get('name'),
+                            'tool_name': tool_name,
+                            'message': f"Node '{node.get('name')}' enables disabled tool '{tool_name}'"
+                        })
         
         # Check 4: Check for nodes without any connections (might be unintentional)
         connected_nodes = set()

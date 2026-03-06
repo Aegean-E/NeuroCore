@@ -21,11 +21,37 @@ class DebugLogger:
         # Print to console for immediate feedback
         print(f"[DEBUG] [{flow_id}] {node_name} ({event_type}): {json.dumps(details, default=str)}")
     
-    def get_logs(self):
-        return list(self.logs)[::-1]
+    def get_logs(self, reverse: bool = True):
+        """
+        Get all logs.
         
-    def get_recent_logs(self, since_timestamp=0):
-        return [log for log in self.logs if log['timestamp_raw'] > float(since_timestamp)]
+        Args:
+            reverse: If True (default), returns newest first (reversed).
+                    If False, returns oldest first (chronological).
+        
+        Returns:
+            List of log entries
+        """
+        if reverse:
+            return list(self.logs)[::-1]
+        return list(self.logs)
+        
+    def get_recent_logs(self, since_timestamp=0, reverse: bool = False):
+        """
+        Get logs since a given timestamp.
+        
+        Args:
+            since_timestamp: Only return logs with timestamp_raw > this value
+            reverse: If False (default), returns oldest first (chronological).
+                    If True, returns newest first (reversed).
+        
+        Returns:
+            List of log entries in chronological order by default
+        """
+        result = [log for log in self.logs if log['timestamp_raw'] > float(since_timestamp)]
+        if reverse:
+            return result[::-1]
+        return result
 
     def clear(self):
         self.logs.clear()
