@@ -43,10 +43,18 @@ class SessionManager:
         return {}
 
     def _save_sessions(self):
-        with open(self.storage_file, "w") as f:
-            # Ensure atomic write by locking during dump
-            # (Though the lock is usually held by the caller method)
-            json.dump(self.sessions, f, indent=4)
+        """Save sessions to disk using atomic temp-file-and-rename pattern."""
+        temp_path = self.storage_file + ".tmp"
+        try:
+            with open(temp_path, "w") as f:
+                json.dump(self.sessions, f, indent=4)
+            # Atomic replace on all platforms
+            os.replace(temp_path, self.storage_file)
+        except Exception as e:
+            # Clean up temp file on failure
+            if os.path.exists(temp_path):
+                os.remove(temp_path)
+            raise e
 
     def create_session(self, name=None):
         with self.lock:

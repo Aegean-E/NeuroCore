@@ -12,6 +12,7 @@ import json
 import os
 import shutil
 import uuid
+import time as import_time
 from datetime import datetime
 import numpy as np
 
@@ -69,8 +70,25 @@ def validate_upload(file: UploadFile) -> None:
 
 # --- Progress Tracking ---
 upload_progress = {}
+UPLOAD_PROGRESS_TTL = 3600  # 1 hour TTL for stale entries
 
-async def process_and_save_document(tracking_id: str, file_path: str, filename: str, llm: LLMBridge):
+def _cleanup_stale_uploads():
+    """Remove stale entries from upload_progress that exceed TTL."""
+    import time
+    current_time = time.time()
+    stale_keys = []
+    for tracking_id, info in upload_progress.items():
+        # Check if entry is older than TTL (only for pending/processing entries)
+        if info.get("status") in ("pending", "processing"):
+            # Check created_at timestamp if available
+            created_at = info.get("created_at", current_time)
+            if current_time - created_at > UPLOAD_PROGRESS_TTL:
+                stale_keys.append(tracking_id)
+    for key in stale_keys:
+        del upload_progress[key]
+    return len(stale_keys)
+
+async def process_and_save_document(tracking_id: str, file_path: str, original_filename: str, stored_filename: str, llm: LLMBridge):
     """Background task to process document and update progress."""
     try:
         upload_progress[tracking_id]["status"] = "processing"
@@ -104,7 +122,8 @@ async def process_and_save_document(tracking_id: str, file_path: str, filename: 
         file_size = os.path.getsize(file_path)
         
         if not document_store.document_exists(file_hash):
-            document_store.add_document(file_hash, filename, file_type, file_size, page_count, chunks)
+            # Use the original filename for storage, not the UUID-prefixed one
+            document_store.add_document(file_hash, original_filename, file_type, file_size, page_count, chunks)
 
         upload_progress[tracking_id]["status"] = "done"
         upload_progress[tracking_id]["progress"] = 100
@@ -113,7 +132,7 @@ async def process_and_save_document(tracking_id: str, file_path: str, filename: 
         if str(e) == "ABORTED" or upload_progress.get(tracking_id, {}).get("status") == "aborted":
             upload_progress[tracking_id]["status"] = "aborted"
         else:
-            print(f"Error processing document {filename}: {e}")
+            print(f"Error processing document {original_filename}: {e}")
             upload_progress[tracking_id]["status"] = "error"
             upload_progress[tracking_id]["message"] = str(e)
             
@@ -178,7 +197,10 @@ async def upload_doc(request: Request, background_tasks: BackgroundTasks, files:
             continue
         
         tracking_id = str(uuid.uuid4())
-        file_path = os.path.join(UPLOAD_DIR, file.filename)
+        
+        # Use UUID-prefixed filename to prevent collisions and handle reserved names
+        safe_filename = f"{uuid.uuid4()}_{file.filename}"
+        file_path = os.path.join(UPLOAD_DIR, safe_filename)
         
         # Save file to disk immediately
         try:
@@ -188,15 +210,17 @@ async def upload_doc(request: Request, background_tasks: BackgroundTasks, files:
             errors.append(f"Error saving {file.filename}: {e}")
             continue
 
-        # Initialize progress
+        # Initialize progress with created_at timestamp for TTL tracking
         upload_progress[tracking_id] = {
             "filename": file.filename,
+            "stored_filename": safe_filename,
             "progress": 0,
-            "status": "pending"
+            "status": "pending",
+            "created_at": import_time.time()
         }
         
-        # Start background processing
-        background_tasks.add_task(process_and_save_document, tracking_id, file_path, file.filename, llm)
+        # Start background processing - pass both original filename and stored filename
+        background_tasks.add_task(process_and_save_document, tracking_id, file_path, file.filename, safe_filename, llm)
 
         # Return progress item
         tmpl = templates.env.get_template("knowledge_base_progress_item.html")

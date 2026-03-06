@@ -449,9 +449,8 @@ class FaissDocumentStore(QueryExpansionMixin):
             with self.index_lock:
                 if self.faiss_index:
                     faiss.write_index(self.faiss_index, temp_path)
-                    if os.path.exists(index_path):
-                        os.remove(index_path)
-                    os.rename(temp_path, index_path)
+                    # Use os.replace for atomic operation (works on both Windows and POSIX)
+                    os.replace(temp_path, index_path)
         except Exception as e:
             logging.error(f"⚠️ Failed to save FAISS index: {e}")
             if os.path.exists(temp_path):
@@ -689,6 +688,11 @@ class FaissDocumentStore(QueryExpansionMixin):
             """, (document_id,)).fetchall()
             
             chunk_ids = [row[0] for row in chunk_rows]
+
+        # Add assertion to ensure chunk IDs match embeddings count
+        assert len(chunk_ids) == len(chunk_embeddings), (
+            f"Chunk ID count mismatch: {len(chunk_ids)} IDs vs {len(chunk_embeddings)} embeddings"
+        )
 
         # Add embeddings to FAISS
         self._add_embeddings_to_faiss(chunk_embeddings, chunk_ids, save_index=True)

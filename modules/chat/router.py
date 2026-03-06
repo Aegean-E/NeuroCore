@@ -173,9 +173,11 @@ async def send_message(
 
     active_flow_ids = settings.get("active_ai_flows", [])
     active_flow = flow_manager.get_flow(active_flow_ids[0]) if active_flow_ids else None
+    flow_error = None  # Track errors in a structured way
 
     if not active_flow:
         ai_response = "Error: No active AI Flow is set. Please go to the AI Flow page to create and activate a flow."
+        flow_error = "no_active_flow"
         elapsed_time = 0
     else:
         start_time = time.time()
@@ -189,22 +191,29 @@ async def send_message(
             
             elapsed_time = round(time.time() - start_time, 1)
             
-            if "error" in flow_result:
+            # Check for structured error flag from flow_result
+            if flow_result.get("_is_error"):
+                ai_response = f"Flow Execution Error: {flow_result.get('error', 'Unknown error')}"
+                flow_error = "flow_error"
+            elif "error" in flow_result:
                 ai_response = f"Flow Execution Error: {flow_result['error']}"
+                flow_error = "flow_error"
             else:
                 # The final output of the flow is expected to be the AI response content,
                 # typically processed by a "Chat Output" node.
                 ai_response = flow_result.get("content", "Flow finished but produced no valid response content.")
                 
-                # If the response indicates a failure, don't add it to history
-                if "produced no valid response" in ai_response or "Error:" in ai_response:
+                # Check for "no valid response" case - but NOT "Error:" string
+                if "produced no valid response" in ai_response:
+                    flow_error = "no_valid_content"
                     ai_response = None  # Mark as failed so we don't add to history
         except Exception as e:
             ai_response = f"Critical Error running AI Flow: {e}"
+            flow_error = "exception"
             elapsed_time = round(time.time() - start_time, 1) if 'start_time' in locals() else 0
 
-    # Add AI response to history only if it's valid
-    if ai_response:
+    # Add AI response to history only if it's valid and not an error
+    if ai_response and not flow_error:
         session_manager.add_message(session_id, "assistant", ai_response)
 
     # Reload session to ensure we have the absolute latest state for auto-renaming
@@ -249,3 +258,4 @@ async def send_message(
         },
         headers={"HX-Trigger": "sessionsChanged"}
     )
+

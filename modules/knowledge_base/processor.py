@@ -125,7 +125,10 @@ class DocumentProcessor:
         sem = asyncio.Semaphore(5)
         
         # Use a single client for all requests to reuse connections (Speed)
-        async with httpx.AsyncClient(timeout=60.0) as client:
+        # Note: We don't use async with here because we need the client to remain
+        # open until all gather tasks complete, including edge cases with exceptions
+        client = httpx.AsyncClient(timeout=60.0)
+        try:
             # Create a temp bridge that uses this shared client
             batch_bridge = LLMBridge(
                 base_url=self.llm.base_url,
@@ -147,7 +150,11 @@ class DocumentProcessor:
                     if progress_callback:
                         await progress_callback(completed, total)
 
-            await asyncio.gather(*(process_chunk(chunk) for chunk in chunks))
+            # Use return_exceptions=True to ensure all tasks complete before client closes
+            await asyncio.gather(*(process_chunk(chunk) for chunk in chunks), return_exceptions=True)
+        finally:
+            # Always close the client after all tasks complete
+            await client.aclose()
 
     def _chunk_pages(self, pages: List[Dict]) -> List[Dict]:
         chunks = []
