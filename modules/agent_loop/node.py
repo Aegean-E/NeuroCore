@@ -1,64 +1,88 @@
 import json
 import os
 import asyncio
-import httpx
+import logging
 from core.llm import LLMBridge
 from core.settings import settings
+from modules.tools.sandbox import ToolSandbox
 
+
+logger = logging.getLogger(__name__)
 
 TOOLS_FILE = "modules/tools/tools.json"
 LIBRARY_DIR = os.path.join(os.path.dirname(__file__), "..", "tools", "library")
 
 
 class AgentLoopExecutor:
+    # Class-level cache: avoids re-reading tools.json and library on every receive() call
+    _tools_cache = {"mtime": 0.0, "data": {}}
+    _library_cache = {"mtime": 0.0, "data": {}}
+
     def __init__(self):
         self.llm = LLMBridge(
             base_url=settings.get("llm_api_url"),
             api_key=settings.get("llm_api_key")
         )
+        # Create sandbox instance for secure tool execution
+        self._sandbox = ToolSandbox(timeout=30.0)
 
     def _load_tools(self):
-        """Load tool definitions from tools.json."""
-        if os.path.exists(TOOLS_FILE):
-            with open(TOOLS_FILE, "r") as f:
-                try:
-                    return json.load(f)
-                except Exception:
-                    return {}
+        """Load tool definitions from tools.json with mtime-based caching."""
+        try:
+            if os.path.exists(TOOLS_FILE):
+                mtime = os.path.getmtime(TOOLS_FILE)
+                if mtime > self.__class__._tools_cache["mtime"]:
+                    with open(TOOLS_FILE, "r") as f:
+                        self.__class__._tools_cache["data"] = json.load(f)
+                    self.__class__._tools_cache["mtime"] = mtime
+                return self.__class__._tools_cache["data"]
+        except (json.JSONDecodeError, OSError, KeyError) as e:
+            logger.warning(f"Failed to load tools: {e}")
         return {}
 
     def _load_tool_library(self):
-        """Load tool implementations from library directory."""
-        library = {}
-        if os.path.exists(LIBRARY_DIR):
-            for filename in os.listdir(LIBRARY_DIR):
-                if filename.endswith(".py"):
-                    tool_name = filename[:-3]
-                    code_path = os.path.join(LIBRARY_DIR, filename)
-                    with open(code_path, "r") as f:
-                        library[tool_name] = f.read()
-        return library
+        """Load tool implementations from library directory with mtime-based caching."""
+        try:
+            if os.path.exists(LIBRARY_DIR):
+                # Check directory mtime
+                dir_mtime = os.path.getmtime(LIBRARY_DIR)
+                if dir_mtime > self.__class__._library_cache["mtime"]:
+                    library = {}
+                    for filename in os.listdir(LIBRARY_DIR):
+                        if filename.endswith(".py"):
+                            tool_name = filename[:-3]
+                            code_path = os.path.join(LIBRARY_DIR, filename)
+                            with open(code_path, "r") as f:
+                                library[tool_name] = f.read()
+                    self.__class__._library_cache["data"] = library
+                    self.__class__._library_cache["mtime"] = dir_mtime
+                return self.__class__._library_cache["data"]
+        except OSError as e:
+            logger.warning(f"Failed to load tool library: {e}")
+        return {}
 
     async def _execute_tool(self, tool_call: dict, tool_library: dict) -> dict:
-        """Execute a single tool call and return the tool result message."""
+        """Execute a single tool call in sandbox and return the tool result message."""
         func_name = tool_call["function"]["name"]
         try:
             args = json.loads(tool_call["function"]["arguments"])
         except (json.JSONDecodeError, KeyError):
             args = {}
 
+        success = False
         if func_name in tool_library:
             code = tool_library[func_name]
-            local_scope = {
-                "args": args,
-                "result": None,
-                "json": json,
-                "httpx": httpx,
-                "asyncio": asyncio
-            }
             try:
-                exec(code, local_scope)
-                output = local_scope.get("result", "Success (no result returned)")
+                # Run in executor to avoid blocking the event loop
+                loop = asyncio.get_running_loop()
+                result = await loop.run_in_executor(
+                    None,
+                    self._sandbox.execute,
+                    code,
+                    {"args": args}
+                )
+                output = result.get("result", "Success (no result returned)")
+                success = True
             except Exception as e:
                 output = f"Error executing tool {func_name}: {str(e)}"
         else:
@@ -68,7 +92,8 @@ class AgentLoopExecutor:
             "tool_call_id": tool_call.get("id", ""),
             "role": "tool",
             "name": func_name,
-            "content": str(output)
+            "content": str(output),
+            "success": success
         }
 
     def _build_system_prompt(self, input_data: dict, config: dict) -> str:
@@ -240,8 +265,8 @@ class AgentLoopExecutor:
 
                 tool_result = await self._execute_tool(tool_call, tool_library)
 
-                # Detect tool execution errors (tool outputs starting with "Error")
-                if str(tool_result["content"]).startswith("Error"):
+                # Detect tool execution errors using structured success field
+                if not tool_result.get("success", False):
                     had_tool_error = True
                     tool_error_occurred = True
                     iteration_trace["errors"].append(
@@ -369,13 +394,23 @@ class AgentLoopExecutor:
             llm_messages = messages.copy()
 
             # Inject system prompt if context is available
+            # Skip if context is already present (avoid duplication from SystemPromptExecutor)
             if system_prompt:
                 has_system = any(m.get("role") == "system" for m in llm_messages)
                 if has_system:
-                    for m in llm_messages:
-                        if m.get("role") == "system":
-                            m["content"] = m["content"] + "\n\n" + system_prompt
-                            break
+                    # Check if any of the context keys are already in the system message
+                    system_msg = next((m for m in llm_messages if m.get("role") == "system"), {})
+                    existing_content = system_msg.get("content", "")
+                    
+                    # Check if context markers already exist to avoid duplication
+                    context_markers = ["## Execution Plan", "## User Memories", "## Relevant Knowledge", "## Previous Reasoning"]
+                    context_already_present = any(marker in existing_content for marker in context_markers)
+                    
+                    if not context_already_present:
+                        for m in llm_messages:
+                            if m.get("role") == "system":
+                                m["content"] = m["content"] + "\n\n" + system_prompt
+                                break
                 else:
                     llm_messages.insert(0, {"role": "system", "content": system_prompt})
 
@@ -490,3 +525,4 @@ async def get_executor_class(node_type_id: str):
     if node_type_id == "agent_loop":
         return AgentLoopExecutor
     return None
+
