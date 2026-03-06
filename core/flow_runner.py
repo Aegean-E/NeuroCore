@@ -10,10 +10,35 @@ from core.debug import debug_logger
 class FlowRunner:
     _executor_cache = {}
     _max_cache_size = 100  # Maximum number of cached executor classes
+    _cache_lock = asyncio.Lock()  # Lock for thread-safe cache operations
     
     @classmethod
     def clear_cache(cls):
         cls._executor_cache.clear()
+    
+    @classmethod
+    async def _get_executor_class(cls, module_id: str, node_type_id: str):
+        """Thread-safe method to get or create an executor class from the cache."""
+        cache_key = f"{module_id}.{node_type_id}"
+        
+        async with cls._cache_lock:
+            # Check if already in cache (after acquiring lock)
+            if cache_key in cls._executor_cache:
+                return cls._executor_cache[cache_key]
+            
+            # Manage cache size before adding new entry
+            cls._manage_cache_size()
+            
+            # Dynamically import the module's node logic dispatcher
+            node_dispatcher = importlib.import_module(f"modules.{module_id}.node")
+            # Only reload in debug mode to pick up hot-code changes;
+            # in production this is wasteful and can cause state issues.
+            if settings.get("debug_mode") and isinstance(node_dispatcher, types.ModuleType) and node_dispatcher.__name__ in sys.modules:
+                importlib.reload(node_dispatcher)
+            # Get the specific executor class for this node type
+            executor_class = await node_dispatcher.get_executor_class(node_type_id)
+            cls._executor_cache[cache_key] = executor_class
+            return executor_class
     
     @classmethod
     def _manage_cache_size(cls):
@@ -464,19 +489,8 @@ class FlowRunner:
                             bridge_module_id = bridge_meta['moduleId']
                             bridge_type_id = bridge_meta['nodeTypeId']
                             
-                            # Get or load the executor class for this bridge node
-                            bridge_cache_key = f"{bridge_module_id}.{bridge_type_id}"
-                            if bridge_cache_key not in self._executor_cache:
-                                self._manage_cache_size()  # Ensure cache doesn't grow too large
-                                node_dispatcher = importlib.import_module(f"modules.{bridge_module_id}.node")
-                                # Only reload in debug mode to pick up hot-code changes;
-                                # in production this is wasteful and can cause state issues.
-                                if settings.get("debug_mode") and isinstance(node_dispatcher, types.ModuleType) and node_dispatcher.__name__ in sys.modules:
-                                    importlib.reload(node_dispatcher)
-                                bridge_executor_class = await node_dispatcher.get_executor_class(bridge_type_id)
-                                self._executor_cache[bridge_cache_key] = bridge_executor_class
-                            else:
-                                bridge_executor_class = self._executor_cache[bridge_cache_key]
+                            # Use thread-safe method to get executor class
+                            bridge_executor_class = await self._get_executor_class(bridge_module_id, bridge_type_id)
                             
                             if bridge_executor_class:
                                 try:
@@ -598,23 +612,9 @@ class FlowRunner:
                     debug_logger.log(self.flow_id, node_id, node_meta['name'], "input_resolved", {"input": node_input})
 
                 try:
-                    cache_key = f"{module_id}.{node_type_id}"
+                    # Use thread-safe method to get executor class
+                    executor_class = await self._get_executor_class(module_id, node_type_id)
                     
-                    if cache_key not in self._executor_cache:
-                        # Manage cache size before adding new entry
-                        self._manage_cache_size()
-                        
-                        # Dynamically import the module's node logic dispatcher
-                        node_dispatcher = importlib.import_module(f"modules.{module_id}.node")
-                        # Only reload in debug mode to pick up hot-code changes;
-                        # in production this is wasteful and can cause state issues.
-                        if settings.get("debug_mode") and isinstance(node_dispatcher, types.ModuleType) and node_dispatcher.__name__ in sys.modules:
-                            importlib.reload(node_dispatcher)
-                        # Get the specific executor class for this node type
-                        executor_class = await node_dispatcher.get_executor_class(node_type_id)
-                        self._executor_cache[cache_key] = executor_class
-
-                    executor_class = self._executor_cache[cache_key]
                     if not executor_class:
                         # Fallback: Pass through if no executor found (e.g. missing module)
                         node_outputs[node_id] = node_input

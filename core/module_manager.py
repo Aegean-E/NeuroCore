@@ -55,8 +55,9 @@ class ModuleManager:
 
     def _load_module_router(self, module_id: str):
         """Imports a module and adds its router to the app."""
-        try:
-            # Prevent loading a router that's already mounted
+        # Use lock to prevent concurrent loading of the same module
+        with self.lock:
+            # Double-check after acquiring lock to prevent double registration
             if any(isinstance(r, Mount) and r.path == f"/{module_id}" for r in self.app.router.routes):
                 return True
 
@@ -69,20 +70,21 @@ class ModuleManager:
             for key in modules_to_remove:
                 del sys.modules[key]
 
-            module = importlib.import_module(f"modules.{module_id}")
-            if hasattr(module, "router"):
-                self.app.include_router(module.router, prefix=f"/{module_id}", tags=[module_id])
-                logger.info(f"Hot-loaded module router: {module_id}")
-                # Clear runtime load error
-                self._load_errors[module_id] = None
-                self.modules[module_id]['load_error'] = None
-                return True
-        except Exception as e:
-            logger.error(f"Failed to load module router for {module_id}: {e}")
-            # Store load error in runtime-only tracking, not in module metadata
-            self._load_errors[module_id] = str(e)
-            self.modules[module_id]['load_error'] = str(e)
-        return False
+            try:
+                module = importlib.import_module(f"modules.{module_id}")
+                if hasattr(module, "router"):
+                    self.app.include_router(module.router, prefix=f"/{module_id}", tags=[module_id])
+                    logger.info(f"Hot-loaded module router: {module_id}")
+                    # Clear runtime load error
+                    self._load_errors[module_id] = None
+                    self.modules[module_id]['load_error'] = None
+                    return True
+            except Exception as e:
+                logger.error(f"Failed to load module router for {module_id}: {e}")
+                # Store load error in runtime-only tracking, not in module metadata
+                self._load_errors[module_id] = str(e)
+                self.modules[module_id]['load_error'] = str(e)
+            return False
 
     def _unload_module_router(self, module_id: str):
         """Finds and removes a module's router from the app."""

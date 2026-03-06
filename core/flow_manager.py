@@ -18,8 +18,9 @@ REQUIRED_NODE_KEYS = {"id", "moduleId", "nodeTypeId"}
 
 class FlowManager:
     def __init__(self, storage_file=FLOWS_FILE):
-        self.storage_file = storage_file
+        # Initialize lock FIRST before any method calls
         self.lock = threading.Lock()
+        self.storage_file = storage_file
         self.flows = self._load_flows()
 
     def _load_flows(self):
