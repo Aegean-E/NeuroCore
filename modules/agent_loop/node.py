@@ -11,6 +11,7 @@ logger = logging.getLogger(__name__)
 
 TOOLS_FILE = "modules/tools/tools.json"
 LIBRARY_DIR = os.path.join(os.path.dirname(__file__), "..", "tools", "library")
+RLM_LIBRARY_DIR = os.path.join(os.path.dirname(__file__), "..", "tools", "rlm_library")
 
 
 class AgentLoopExecutor:
@@ -612,5 +613,731 @@ class AgentLoopExecutor:
 async def get_executor_class(node_type_id: str):
     if node_type_id == "agent_loop":
         return AgentLoopExecutor
+    if node_type_id == "recursive_lm":
+        return RLMAgentLoopExecutor
+    if node_type_id == "repl_environment":
+        return REPLEnvironmentExecutor
     return None
+
+
+class REPLEnvironmentExecutor:
+    """
+    REPL Environment Node - Initializes a persistent REPL state.
+    
+    This is the foundation of RLM processing. It:
+    1. Extracts user input from messages
+    2. Stores it as prompt_var in repl_state (NOT in context window)
+    3. Builds metadata-only system prompt
+    4. Initializes full repl_state structure including recursion tracking
+    
+    Config:
+        - max_recursion_depth (int, default 3): Max sub-call depth
+        - max_cost_usd (float, default 1.0): Hard cost stop
+        - max_sub_calls (int, default 50): Max total sub-calls
+        - sub_call_model (str): Model for sub-calls (defaults to root model)
+    """
+    
+    async def receive(self, input_data: dict, config: dict = None) -> dict:
+        if input_data is None:
+            return None
+            
+        config = config or {}
+        messages = input_data.get("messages", [])
+        
+        # Extract user content
+        user_content = self._extract_user_content(messages)
+        
+        # Build comprehensive repl_state
+        repl_state = {
+            "prompt_var": user_content,
+            "prompt_length": len(user_content),
+            "variables": {},
+            "stdout_history": [],
+            "final": None,
+            "iteration": 0,
+            "recursion_depth": 0,
+            "max_recursion_depth": config.get("max_recursion_depth", 3),
+            "sub_call_count": 0,
+            "max_sub_calls": config.get("max_sub_calls", 50),
+            "estimated_cost": 0.0,
+            "max_cost_usd": config.get("max_cost_usd", 1.0),
+            "root_model": config.get("model") or config.get("root_model"),
+            "sub_call_model": config.get("sub_call_model") or config.get("model"),
+        }
+        
+        # Build metadata-only system prompt
+        preview = user_content[:200] + "..." if len(user_content) > 200 else user_content
+        system_content = self._build_repl_system_prompt({
+            "prompt_length": len(user_content),
+            "prompt_preview": preview,
+            "prompt_type": self._classify_content(user_content),
+            "max_recursion_depth": repl_state["max_recursion_depth"],
+            "max_sub_calls": repl_state["max_sub_calls"],
+        })
+        
+        result = input_data.copy()
+        result["repl_state"] = repl_state
+        result["_repl_initialized"] = True
+        
+        # Replace messages with metadata-only context
+        result["messages"] = [
+            {"role": "system", "content": system_content},
+            {"role": "user", "content": "Process the input using the REPL environment."}
+        ]
+        
+        return result
+    
+    def _extract_user_content(self, messages: list) -> str:
+        """Extract the actual user content from messages."""
+        for msg in messages:
+            if msg.get("role") == "user":
+                content = msg.get("content", "")
+                if content:
+                    return content
+        return " ".join(m.get("content", "") for m in messages if m.get("role") == "user")
+
+    def _classify_content(self, content: str) -> str:
+        """Classify the type of content for metadata."""
+        content_lower = content.lower()
+        if "code" in content_lower or "def " in content_lower:
+            return "code"
+        elif len(content) > 100000:
+            return "large_document"
+        elif len(content) > 10000:
+            return "long_text"
+        return "standard"
+
+    def _build_repl_system_prompt(self, metadata: dict) -> str:
+        """Build the system prompt for REPL mode - metadata only, no actual content."""
+        return f"""You are operating in a REPL environment.
+
+The user's input has been loaded as a variable. DO NOT try to process it all at once.
+
+Environment state:
+- prompt_length: {metadata['prompt_length']} characters
+- prompt_type: {metadata['prompt_type']}
+- prompt_preview: "{metadata['prompt_preview']}"
+- max_recursion_depth: {metadata['max_recursion_depth']}
+- max_sub_calls: {metadata['max_sub_calls']}
+
+Available functions:
+- peek(start, end): View a slice of the prompt by character position
+- search(pattern): Find regex matches in the prompt  
+- chunk(size, overlap): Split prompt into chunks of given size
+- sub_call(prompt): Recursively call an LLM on any string
+- set_variable(name, value): Store intermediate results
+- get_variable(name): Retrieve stored results
+- set_final(value): Set your final answer and terminate
+
+Write Python code to examine, decompose, and process the input.
+Store intermediate results in variables using set_variable().
+Call set_final() when complete.
+
+WARNING: Do not exceed max_recursion_depth or max_sub_calls or execution will be terminated."""
+
+    async def send(self, processed_data: dict) -> dict:
+        return processed_data
+
+
+class RLMAgentLoopExecutor:
+    """
+    RLM (Recursive Language Model) variant of the agent loop.
+    
+    Key differences from standard AgentLoopExecutor:
+    1. REPL state is maintained across iterations - input stored as variable, not in context
+    2. Tool outputs are stored as variables in repl_state, NOT injected into messages
+    3. Only metadata about stdout goes back into LLM history (constant size)
+    4. Terminates when set_final() is called
+    
+    This architecture enables processing arbitrarily long inputs (10M+ tokens) by:
+    - Storing the actual content in repl_state, not in messages
+    - Only passing constant-size metadata to the LLM
+    - Allowing the LLM to write code to examine/decompose content via tools
+    """
+    
+    # Class-level cache for tools
+    _tools_cache = {"mtime": 0.0, "data": {}}
+    _library_cache = {"mtime": 0.0, "data": {}}
+
+    def __init__(self):
+        self.llm = LLMBridge(
+            base_url=settings.get("llm_api_url"),
+            api_key=settings.get("llm_api_key")
+        )
+        from modules.tools.sandbox import ToolSandbox
+        self._sandbox = ToolSandbox(timeout=30.0)
+
+    def _estimate_tokens(self, text: str) -> int:
+        """Estimate token count: ~4 characters per token."""
+        if not text:
+            return 0
+        return len(text) // 4
+
+    def _load_tools(self):
+        """Load tool definitions from tools.json with mtime-based caching."""
+        try:
+            if os.path.exists(TOOLS_FILE):
+                mtime = os.path.getmtime(TOOLS_FILE)
+                if mtime > self.__class__._tools_cache["mtime"]:
+                    with open(TOOLS_FILE, "r") as f:
+                        self.__class__._tools_cache["data"] = json.load(f)
+                    self.__class__._tools_cache["mtime"] = mtime
+                return self.__class__._tools_cache["data"]
+        except (json.JSONDecodeError, OSError, KeyError) as e:
+            logger.warning(f"Failed to load tools: {e}")
+        return {}
+
+    def _load_tool_library(self):
+        """Load tool implementations from RLM library directory with mtime-based caching."""
+        try:
+            # Load from RLM library directory (RLM-specific tools: Peek, Search, Chunk, etc.)
+            if os.path.exists(RLM_LIBRARY_DIR):
+                dir_mtime = os.path.getmtime(RLM_LIBRARY_DIR)
+                # Check if cache needs refresh (compare with RLM library mtime)
+                cache_key = f"{RLM_LIBRARY_DIR}|{LIBRARY_DIR}"
+                if dir_mtime > self.__class__._library_cache.get("mtime", 0):
+                    library = {}
+                    # First load RLM-specific tools
+                    for filename in os.listdir(RLM_LIBRARY_DIR):
+                        if filename.endswith(".py"):
+                            tool_name = filename[:-3]
+                            code_path = os.path.join(RLM_LIBRARY_DIR, filename)
+                            with open(code_path, "r") as f:
+                                library[tool_name] = f.read()
+                    # Then load common tools from library (like SubCall)
+                    if os.path.exists(LIBRARY_DIR):
+                        for filename in os.listdir(LIBRARY_DIR):
+                            if filename.endswith(".py"):
+                                tool_name = filename[:-3]
+                                # Don't override RLM-specific tools
+                                if tool_name not in library:
+                                    code_path = os.path.join(LIBRARY_DIR, filename)
+                                    with open(code_path, "r") as f:
+                                        library[tool_name] = f.read()
+                    self.__class__._library_cache["data"] = library
+                    self.__class__._library_cache["mtime"] = dir_mtime
+                return self.__class__._library_cache.get("data", {})
+        except OSError as e:
+            logger.warning(f"Failed to load RLM tool library: {e}")
+        return {}
+    
+    def _resolve_tool_name(self, func_name: str, tool_library: dict) -> str:
+        """
+        Resolve tool name with case-insensitive matching.
+        Returns the actual tool name from the library if found.
+        """
+        # Direct match
+        if func_name in tool_library:
+            return func_name
+        
+        # Case-insensitive match
+        func_lower = func_name.lower()
+        for tool_name in tool_library:
+            if tool_name.lower() == func_lower:
+                return tool_name
+        
+        # Snake case to CamelCase conversion (e.g., set_variable -> SetVariable)
+        parts = func_name.split('_')
+        camel_case = ''.join(p.capitalize() for p in parts)
+        if camel_case in tool_library:
+            return camel_case
+        
+        # Reverse: CamelCase to snake_case
+        snake_case = ''
+        for i, char in enumerate(func_name):
+            if char.isupper() and i > 0:
+                snake_case += '_'
+            snake_case += char.lower()
+        if snake_case in tool_library:
+            return snake_case
+        
+        return func_name  # Return original if not found
+
+    def _extract_user_content(self, messages: list) -> str:
+        """Extract the actual user content from messages."""
+        for msg in messages:
+            if msg.get("role") == "user":
+                content = msg.get("content", "")
+                if content:
+                    return content
+        # Fallback: concatenate all user messages
+        return " ".join(m.get("content", "") for m in messages if m.get("role") == "user")
+
+    def _classify_content(self, content: str) -> str:
+        """Classify the type of content for metadata."""
+        content_lower = content.lower()
+        if "code" in content_lower or "def " in content_lower or "function" in content_lower:
+            return "code"
+        elif len(content) > 100000:
+            return "large_document"
+        elif len(content) > 10000:
+            return "long_text"
+        else:
+            return "standard"
+
+    def _build_repl_system_prompt(self, metadata: dict) -> str:
+        """Build the system prompt for REPL mode - metadata only, no actual content."""
+        return f"""You are operating in a REPL environment.
+
+The user's input has been loaded as a variable. DO NOT try to process it all at once.
+
+Environment state:
+- prompt_length: {metadata['prompt_length']} characters
+- prompt_type: {metadata['prompt_type']}
+- prompt_preview: "{metadata['prompt_preview']}"
+
+Available functions:
+- peek(start, end): View a slice of the prompt by character position
+- search(pattern): Find regex matches in the prompt  
+- chunk(size, overlap): Split prompt into chunks of given size
+- sub_call(prompt): Recursively call an LLM on any string
+- set_variable(name, value): Store intermediate results
+- get_variable(name): Retrieve stored results
+- set_final(value): Set your final answer and terminate
+
+Write Python code to examine, decompose, and process the input.
+Store intermediate results in variables using set_variable().
+Call set_final() when complete."""
+
+    def _init_repl_state(self, messages: list) -> tuple:
+        """
+        Initialize REPL state from messages.
+        
+        Returns (repl_state, metadata, new_messages)
+        """
+        user_content = self._extract_user_content(messages)
+        
+        # Store content as environment variable, NOT in context
+        repl_state = {
+            "prompt_var": user_content,
+            "variables": {},
+            "stdout_history": [],
+            "final": None,
+            "iteration": 0
+        }
+        
+        # Metadata that the LLM actually sees
+        preview = user_content[:200] + "..." if len(user_content) > 200 else user_content
+        metadata = {
+            "prompt_length": len(user_content),
+            "prompt_preview": preview,
+            "prompt_type": self._classify_content(user_content),
+        }
+        
+        # Build new messages with REPL system prompt only
+        system_content = self._build_repl_system_prompt(metadata)
+        new_messages = [
+            {"role": "system", "content": system_content},
+            {"role": "user", "content": "Process the input using the REPL environment. Use tools to examine the content incrementally and call set_final() when done."}
+        ]
+        
+        return repl_state, metadata, new_messages
+
+    async def _execute_tool(self, tool_call: dict, tool_library: dict, repl_state: dict) -> dict:
+        """Execute a tool call - sub_call is handled specially as a built-in."""
+        func_name = tool_call["function"]["name"]
+        try:
+            args = json.loads(tool_call["function"]["arguments"])
+        except (json.JSONDecodeError, KeyError):
+            args = {}
+
+        success = False
+        
+        # CRITICAL: sub_call is a built-in, NOT a library tool
+        # It cannot be executed via exec() because it requires async LLM calls
+        # Using run_until_complete inside an already-running event loop causes deadlock
+        if func_name.lower() == "subcall" or func_name.lower() == "sub_call":
+            return await self._execute_sub_call(args, repl_state)
+        
+        # Resolve tool name with case-insensitive matching
+        actual_tool_name = self._resolve_tool_name(func_name, tool_library)
+        
+        # For all other tools, use sandbox execution
+        args["_repl_state"] = repl_state
+        
+        if actual_tool_name in tool_library:
+            code = tool_library[actual_tool_name]
+            try:
+                loop = asyncio.get_running_loop()
+                result = await loop.run_in_executor(
+                    None,
+                    self._sandbox.execute,
+                    code,
+                    {"args": args}
+                )
+                output = result.get("result", "Success (no result returned)")
+                success = True
+                
+                # Update repl_state if tool returned state update
+                if isinstance(result.get("_repl_state_update"), dict):
+                    repl_state.update(result["_repl_state_update"])
+            except Exception as e:
+                output = f"Error executing tool {func_name}: {str(e)}"
+        else:
+            output = f"Error: Tool {func_name} not found in library."
+
+        return {
+            "tool_call_id": tool_call.get("id", ""),
+            "role": "tool",
+            "name": func_name,
+            "content": str(output),
+            "success": success
+        }
+    
+    async def _execute_sub_call(self, args: dict, repl_state: dict) -> dict:
+        """
+        Execute sub_call as a built-in - NOT via exec().
+        
+        This is the KEY RLM feature that enables recursive processing.
+        Must be async to avoid deadlock from run_until_complete in running loop.
+        """
+        # Check guardrails first
+        if repl_state.get("sub_call_count", 0) >= repl_state.get("max_sub_calls", 50):
+            return {
+                "tool_call_id": "",
+                "role": "tool",
+                "name": "sub_call",
+                "content": "Error: max_sub_calls limit reached",
+                "success": False
+            }
+        
+        if repl_state.get("recursion_depth", 0) >= repl_state.get("max_recursion_depth", 3):
+            return {
+                "tool_call_id": "",
+                "role": "tool",
+                "name": "sub_call",
+                "content": "Error: max_recursion_depth limit reached",
+                "success": False
+            }
+        
+        # Check cost limit
+        if repl_state.get("estimated_cost", 0) >= repl_state.get("max_cost_usd", 1.0):
+            return {
+                "tool_call_id": "",
+                "role": "tool",
+                "name": "sub_call",
+                "content": "Error: max_cost_usd limit reached",
+                "success": False
+            }
+        
+        prompt = args.get("prompt", "")
+        model = args.get("model") or repl_state.get("sub_call_model") or settings.get("default_model")
+        max_tokens = args.get("max_tokens", 2000)
+        
+        if not prompt:
+            return {
+                "tool_call_id": "",
+                "role": "tool",
+                "name": "sub_call",
+                "content": "Error: No prompt provided for sub_call",
+                "success": False
+            }
+        
+        try:
+            # Increment counters BEFORE the call
+            repl_state["sub_call_count"] = repl_state.get("sub_call_count", 0) + 1
+            old_depth = repl_state.get("recursion_depth", 0)
+            repl_state["recursion_depth"] = old_depth + 1
+            
+            # Make the async LLM call properly (not via run_until_complete)
+            response = await self.llm.chat_completion(
+                messages=[{"role": "user", "content": prompt}],
+                model=model,
+                max_tokens=max_tokens
+            )
+            
+            # Restore depth after call
+            repl_state["recursion_depth"] = old_depth
+            
+            if response and "choices" in response:
+                content = response["choices"][0]["message"].get("content", "")
+                
+                # Estimate cost (rough: ~4 chars per token, $0.001 per 1K tokens)
+                estimated_tokens = len(prompt) // 4 + max_tokens
+                cost = (estimated_tokens / 1000) * 0.001
+                repl_state["estimated_cost"] = repl_state.get("estimated_cost", 0) + cost
+                
+                return {
+                    "tool_call_id": "",
+                    "role": "tool",
+                    "name": "sub_call",
+                    "content": content,
+                    "success": True,
+                    "model_used": model,
+                    "sub_call_count": repl_state["sub_call_count"],
+                    "estimated_cost": repl_state["estimated_cost"]
+                }
+            else:
+                return {
+                    "tool_call_id": "",
+                    "role": "tool",
+                    "name": "sub_call",
+                    "content": f"Error in sub_call: {response.get('error', 'Unknown error') if response else 'No response'}",
+                    "success": False
+                }
+        except Exception as e:
+            repl_state["recursion_depth"] = old_depth  # Restore on error
+            return {
+                "tool_call_id": "",
+                "role": "tool",
+                "name": "sub_call",
+                "content": f"Error in sub_call: {str(e)}",
+                "success": False
+            }
+
+    async def _llm_with_retry(
+        self,
+        messages: list,
+        model: str,
+        temperature: float,
+        max_tokens: int,
+        tools: list,
+        max_retries: int,
+        retry_delay: float
+    ) -> dict:
+        """Call LLM with exponential backoff retry."""
+        last_error = "Unknown error"
+
+        for attempt in range(max_retries + 1):
+            if attempt > 0:
+                delay = retry_delay * (2 ** (attempt - 1))
+                await asyncio.sleep(delay)
+
+            try:
+                response = await self.llm.chat_completion(
+                    messages=messages,
+                    model=model,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                    tools=tools if tools else None
+                )
+
+                if response and "choices" in response and not response.get("error"):
+                    return response
+
+                if response:
+                    last_error = response.get("error", "Response missing 'choices' key")
+                else:
+                    last_error = "LLM returned None"
+
+            except Exception as e:
+                last_error = str(e)
+
+        return {
+            "error": f"LLM failed after {max_retries + 1} attempt(s): {last_error}"
+        }
+
+    async def _run_rlm_loop(
+        self,
+        initial_messages: list,
+        repl_state: dict,
+        tools_list: list,
+        tool_library: dict,
+        model: str,
+        config: dict,
+        trace: list
+    ) -> tuple:
+        """
+        Core RLM loop: LLM generates code → executes tools → only metadata goes back.
+        
+        Key difference from standard loop:
+        - Tool outputs stored in repl_state["variables"], NOT in messages
+        - Only constant-size metadata appended to messages
+        - Terminates when repl_state["final"] is set
+        """
+        max_iterations = config.get("max_iterations", 20)
+        stdout_preview_length = config.get("stdout_preview_length", 500)
+        max_llm_retries = config.get("max_llm_retries", 3)
+        retry_delay = config.get("retry_delay", 1.0)
+        temperature = config.get("temperature", 0.1)  # Low temp for code generation
+        max_tokens = config.get("max_tokens", 2000)
+
+        # Build initial LLM messages
+        llm_messages = initial_messages.copy()
+
+        for iteration in range(max_iterations):
+            repl_state["iteration"] = iteration
+            iteration_trace = {
+                "iteration": iteration,
+                "tool_calls": [],
+                "errors": []
+            }
+
+            # Inject current REPL state as metadata (small, constant-size)
+            state_metadata = {
+                "iteration": iteration,
+                "variables_set": list(repl_state["variables"].keys()),
+                "stdout_entries": len(repl_state["stdout_history"]),
+                "last_stdout_preview": (
+                    repl_state["stdout_history"][-1][:stdout_preview_length]
+                    if repl_state["stdout_history"] else "none"
+                ),
+                "final_set": repl_state["final"] is not None
+            }
+
+            # Add state metadata to messages (NOT the actual content)
+            messages_with_state = llm_messages + [{
+                "role": "system",
+                "content": f"REPL state: {json.dumps(state_metadata)}"
+            }]
+
+            # LLM generates code
+            response = await self._llm_with_retry(
+                messages=messages_with_state,
+                model=model,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                tools=tools_list,
+                max_retries=max_llm_retries,
+                retry_delay=retry_delay
+            )
+
+            if not response or "choices" not in response:
+                error_msg = response.get("error", "LLM returned no choices") if response else "LLM returned None"
+                iteration_trace["errors"].append(error_msg)
+                trace.append(iteration_trace)
+                break
+
+            assistant_message = response["choices"][0]["message"]
+            tool_calls = assistant_message.get("tool_calls", [])
+
+            if not tool_calls:
+                # LLM returned text instead of code — capture as stdout
+                content = assistant_message.get("content", "")
+                if content:
+                    repl_state["stdout_history"].append(content)
+                    # Only metadata goes back, NOT the full content
+                    llm_messages.append({
+                        "role": "assistant", 
+                        "content": f"[stdout: {len(content)} chars, preview: {content[:100]}...]"
+                    })
+                # Check if final was set in the text response
+                if repl_state.get("final") is not None:
+                    break
+                break
+
+            # Execute tool calls, pass repl_state through
+            for tool_call in tool_calls:
+                tool_name = tool_call.get("function", {}).get("name", "unknown")
+                iteration_trace["tool_calls"].append(tool_name)
+
+                tool_result = await self._execute_tool(tool_call, tool_library, repl_state)
+
+                output_content = tool_result["content"]
+                repl_state["stdout_history"].append(str(output_content))
+
+                # CRITICAL: Only metadata goes into LLM history
+                # This is what prevents context rot!
+                stdout_metadata = (
+                    f"[stdout: {len(str(output_content))} chars, "
+                    f"preview: {str(output_content)[:stdout_preview_length]}...]"
+                )
+                llm_messages.append({
+                    "role": "tool",
+                    "tool_call_id": tool_call.get("id", ""),
+                    "content": stdout_metadata  # NOT the full output
+                })
+
+            # Check if final answer has been set
+            if repl_state.get("final") is not None:
+                trace.append(iteration_trace)
+                break
+                
+            trace.append(iteration_trace)
+
+        return repl_state.get("final"), repl_state
+
+    async def receive(self, input_data: dict, config: dict = None) -> dict:
+        """
+        RLM Agent Loop: processes arbitrarily long inputs via REPL environment.
+        
+        Input:
+            - messages: conversation history (must include at least one user message)
+            
+        Config:
+            - max_iterations (int, default 20): Maximum RLM iterations
+            - max_tokens (int, default 2000): Max tokens per LLM call
+            - temperature (float, default 0.1): Low temp for code generation
+            - max_llm_retries (int, default 3): Retries on LLM failure
+            - retry_delay (float, default 1.0): Base delay for backoff
+            - stdout_preview_length (int, default 500): Preview size in metadata
+            - sub_call_model (str, optional): Model for sub_call tool
+            - model (str, optional): Main model (defaults to settings.get("default_model"))
+
+        Output:
+            - content: The final answer from set_final()
+            - repl_state: Final REPL state for debugging
+            - iterations: Number of iterations executed
+            - rlm_trace: Per-iteration details
+        """
+        if input_data is None:
+            input_data = {}
+
+        config = config or {}
+
+        # Configuration
+        max_iterations = int(config.get("max_iterations", 20))
+        max_tokens = int(config.get("max_tokens", 2000))
+        temperature = float(config.get("temperature", 0.1))
+        max_llm_retries = int(config.get("max_llm_retries", 3))
+        retry_delay = float(config.get("retry_delay", 1.0))
+        stdout_preview_length = int(config.get("stdout_preview_length", 500))
+        model = config.get("model") or settings.get("default_model")
+
+        # Guard: no messages → return input unchanged
+        messages = input_data.get("messages", [])
+        if not messages:
+            result = input_data.copy()
+            result["content"] = ""
+            result["rlm_error"] = "No messages provided"
+            return result
+
+        # Step 1: Initialize REPL state
+        # This extracts the user content and stores it in repl_state
+        # instead of putting it in the LLM context
+        repl_state, metadata, new_messages = self._init_repl_state(messages)
+
+        # Step 2: Load tools
+        tools_def = self._load_tools()
+        tools_list = []
+        if tools_def:
+            for tool_name, tool_data in tools_def.items():
+                if isinstance(tool_data, dict) and tool_data.get("enabled", True):
+                    definition = tool_data.get("definition")
+                    if definition:
+                        tools_list.append(definition)
+
+        tool_library = self._load_tool_library()
+
+        # Step 3: Run RLM loop
+        trace = []
+        final_result, final_state = await self._run_rlm_loop(
+            initial_messages=new_messages,
+            repl_state=repl_state,
+            tools_list=tools_list,
+            tool_library=tool_library,
+            model=model,
+            config=config,
+            trace=trace
+        )
+
+        # Step 4: Build result
+        result = input_data.copy()
+        result["content"] = final_result or ""
+        result["repl_state"] = {
+            "variables": final_state.get("variables", {}),
+            "iteration": final_state.get("iteration", 0),
+            "stdout_count": len(final_state.get("stdout_history", []))
+        }
+        result["iterations"] = final_state.get("iteration", 0) + 1
+        result["rlm_trace"] = trace
+        result["messages"] = new_messages  # Return the REPL messages (not full history)
+        
+        if not final_result:
+            result["rlm_error"] = "No final answer set - max iterations reached or error"
+
+        return result
+
+    async def send(self, processed_data: dict) -> dict:
+        return processed_data
 

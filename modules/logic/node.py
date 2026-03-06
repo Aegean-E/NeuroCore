@@ -298,4 +298,62 @@ async def get_executor_class(node_type_id: str):
         return TriggerExecutor
     if node_type_id == "schedule_start_node":
         return ScheduleStartExecutor
+    if node_type_id == "context_length_router":
+        return ContextLengthRouterExecutor
     return None
+
+
+class ContextLengthRouterExecutor:
+    """
+    Routes to RLM or standard LLM based on estimated token count.
+    
+    Implements the paper's finding that RLMs have a crossover point below which
+    standard LLM calls are better. Automatically routes long inputs to RLM
+    and short inputs to standard processing.
+    
+    Config:
+        - rlm_threshold_tokens (int, default 8000): Token count threshold for RLM routing
+        - rlm_branch (list): Node IDs to route to when input exceeds threshold
+        - standard_branch (list): Node IDs to route to when input is within threshold
+    """
+    
+    async def receive(self, input_data: dict, config: dict = None) -> dict:
+        if input_data is None:
+            return None
+            
+        config = config or {}
+        threshold = config.get("rlm_threshold_tokens", 8000)
+        
+        messages = input_data.get("messages", [])
+        estimated_tokens = self._estimate_tokens(messages)
+        
+        result = input_data.copy()
+        
+        if estimated_tokens > threshold:
+            result["_route_targets"] = config.get("rlm_branch", [])
+            result["routing_reason"] = f"Input ~{estimated_tokens} tokens exceeds threshold {threshold}"
+            result["use_rlm"] = True
+        else:
+            result["_route_targets"] = config.get("standard_branch", [])
+            result["routing_reason"] = f"Input ~{estimated_tokens} tokens within standard limit"
+            result["use_rlm"] = False
+        
+        return result
+    
+    def _estimate_tokens(self, messages: list) -> int:
+        """Estimate token count. Rough estimate: 4 chars per token."""
+        total_chars = 0
+        for msg in messages:
+            if isinstance(msg, dict):
+                content = msg.get("content", "")
+                if isinstance(content, str):
+                    total_chars += len(content)
+                elif isinstance(content, list):
+                    # Handle multimodal messages with content parts
+                    for part in content:
+                        if isinstance(part, dict):
+                            total_chars += len(str(part.get("text", "")))
+        return total_chars // 4
+
+    async def send(self, processed_data: dict) -> dict:
+        return processed_data

@@ -407,5 +407,183 @@
             }
         },
         "enabled": true
+    },
+    "Peek": {
+        "definition": {
+            "type": "function",
+            "function": {
+                "name": "Peek",
+                "description": "View a slice of the prompt by character position. Used in RLM mode for examining long inputs incrementally.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "start": {
+                            "type": "number",
+                            "description": "Start character position (inclusive)."
+                        },
+                        "end": {
+                            "type": "number",
+                            "description": "End character position (exclusive)."
+                        }
+                    },
+                    "required": [
+                        "start",
+                        "end"
+                    ]
+                }
+            }
+        },
+        "enabled": true
+    },
+    "Search": {
+        "definition": {
+            "type": "function",
+            "function": {
+                "name": "Search",
+                "description": "Find regex matches in the prompt. Used in RLM mode for searching through long inputs.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "pattern": {
+                            "type": "string",
+                            "description": "The regex pattern to search for."
+                        },
+                        "max_results": {
+                            "type": "number",
+                            "description": "Maximum number of matches to return (default 20)."
+                        }
+                    },
+                    "required": [
+                        "pattern"
+                    ]
+                }
+            }
+        },
+        "enabled": true
+    },
+    "Chunk": {
+        "definition": {
+            "type": "function",
+            "function": {
+                "name": "Chunk",
+                "description": "Split prompt into chunks of given size. Used in RLM mode for processing long inputs in pieces.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "size": {
+                            "type": "number",
+                            "description": "Size of each chunk in characters (default 2000)."
+                        },
+                        "overlap": {
+                            "type": "number",
+                            "description": "Overlap between chunks in characters (default 200)."
+                        }
+                    },
+                    "required": []
+                }
+            }
+        },
+        "enabled": true
+    },
+    "SubCall": {
+        "definition": {
+            "type": "function",
+            "function": {
+                "name": "SubCall",
+                "description": "Recursively call an LLM on any string. Used in RLM mode for processing chunks of the input. This is the key feature that enables processing arbitrarily long inputs.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "prompt": {
+                            "type": "string",
+                            "description": "The prompt to send to the sub-call LLM."
+                        },
+                        "model": {
+                            "type": "string",
+                            "description": "Optional model to use for sub-call. If not specified, uses default model."
+                        },
+                        "max_tokens": {
+                            "type": "number",
+                            "description": "Maximum tokens in response (default 2000)."
+                        }
+                    },
+                    "required": [
+                        "prompt"
+                    ]
+                }
+            }
+        },
+        "enabled": true
+    },
+    "SetVariable": {
+        "definition": {
+            "type": "function",
+            "function": {
+                "name": "SetVariable",
+                "description": "Store intermediate results in REPL state. Used in RLM mode for accumulating results across iterations.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "name": {
+                            "type": "string",
+                            "description": "Variable name to store."
+                        },
+                        "value": {
+                            "type": "string",
+                            "description": "Value to store."
+                        }
+                    },
+                    "required": [
+                        "name",
+                        "value"
+                    ]
+                }
+            }
+        },
+        "enabled": true
+    },
+    "GetVariable": {
+        "definition": {
+            "type": "function",
+            "function": {
+                "name": "GetVariable",
+                "description": "Retrieve stored results from REPL state. Used in RLM mode for accessing intermediate results.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "name": {
+                            "type": "string",
+                            "description": "Variable name to retrieve."
+                        }
+                    },
+                    "required": [
+                        "name"
+                    ]
+                }
+            }
+        },
+        "enabled": true
+    },
+    "SetFinal": {
+        "definition": {
+            "type": "function",
+            "function": {
+                "name": "SetFinal",
+                "description": "Set final answer and terminate RLM loop. Used in RLM mode to signal completion.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "value": {
+                            "type": "string",
+                            "description": "The final answer to return."
+                        }
+                    },
+                    "required": [
+                        "value"
+                    ]
+                }
+            }
+        },
+        "enabled": true
     }
 }
