@@ -25,37 +25,64 @@ def make_input(messages=None, plan=None, current_step=0, replan_count=0):
     return data
 
 
+def make_tool_call(
+    name: str = "Calculator",
+    args: str = '{"expression": "2+2"}',
+    call_id: str = "call_1",
+) -> dict:
+    """Build a minimal tool_call dict as returned by the LLM."""
+    return {"id": call_id, "function": {"name": name, "arguments": args}}
+
+
 @pytest.mark.asyncio
-async def test_replan_needed_on_max_iterations():
-    """Should set replan_needed=True when max_iterations reached."""
+async def test_replan_needed_on_max_iterations_with_failure():
+    """Should set replan_needed=True when max_iterations reached AND there's a failure."""
     executor = make_executor()
     
-    # Simulate max iterations reached
+    # Simulate max iterations reached with actual failure (no content)
     plan = [{"step": 1, "action": "Step 1"}, {"step": 2, "action": "Step 2"}]
     input_data = make_input(plan=plan, current_step=0)
     
-    # Mock LLM to always return tool calls (forcing max iterations)
-    # Tool should succeed so we don't get tool error instead of max iterations
+    # Mock LLM to return empty content after max iterations (simulating failure)
+    executor.llm.chat_completion = AsyncMock(return_value={
+        "choices": [{"message": {"content": ""}}]
+    })
+    
+    result = await executor.receive(input_data, config={"max_iterations": 2})
+    
+    # Should NOT trigger replan since content is empty (failure case)
+    assert result["replan_needed"] is True
+    assert "no content" in result["replan_reason"].lower() or "error" in result["replan_reason"].lower()
+
+
+@pytest.mark.asyncio
+async def test_no_replan_when_max_iterations_reached_successfully():
+    """Should NOT set replan_needed when max_iterations reached but agent succeeded."""
+    executor = make_executor()
+    
+    # Simulate max iterations reached with successful tool execution
+    plan = [{"step": 1, "action": "Step 1"}, {"step": 2, "action": "Step 2"}]
+    input_data = make_input(plan=plan, current_step=0)
+    
+    # Mock LLM to return tool calls that succeed, then final response
+    tool_call = make_tool_call("TestTool", '{"key": "value"}')
     executor.llm.chat_completion = AsyncMock(return_value={
         "choices": [{
             "message": {
-                "content": "Using tool",
-                "tool_calls": [{"id": "1", "function": {"name": "TestTool", "arguments": "{}"}}]
+                "content": "Task completed successfully!",
+                "tool_calls": [tool_call]
             }
         }]
     })
     
-    # Mock tool that succeeds
     with patch.object(executor, '_load_tool_library', return_value={
         "TestTool": "result = 'Success'"
     }):
         result = await executor.receive(input_data, config={"max_iterations": 2})
     
-    assert result["replan_needed"] is True
-    assert "Max iterations" in result["replan_reason"]
-    assert "suggested_approach" in result
-    # Verify replan_count is incremented
-    assert result["replan_count"] == 1
+    # Should NOT trigger replan since we got valid content
+    assert result["replan_needed"] is False
+    assert result["replan_count"] == 0  # Reset to 0 on success
 
 
 
@@ -77,9 +104,9 @@ async def test_replan_needed_on_tool_error():
         }]
     })
     
-    # Tool library with failing tool
+    # Tool library with actually failing tool (raises exception)
     with patch.object(executor, '_load_tool_library', return_value={
-        "TestTool": "result = 'Error: Tool failed'"
+        "TestTool": "raise Exception('Tool failed')"
     }):
         result = await executor.receive(input_data, config={"max_iterations": 5})
     
@@ -314,8 +341,9 @@ async def test_replan_count_increments_each_failure():
         }]
     })
     
+    # Tool library with actually failing tool (raises exception)
     with patch.object(executor, '_load_tool_library', return_value={
-        "TestTool": "result = 'Error: Tool failed'"
+        "TestTool": "raise Exception('Tool failed')"
     }):
         result = await executor.receive(input_data, config={"max_replan_depth": 5})
     
@@ -325,8 +353,8 @@ async def test_replan_count_increments_each_failure():
 
 
 @pytest.mark.asyncio
-async def test_replan_count_preserved_on_success():
-    """Should preserve replan_count when execution succeeds."""
+async def test_replan_count_reset_on_success():
+    """Should reset replan_count to 0 when execution succeeds."""
     executor = make_executor()
     
     # Start with replan_count=2 from previous attempts
@@ -341,8 +369,8 @@ async def test_replan_count_preserved_on_success():
     with patch.object(executor, '_load_tool_library', return_value={}):
         result = await executor.receive(input_data, config={"max_replan_depth": 5})
     
-    # replan_count should be preserved at 2
-    assert result["replan_count"] == 2
+    # replan_count should be reset to 0 on success
+    assert result["replan_count"] == 0
     assert result["replan_needed"] is False
 
 

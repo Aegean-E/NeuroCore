@@ -26,6 +26,67 @@ class AgentLoopExecutor:
         # Create sandbox instance for secure tool execution
         self._sandbox = ToolSandbox(timeout=30.0)
 
+    def _estimate_tokens(self, text: str) -> int:
+        """
+        Estimate token count for a given text.
+        Uses a rough approximation: ~4 characters per token.
+        """
+        if not text:
+            return 0
+        return len(text) // 4
+
+    def _truncate_messages(
+        self,
+        messages: list,
+        max_context_tokens: int,
+        preserve_system: bool = True
+    ) -> list:
+        """
+        Truncate messages to fit within token budget.
+        Preserves system message and last N turns.
+        """
+        if not messages:
+            return messages
+            
+        # Calculate current token count
+        total_tokens = 0
+        for msg in messages:
+            content = msg.get("content", "")
+            total_tokens += self._estimate_tokens(content)
+        
+        # If under limit, no truncation needed
+        if total_tokens <= max_context_tokens:
+            return messages
+        
+        # Find system message if present
+        system_msg = None
+        non_system_messages = []
+        for msg in messages:
+            if msg.get("role") == "system" and preserve_system:
+                system_msg = msg
+            else:
+                non_system_messages.append(msg)
+        
+        # Keep last N non-system messages that fit in budget
+        system_tokens = self._estimate_tokens(system_msg.get("content", "")) if system_msg else 0
+        available_tokens = max_context_tokens - system_tokens
+        
+        result = []
+        if system_msg:
+            result.append(system_msg)
+        
+        # Add from end until we hit limit
+        tokens_used = 0
+        for msg in reversed(non_system_messages):
+            msg_tokens = self._estimate_tokens(msg.get("content", ""))
+            if tokens_used + msg_tokens <= available_tokens:
+                result.insert(0 if system_msg else len(result), msg)
+                tokens_used += msg_tokens
+            else:
+                break
+        
+        return result
+
     def _load_tools(self):
         """Load tool definitions from tools.json with mtime-based caching."""
         try:
@@ -214,6 +275,7 @@ class AgentLoopExecutor:
         iterations = 0
         final_response = None
         had_tool_error = False
+        seen_calls = set()  # Track tool call signatures to detect loops
 
         for iteration in range(max_iterations):
             iterations += 1
@@ -261,6 +323,19 @@ class AgentLoopExecutor:
             tool_error_occurred = False
             for tool_call in tool_calls:
                 tool_name = tool_call.get("function", {}).get("name", "unknown")
+                tool_args = tool_call.get("function", {}).get("arguments", "{}")
+                
+                # Tool call deduplication: detect loops
+                call_signature = f"{tool_name}:{tool_args}"
+                if call_signature in seen_calls:
+                    # Model is spinning - same tool call detected
+                    iteration_trace["errors"].append(
+                        f"Loop detected: '{tool_name}' called with same arguments repeatedly"
+                    )
+                    # Don't execute again, break the loop
+                    break
+                seen_calls.add(call_signature)
+                
                 iteration_trace["tool_calls"].append(tool_name)
 
                 tool_result = await self._execute_tool(tool_call, tool_library)
@@ -349,12 +424,13 @@ class AgentLoopExecutor:
         tool_error_strategy = str(config.get("tool_error_strategy", "continue"))
         timeout = float(config.get("timeout", 120))
         max_replan_depth = int(config.get("max_replan_depth", 3))
+        max_context_tokens = int(config.get("max_context_tokens", 6000))  # Token budget for context
         
         # --- Re-planning depth tracking ---
         replan_count = int(input_data.get("replan_count", 0))
         
-        # Check if we've exceeded max re-planning depth
-        if replan_count >= max_replan_depth:
+        # Check if we've exceeded max re-planning depth (only if max_replan_depth > 0)
+        if max_replan_depth > 0 and replan_count >= max_replan_depth:
             result = input_data.copy()
             result["replan_needed"] = False
             result["replan_depth_exceeded"] = True
@@ -392,6 +468,10 @@ class AgentLoopExecutor:
             """Inner coroutine — wrapped with optional timeout."""
             # Build initial message list
             llm_messages = messages.copy()
+
+            # Apply token budget truncation to prevent context overflow
+            if max_context_tokens > 0:
+                llm_messages = self._truncate_messages(llm_messages, max_context_tokens)
 
             # Inject system prompt if context is available
             # Skip if context is already present (avoid duplication from SystemPromptExecutor)
@@ -437,19 +517,27 @@ class AgentLoopExecutor:
                 result["content"] = final_response["choices"][0]["message"].get("content", "")
 
             # --- Re-planning detection ---
+            # Check if the agent actually failed to produce a useful response
+            # Don't trigger re-planning just because max_iterations was reached
+            content = result.get("content", "")
+            response_text = str(final_response) if final_response else ""
+            actually_failed = had_tool_error or not content or "error" in response_text.lower()
+            
             plan = input_data.get("plan", [])
             current_step = input_data.get("current_step", 0)
             
             # Check if re-planning is needed
-            if had_tool_error or iterations >= max_iterations:
+            if actually_failed:
                 result["replan_needed"] = True
                 # Increment replan count for depth tracking
                 result["replan_count"] = replan_count + 1
                 
                 if had_tool_error:
                     result["replan_reason"] = "Tool execution errors occurred during plan execution"
+                elif not content:
+                    result["replan_reason"] = "Agent produced no content response"
                 else:
-                    result["replan_reason"] = f"Max iterations ({max_iterations}) reached - plan may be too complex"
+                    result["replan_reason"] = "Agent response contained error indicators"
                 
                 # Suggest simpler approach if plan has multiple steps
                 if plan and len(plan) > 1:
@@ -465,8 +553,8 @@ class AgentLoopExecutor:
                     result["suggested_approach"] = "No plan exists. Consider creating a step-by-step plan."
             else:
                 result["replan_needed"] = False
-                # Preserve replan count for tracking across successful executions
-                result["replan_count"] = replan_count
+                # Reset replan count on successful execution
+                result["replan_count"] = 0
 
             return result
 
