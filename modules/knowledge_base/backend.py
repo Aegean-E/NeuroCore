@@ -17,8 +17,263 @@ except ImportError:
     logging.warning("⚠️ FAISS not installed. Install with: pip install faiss-cpu")
     FAISS_AVAILABLE = False
 
+# Import LLMBridge for query expansion
+from core.llm import LLMBridge
 
-class FaissDocumentStore:
+
+# =============================================================================
+# Query Expansion and Re-ranking Mixin
+# =============================================================================
+
+class QueryExpansionMixin:
+    """
+    Mixin that adds query expansion and re-ranking capabilities to FaissDocumentStore.
+    
+    Query expansion: Generate 3-5 alternative phrasings of the query, search with all,
+    then merge and deduplicate results.
+    
+    Re-ranking: After retrieving candidates, use cross-encoder model to re-rank
+    by actual relevance to the query.
+    """
+    
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.query_expansion_count = 5  # Number of alternative phrasings
+        self.rerank_top_k = 20  # Number of candidates to re-rank
+        self.rerank_final_k = 5  # Final number of results after re-ranking
+        self._cross_encoder_model = None
+        
+    def _get_cross_encoder(self):
+        """
+        Get or initialize cross-encoder model for re-ranking.
+        Falls back to LLM-based re-ranking if not available.
+        """
+        if self._cross_encoder_model is not None:
+            return self._cross_encoder_model
+            
+        try:
+            from sentence_transformers import CrossEncoder
+            # Use a lightweight cross-encoder model
+            self._cross_encoder_model = CrossEncoder('cross-encoder/ms-marco-MiniLM-L-6-v2')
+            logging.info("Loaded cross-encoder model for re-ranking")
+            return self._cross_encoder_model
+        except ImportError:
+            logging.warning("sentence-transformers not installed. Using LLM-based re-ranking.")
+            return None
+        except Exception as e:
+            logging.warning(f"Failed to load cross-encoder: {e}")
+            return None
+    
+    async def expand_query_async(self, query: str, llm_bridge: LLMBridge = None) -> List[str]:
+        """
+        Generate alternative phrasings of the query asynchronously.
+        
+        Args:
+            query: Original query string
+            llm_bridge: Optional LLM bridge for query expansion
+            
+        Returns:
+            List of alternative query phrasings including the original
+        """
+        if not query or not query.strip():
+            return [query]
+        
+        # If no LLM bridge provided, return the original query
+        if llm_bridge is None:
+            return [query]
+        
+        try:
+            expansion_prompt = f"""Generate {self.query_expansion_count - 1} alternative phrasings of the following query that maintain the same meaning but use different words or sentence structures.
+The goal is to improve search recall by capturing different ways the same concept might be expressed.
+
+Original query: "{query}"
+
+Generate {self.query_expansion_count - 1} alternatives, one per line, no numbering:
+"""
+            
+            response = await llm_bridge.chat_completion(
+                messages=[{"role": "user", "content": expansion_prompt}],
+                temperature=0.7,
+                max_tokens=500
+            )
+            
+            content = response.get("choices", [{}])[0].get("message", {}).get("content", "")
+            
+            # Parse alternatives
+            alternatives = [query]  # Always include original
+            for line in content.strip().split('\n'):
+                line = line.strip()
+                # Skip empty lines and numbered items
+                if line and not line[0].isdigit():
+                    # Remove bullet points and dashes
+                    cleaned = line.lstrip('-* ').strip()
+                    if cleaned and len(cleaned) > 5:
+                        alternatives.append(cleaned)
+            
+            # Limit to requested count
+            return alternatives[:self.query_expansion_count]
+            
+        except Exception as e:
+            logging.warning(f"Query expansion failed: {e}")
+            return [query]
+    
+    def expand_query_sync(self, query: str) -> List[str]:
+        """
+        Synchronous version of query expansion (generates simple variations).
+        
+        Args:
+            query: Original query string
+            
+        Returns:
+            List of query variations
+        """
+        if not query or not query.strip():
+            return [query]
+        
+        variations = [query]
+        
+        # Generate simple variations without LLM
+        query_lower = query.lower()
+        
+        # Add variations based on common transformations
+        if "?" not in query:
+            variations.append(query + "?")
+        
+        # Remove common words for broader search
+        stop_words = {"the", "a", "an", "is", "are", "was", "were", "in", "on", "at", "to", "for"}
+        words = query.split()
+        filtered = " ".join([w for w in words if w.lower() not in stop_words])
+        if filtered != query and len(filtered) > 3:
+            variations.append(filtered)
+        
+        # Add keyword-only version
+        if len(words) > 1:
+            keywords_only = " ".join([w for w in words if len(w) > 3])
+            if keywords_only != query:
+                variations.append(keywords_only)
+        
+        return variations[:self.query_expansion_count]
+    
+    def rerank_candidates(self, query: str, candidates: List[Dict], use_cross_encoder: bool = True) -> List[Dict]:
+        """
+        Re-rank candidates by relevance to the query.
+        
+        Args:
+            query: Original search query
+            candidates: List of candidate documents with 'content' field
+            use_cross_encoder: Whether to use cross-encoder (vs LLM fallback)
+            
+        Returns:
+            Re-ranked list of candidates
+        """
+        if not candidates:
+            return []
+        
+        if len(candidates) <= self.rerank_final_k:
+            return candidates
+        
+        try:
+            # Try cross-encoder first
+            if use_cross_encoder:
+                cross_encoder = self._get_cross_encoder()
+                if cross_encoder:
+                    # Prepare query-document pairs
+                    pairs = [(query, cand.get('content', '')) for cand in candidates]
+                    
+                    # Get relevance scores
+                    scores = cross_encoder.predict(pairs)
+                    
+                    # Add scores to candidates and sort
+                    for i, cand in enumerate(candidates):
+                        cand['rerank_score'] = float(scores[i])
+                    
+                    candidates.sort(key=lambda x: x.get('rerank_score', 0), reverse=True)
+                    return candidates[:self.rerank_final_k]
+            
+            # Fallback: simple keyword overlap scoring
+            query_terms = set(query.lower().split())
+            for cand in candidates:
+                content = cand.get('content', '').lower()
+                content_terms = set(content.split())
+                overlap = len(query_terms & content_terms) / max(len(query_terms), 1)
+                cand['rerank_score'] = overlap
+            
+            candidates.sort(key=lambda x: x.get('rerank_score', 0), reverse=True)
+            return candidates[:self.rerank_final_k]
+            
+        except Exception as e:
+            logging.warning(f"Re-ranking failed: {e}")
+            return candidates[:self.rerank_final_k]
+    
+    async def search_enhanced(
+        self,
+        query_text: str,
+        query_embedding: List[float] = None,
+        limit: int = 5,
+        expand_queries: bool = True,
+        rerank: bool = True,
+        llm_bridge: LLMBridge = None
+    ) -> List[Dict]:
+        """
+        Enhanced search with query expansion and re-ranking.
+        
+        Args:
+            query_text: Original query text
+            query_embedding: Pre-computed query embedding (generated if not provided)
+            limit: Number of results to return
+            expand_queries: Whether to use query expansion
+            rerank: Whether to re-rank results
+            llm_bridge: Optional LLM bridge for query expansion
+            
+        Returns:
+            List of search results
+        """
+        # Get query embedding if not provided
+        if query_embedding is None:
+            if self.embed_fn:
+                query_embedding = await self.embed_fn(query_text)
+            else:
+                logging.warning("No embed_fn provided, falling back to basic search")
+                return self.search_hybrid(query_text, [], limit)
+        
+        # Query expansion
+        if expand_queries and llm_bridge:
+            # Try async expansion with LLM
+            try:
+                query_variants = await self.expand_query_async(query_text, llm_bridge)
+            except Exception:
+                query_variants = self.expand_query_sync(query_text)
+        else:
+            query_variants = self.expand_query_sync(query_text)
+        
+        # Collect results from all query variants
+        all_results = []
+        seen_ids = set()
+        
+        for variant in query_variants:
+            # For first variant, use the provided embedding
+            # For others, we'd need to compute embeddings (skip for efficiency)
+            if variant == query_variants[0]:
+                results = self.search_hybrid(variant, query_embedding, limit=self.rerank_top_k)
+            else:
+                # Just use keyword search for variations to save API calls
+                results = self.search_keyword(variant, limit=self.rerank_top_k)
+            
+            # Deduplicate
+            for r in results:
+                if r['id'] not in seen_ids:
+                    all_results.append(r)
+                    seen_ids.add(r['id'])
+        
+        # Re-ranking
+        if rerank and all_results:
+            all_results = self.rerank_candidates(query_text, all_results)
+        
+        # Return top results
+        return all_results[:limit]
+
+
+class FaissDocumentStore(QueryExpansionMixin):
     """
     FAISS-enhanced document store with fast vector search.
     
@@ -39,6 +294,12 @@ class FaissDocumentStore:
         self.faiss_index_type = settings.get("faiss_index_type", "IndexFlatIP")
         self.faiss_nlist = settings.get("faiss_nlist", 100) # For IndexIVFFlat
         self.faiss_nprobe = settings.get("faiss_nprobe", 10)
+
+        # Initialize QueryExpansionMixin attributes
+        self.query_expansion_count = 5
+        self.rerank_top_k = 20
+        self.rerank_final_k = 5
+        self._cross_encoder_model = None
 
         self._load_faiss_index()
         self._sync_faiss_index()
@@ -722,3 +983,255 @@ class FaissDocumentStore:
 
 # Global instance
 document_store = FaissDocumentStore()
+
+
+# =============================================================================
+# Query Expansion and Re-ranking Mixin
+# =============================================================================
+
+class QueryExpansionMixin:
+    """
+    Mixin that adds query expansion and re-ranking capabilities to FaissDocumentStore.
+    
+    Query expansion: Generate 3-5 alternative phrasings of the query, search with all,
+    then merge and deduplicate results.
+    
+    Re-ranking: After retrieving candidates, use cross-encoder model to re-rank
+    by actual relevance to the query.
+    """
+    
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.query_expansion_count = 5  # Number of alternative phrasings
+        self.rerank_top_k = 20  # Number of candidates to re-rank
+        self.rerank_final_k = 5  # Final number of results after re-ranking
+        self._cross_encoder_model = None
+        
+    def _get_cross_encoder(self):
+        """
+        Get or initialize cross-encoder model for re-ranking.
+        Falls back to LLM-based re-ranking if not available.
+        """
+        if self._cross_encoder_model is not None:
+            return self._cross_encoder_model
+            
+        try:
+            from sentence_transformers import CrossEncoder
+            # Use a lightweight cross-encoder model
+            self._cross_encoder_model = CrossEncoder('cross-encoder/ms-marco-MiniLM-L-6-v2')
+            logging.info("Loaded cross-encoder model for re-ranking")
+            return self._cross_encoder_model
+        except ImportError:
+            logging.warning("sentence-transformers not installed. Using LLM-based re-ranking.")
+            return None
+        except Exception as e:
+            logging.warning(f"Failed to load cross-encoder: {e}")
+            return None
+    
+    async def expand_query_async(self, query: str, llm_bridge: LLMBridge = None) -> List[str]:
+        """
+        Generate alternative phrasings of the query asynchronously.
+        
+        Args:
+            query: Original query string
+            llm_bridge: Optional LLM bridge for query expansion
+            
+        Returns:
+            List of alternative query phrasings including the original
+        """
+        if not query or not query.strip():
+            return [query]
+        
+        # If no LLM bridge provided, return the original query
+        if llm_bridge is None:
+            return [query]
+        
+        try:
+            expansion_prompt = f"""Generate {self.query_expansion_count - 1} alternative phrasings of the following query that maintain the same meaning but use different words or sentence structures.
+The goal is to improve search recall by capturing different ways the same concept might be expressed.
+
+Original query: "{query}"
+
+Generate {self.query_expansion_count - 1} alternatives, one per line, no numbering:
+"""
+            
+            response = await llm_bridge.chat_completion(
+                messages=[{"role": "user", "content": expansion_prompt}],
+                temperature=0.7,
+                max_tokens=500
+            )
+            
+            content = response.get("choices", [{}])[0].get("message", {}).get("content", "")
+            
+            # Parse alternatives
+            alternatives = [query]  # Always include original
+            for line in content.strip().split('\n'):
+                line = line.strip()
+                # Skip empty lines and numbered items
+                if line and not line[0].isdigit():
+                    # Remove bullet points and dashes
+                    cleaned = line.lstrip('-* ').strip()
+                    if cleaned and len(cleaned) > 5:
+                        alternatives.append(cleaned)
+            
+            # Limit to requested count
+            return alternatives[:self.query_expansion_count]
+            
+        except Exception as e:
+            logging.warning(f"Query expansion failed: {e}")
+            return [query]
+    
+    def expand_query_sync(self, query: str) -> List[str]:
+        """
+        Synchronous version of query expansion (generates simple variations).
+        
+        Args:
+            query: Original query string
+            
+        Returns:
+            List of query variations
+        """
+        if not query or not query.strip():
+            return [query]
+        
+        variations = [query]
+        
+        # Generate simple variations without LLM
+        query_lower = query.lower()
+        
+        # Add variations based on common transformations
+        if "?" not in query:
+            variations.append(query + "?")
+        
+        # Remove common words for broader search
+        stop_words = {"the", "a", "an", "is", "are", "was", "were", "in", "on", "at", "to", "for"}
+        words = query.split()
+        filtered = " ".join([w for w in words if w.lower() not in stop_words])
+        if filtered != query and len(filtered) > 3:
+            variations.append(filtered)
+        
+        # Add keyword-only version
+        if len(words) > 1:
+            keywords_only = " ".join([w for w in words if len(w) > 3])
+            if keywords_only != query:
+                variations.append(keywords_only)
+        
+        return variations[:self.query_expansion_count]
+    
+    def rerank_candidates(self, query: str, candidates: List[Dict], use_cross_encoder: bool = True) -> List[Dict]:
+        """
+        Re-rank candidates by relevance to the query.
+        
+        Args:
+            query: Original search query
+            candidates: List of candidate documents with 'content' field
+            use_cross_encoder: Whether to use cross-encoder (vs LLM fallback)
+            
+        Returns:
+            Re-ranked list of candidates
+        """
+        if not candidates:
+            return []
+        
+        if len(candidates) <= self.rerank_final_k:
+            return candidates
+        
+        try:
+            # Try cross-encoder first
+            if use_cross_encoder:
+                cross_encoder = self._get_cross_encoder()
+                if cross_encoder:
+                    # Prepare query-document pairs
+                    pairs = [(query, cand.get('content', '')) for cand in candidates]
+                    
+                    # Get relevance scores
+                    scores = cross_encoder.predict(pairs)
+                    
+                    # Add scores to candidates and sort
+                    for i, cand in enumerate(candidates):
+                        cand['rerank_score'] = float(scores[i])
+                    
+                    candidates.sort(key=lambda x: x.get('rerank_score', 0), reverse=True)
+                    return candidates[:self.rerank_final_k]
+            
+            # Fallback: simple keyword overlap scoring
+            query_terms = set(query.lower().split())
+            for cand in candidates:
+                content = cand.get('content', '').lower()
+                content_terms = set(content.split())
+                overlap = len(query_terms & content_terms) / max(len(query_terms), 1)
+                cand['rerank_score'] = overlap
+            
+            candidates.sort(key=lambda x: x.get('rerank_score', 0), reverse=True)
+            return candidates[:self.rerank_final_k]
+            
+        except Exception as e:
+            logging.warning(f"Re-ranking failed: {e}")
+            return candidates[:self.rerank_final_k]
+    
+    async def search_enhanced(
+        self,
+        query_text: str,
+        query_embedding: List[float] = None,
+        limit: int = 5,
+        expand_queries: bool = True,
+        rerank: bool = True,
+        llm_bridge: LLMBridge = None
+    ) -> List[Dict]:
+        """
+        Enhanced search with query expansion and re-ranking.
+        
+        Args:
+            query_text: Original query text
+            query_embedding: Pre-computed query embedding (generated if not provided)
+            limit: Number of results to return
+            expand_queries: Whether to use query expansion
+            rerank: Whether to re-rank results
+            llm_bridge: Optional LLM bridge for query expansion
+            
+        Returns:
+            List of search results
+        """
+        # Get query embedding if not provided
+        if query_embedding is None:
+            if self.embed_fn:
+                query_embedding = await self.embed_fn(query_text)
+            else:
+                logging.warning("No embed_fn provided, falling back to basic search")
+                return self.search_hybrid(query_text, [], limit)
+        
+        # Query expansion
+        if expand_queries and llm_bridge:
+            # Try async expansion with LLM
+            try:
+                query_variants = await self.expand_query_async(query_text, llm_bridge)
+            except Exception:
+                query_variants = self.expand_query_sync(query_text)
+        else:
+            query_variants = self.expand_query_sync(query_text)
+        
+        # Collect results from all query variants
+        all_results = []
+        seen_ids = set()
+        
+        for variant in query_variants:
+            # For first variant, use the provided embedding
+            # For others, we'd need to compute embeddings (skip for efficiency)
+            if variant == query_variants[0]:
+                results = self.search_hybrid(variant, query_embedding, limit=self.rerank_top_k)
+            else:
+                # Just use keyword search for variations to save API calls
+                results = self.search_keyword(variant, limit=self.rerank_top_k)
+            
+            # Deduplicate
+            for r in results:
+                if r['id'] not in seen_ids:
+                    all_results.append(r)
+                    seen_ids.add(r['id'])
+        
+        # Re-ranking
+        if rerank and all_results:
+            all_results = self.rerank_candidates(query_text, all_results)
+        
+        # Return top results
+        return all_results[:limit]

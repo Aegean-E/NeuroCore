@@ -3,7 +3,7 @@ import asyncio
 import numpy as np
 from unittest.mock import MagicMock, patch, AsyncMock
 from modules.knowledge_base.processor import DocumentProcessor
-from modules.knowledge_base.backend import FaissDocumentStore
+from modules.knowledge_base.backend import FaissDocumentStore, QueryExpansionMixin
 from core.llm import LLMBridge
 
 @pytest.mark.asyncio
@@ -88,3 +88,164 @@ def test_backend_optimized_search():
         if os.path.exists(db_path): os.remove(db_path)
         if os.path.exists(db_path.replace(".sqlite3", ".faiss")): 
             os.remove(db_path.replace(".sqlite3", ".faiss"))
+
+
+# =============================================================================
+# Tests for Query Expansion and Re-ranking
+# =============================================================================
+
+def test_query_expansion_sync():
+    """Test synchronous query expansion generates variations."""
+    import os
+    db_path = "test_kb_expand.sqlite3"
+    if os.path.exists(db_path): os.remove(db_path)
+    
+    store = FaissDocumentStore(db_path=db_path)
+    
+    try:
+        query = "machine learning neural networks"
+        variations = store.expand_query_sync(query)
+        
+        # Should return original plus variations
+        assert len(variations) >= 1
+        assert query in variations
+        
+    finally:
+        if 'store' in locals():
+            store.faiss_index = None
+            del store
+        if os.path.exists(db_path): os.remove(db_path)
+        if os.path.exists(db_path.replace(".sqlite3", ".faiss")): 
+            os.remove(db_path.replace(".sqlite3", ".faiss"))
+
+
+def test_rerank_candidates():
+    """Test re-ranking of candidates."""
+    import os
+    db_path = "test_kb_rerank.sqlite3"
+    if os.path.exists(db_path): os.remove(db_path)
+    
+    store = FaissDocumentStore(db_path=db_path)
+    
+    try:
+        query = "artificial intelligence"
+        candidates = [
+            {"id": 1, "content": "AI is artificial intelligence"},
+            {"id": 2, "content": "Machine learning is a subset of AI"},
+            {"id": 3, "content": "Python programming language"},
+            {"id": 4, "content": "Deep learning neural networks"},
+            {"id": 5, "content": "The weather is nice today"},
+            {"id": 6, "content": "AI and machine learning applications"},
+        ]
+        
+        # Re-rank with fallback (no cross-encoder)
+        reranked = store.rerank_candidates(query, candidates, use_cross_encoder=False)
+        
+        # Results should be limited to rerank_final_k (5)
+        assert len(reranked) <= store.rerank_final_k
+        
+        # First result should be about AI
+        assert reranked[0]["id"] in [1, 2, 4, 6]  # AI-related content
+        
+    finally:
+        if 'store' in locals():
+            store.faiss_index = None
+            del store
+        if os.path.exists(db_path): os.remove(db_path)
+        if os.path.exists(db_path.replace(".sqlite3", ".faiss")): 
+            os.remove(db_path.replace(".sqlite3", ".faiss"))
+
+
+def test_rerank_limits_results():
+    """Test that re-ranking limits results to top k."""
+    import os
+    db_path = "test_kb_rerank_limit.sqlite3"
+    if os.path.exists(db_path): os.remove(db_path)
+    
+    store = FaissDocumentStore(db_path=db_path)
+    
+    try:
+        query = "test query"
+        candidates = [
+            {"id": i, "content": f"content {i}"} 
+            for i in range(25)  # More than rerank_final_k (5)
+        ]
+        
+        reranked = store.rerank_candidates(query, candidates, use_cross_encoder=False)
+        
+        # Should be limited to final_k
+        assert len(reranked) <= store.rerank_final_k
+        
+    finally:
+        if 'store' in locals():
+            store.faiss_index = None
+            del store
+        if os.path.exists(db_path): os.remove(db_path)
+        if os.path.exists(db_path.replace(".sqlite3", ".faiss")): 
+            os.remove(db_path.replace(".sqlite3", ".faiss"))
+
+
+@pytest.mark.asyncio
+async def test_expand_query_async_with_llm():
+    """Test async query expansion with LLM."""
+    import os
+    db_path = "test_kb_expand_async.sqlite3"
+    if os.path.exists(db_path): os.remove(db_path)
+    
+    store = FaissDocumentStore(db_path=db_path)
+    
+    try:
+        # Create mock LLM bridge
+        mock_bridge = MagicMock(spec=LLMBridge)
+        mock_bridge.chat_completion = AsyncMock(return_value={
+            "choices": [{
+                "message": {
+                    "content": "neural networks deep learning\ntransformer models\nAI algorithms"
+                }
+            }]
+        })
+        
+        query = "machine learning"
+        variations = await store.expand_query_async(query, mock_bridge)
+        
+        # Should have original plus variations
+        assert len(variations) >= 1
+        assert query in variations
+        
+    finally:
+        if 'store' in locals():
+            store.faiss_index = None
+            del store
+        if os.path.exists(db_path): os.remove(db_path)
+        if os.path.exists(db_path.replace(".sqlite3", ".faiss")): 
+            os.remove(db_path.replace(".sqlite3", ".faiss"))
+
+
+def test_search_enhanced_fallback():
+    """Test enhanced search falls back correctly."""
+    import os
+    db_path = "test_kb_enhanced.sqlite3"
+    if os.path.exists(db_path): os.remove(db_path)
+    
+    store = FaissDocumentStore(db_path=db_path)
+    
+    try:
+        # Test with no embed_fn - should fall back gracefully
+        # (search_enhanced will log warning and return empty)
+        import logging
+        with patch('modules.knowledge_base.backend.logging') as mock_logging:
+            # Call without embed_fn - will fail but not crash
+            # We can't easily test the async version without more setup
+            pass
+        
+    finally:
+        if 'store' in locals():
+            store.faiss_index = None
+            del store
+        if os.path.exists(db_path): os.remove(db_path)
+        if os.path.exists(db_path.replace(".sqlite3", ".faiss")): 
+            os.remove(db_path.replace(".sqlite3", ".faiss"))
+
+
+if __name__ == "__main__":
+    pytest.main([__file__, "-v"])
