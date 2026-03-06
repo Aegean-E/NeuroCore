@@ -116,6 +116,11 @@ class ModuleManager:
         with self.lock:
             return sorted(list(self.modules.values()), key=lambda m: m.get('order', 999))
 
+    def get_module(self, module_id: str):
+        """Returns module metadata with proper locking to avoid race conditions."""
+        with self.lock:
+            return self.modules.get(module_id)
+
     def _toggle_module(self, module_id: str, enabled: bool):
         """Enables or disables a module, updating the running app and the metadata file."""
         with self.lock:

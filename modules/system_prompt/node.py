@@ -29,7 +29,7 @@ class SystemPromptExecutor:
             logger.warning(f"Failed to load available tools: {e}")
         return {}
 
-    def _get_tools_in_openai_format(self, enabled_tool_names: list) -> list:
+    async def _get_tools_in_openai_format(self, enabled_tool_names: list) -> list:
         """Convert enabled tools to OpenAI tool format."""
         all_tools = await self._load_available_tools()
         tools_list = []
@@ -46,7 +46,8 @@ class SystemPromptExecutor:
             return ""
         
         skills_content = []
-        storage_path = "modules/skills/data"
+        # Use absolute path based on this file's location for consistency
+        storage_path = os.path.join(os.path.dirname(__file__), "..", "skills", "data")
         metadata_file = os.path.join(storage_path, "skills_metadata.json")
         
         # Load metadata to get skill names
@@ -114,31 +115,31 @@ class SystemPromptExecutor:
         skills_context = self._load_skills_content(enabled_skills)
         
         # Build context sections with priority-based ordering
-        # Priority: plan → memory → knowledge → reasoning → skills
-        # User-specific context (memory) comes before generic context (skills)
+        # Priority levels: 0=highest (plan, memory), 1=medium (knowledge, reasoning), 2=lowest (skills)
+        # Use tuples of (priority, content) for priority-aware budget management
         context_parts = []
         
-        # High priority: Plan and Memory (user-specific)
+        # High priority (0): Plan and Memory (user-specific)
         if plan_context:
-            context_parts.append(plan_context)
+            context_parts.append((0, plan_context))
         if memory_context:
             # Extract just the memory content (after "Relevant memories retrieved...")
             if "Relevant memories retrieved" in memory_context:
                 # Split on the marker and take the content after it
                 memory_content = memory_context.split("Relevant memories retrieved", 1)[1].strip()
-                context_parts.append(f"## User Memories\n{memory_content}")
+                context_parts.append((0, f"## User Memories\n{memory_content}"))
             else:
-                context_parts.append(f"## User Memories\n{memory_context}")
+                context_parts.append((0, f"## User Memories\n{memory_context}"))
         
-        # Medium priority: Knowledge and Reasoning
+        # Medium priority (1): Knowledge and Reasoning
         if knowledge_context:
-            context_parts.append(f"## Relevant Knowledge\n{knowledge_context}")
+            context_parts.append((1, f"## Relevant Knowledge\n{knowledge_context}"))
         if reasoning_context:
-            context_parts.append(f"## Previous Reasoning\n{reasoning_context}")
+            context_parts.append((1, f"## Previous Reasoning\n{reasoning_context}"))
         
-        # Low priority: Skills (generic, can be dropped if needed)
+        # Low priority (2): Skills (generic, can be dropped if needed)
         if skills_context:
-            context_parts.append(skills_context)
+            context_parts.append((2, skills_context))
         
         # Apply token budget management
         max_token_budget = config.get("max_token_budget", 4000)
@@ -174,7 +175,9 @@ class SystemPromptExecutor:
     def _apply_token_budget(self, base_prompt: str, context_parts: list, max_tokens: int) -> str:
         """
         Apply token budget management with priority-based trimming.
-        Priority order: plan, memory, knowledge, reasoning, skills
+        Priority levels: 0=highest (plan, memory), 1=medium (knowledge, reasoning), 2=lowest (skills)
+        
+        Uses priority tags instead of indices to handle variable context parts.
         """
         base_tokens = self._estimate_tokens(base_prompt)
         available_tokens = max_tokens - base_tokens - 100  # Reserve 100 tokens for safety
@@ -186,7 +189,11 @@ class SystemPromptExecutor:
         result_parts = []
         remaining_tokens = available_tokens
         
-        for i, part in enumerate(context_parts):
+        # Sort by priority (lower number = higher priority)
+        # This ensures we keep high-priority items when trimming
+        sorted_parts = sorted(context_parts, key=lambda x: x[0])
+        
+        for priority, part in sorted_parts:
             part_tokens = self._estimate_tokens(part)
             
             # Check if this part fits within remaining budget
@@ -194,9 +201,9 @@ class SystemPromptExecutor:
                 result_parts.append(part)
                 remaining_tokens -= part_tokens
             else:
-                # Part doesn't fit - try to truncate if it's not the first part
-                # and we have some remaining budget
-                if remaining_tokens > 200 and i > 0:
+                # Part doesn't fit - try to truncate if we have some remaining budget
+                # Only truncate if this isn't the highest priority item (priority > 0)
+                if remaining_tokens > 200 and priority > 0:
                     # Truncate with ellipsis
                     max_chars = remaining_tokens * 4 - 20  # Reserve for ellipsis
                     truncated = part[:max_chars] + "\n\n[... content truncated due to token budget]"
@@ -204,11 +211,13 @@ class SystemPromptExecutor:
                     remaining_tokens = 0
                     break  # Short-circuit after truncation since we used up budget
                 
-                # For lower priority parts (skills, reasoning), we can skip entirely
-                # if they don't fit. Higher priority parts (plan, memory) were added first.
-                if i >= 3:  # skills is typically index 4, reasoning at 3
-                    logger.debug(f"Dropping low-priority context part {i} due to token budget")
+                # For lowest priority parts (priority == 2, skills), skip entirely if they don't fit
+                if priority >= 2:
+                    logger.debug(f"Dropping lowest priority context (skills) due to token budget")
                     break
+                # For medium priority (priority == 1), log but continue to lower priority
+                elif priority == 1:
+                    logger.debug(f"Dropping medium priority context (knowledge/reasoning) due to token budget")
         
         if result_parts:
             return base_prompt + "\n\n" + "\n\n".join(result_parts)

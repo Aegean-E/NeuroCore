@@ -1,3 +1,4 @@
+import asyncio
 import html
 import json
 import os
@@ -14,26 +15,33 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 templates = Jinja2Templates(directory="web/templates")
 
-def _load_tools():
-    """Load available tools from the tools module."""
-    tools_file = os.path.join(os.path.dirname(__file__), "..", "tools", "tools.json")
-    if os.path.exists(tools_file):
-        try:
-            with open(tools_file, "r") as f:
-                return json.load(f)
-        except (json.JSONDecodeError, OSError, KeyError) as e:
-            # JSONDecodeError: Corrupted JSON file
-            # OSError: File read permissions or I/O issues
-            # KeyError: Missing expected keys in JSON structure
-            logger.warning(f"Failed to load tools from {tools_file}: {e}")
-            return {}
+# Shared tools cache with mtime-based caching (same pattern as node.py)
+_tools_lock = asyncio.Lock()
+_tools_cache = {"mtime": 0.0, "data": {}}
+_tools_path = os.path.join(os.path.dirname(__file__), "..", "tools", "tools.json")
+
+async def _load_tools_cached():
+    """Load available tools from the tools module with mtime-based caching."""
+    try:
+        if os.path.exists(_tools_path):
+            mtime = os.path.getmtime(_tools_path)
+            async with _tools_lock:
+                if mtime > _tools_cache["mtime"]:
+                    with open(_tools_path, "r") as f:
+                        _tools_cache["data"] = json.load(f)
+                    _tools_cache["mtime"] = mtime
+            return _tools_cache["data"]
+    except (json.JSONDecodeError, OSError, KeyError) as e:
+        logger.warning(f"Failed to load tools: {e}")
     return {}
 
 @router.get("/available-tools", response_class=HTMLResponse)
 async def get_available_tools(request: Request, module_manager = Depends(get_module_manager)):
     """Get available tools with checkboxes."""
-    all_tools = _load_tools()
-    system_prompt_module = module_manager.modules.get("system_prompt", {})
+    all_tools = await _load_tools_cached()
+    
+    # FIX: Use proper accessor method with lock to avoid race condition
+    system_prompt_module = module_manager.get_module("system_prompt") or {}
     enabled_tools = system_prompt_module.get("config", {}).get("enabled_tools", [])
     
     tools_html = ""
@@ -82,3 +90,4 @@ async def get_available_tools(request: Request, module_manager = Depends(get_mod
     """
     
     return full_html
+
