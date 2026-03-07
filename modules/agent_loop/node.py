@@ -138,6 +138,14 @@ class AgentLoopExecutor:
         except (json.JSONDecodeError, KeyError):
             args = {}
 
+        # Log tool call event
+        if self._session_manager:
+            try:
+                self._session_manager.log_tool_call(func_name, args)
+            except Exception:
+                pass  # Don't fail if logging fails
+
+        start_time = time.time()
         success = False
         if func_name in tool_library:
             code = tool_library[func_name]
@@ -156,6 +164,21 @@ class AgentLoopExecutor:
                 output = f"Error executing tool {func_name}: {str(e)}"
         else:
             output = f"Error: Tool {func_name} not found in library."
+
+        # Calculate duration
+        duration_ms = (time.time() - start_time) * 1000
+
+        # Log tool result event
+        if self._session_manager:
+            try:
+                self._session_manager.log_tool_result(
+                    func_name,
+                    output,
+                    success=success,
+                    duration_ms=duration_ms
+                )
+            except Exception:
+                pass  # Don't fail if logging fails
 
         return {
             "tool_call_id": tool_call.get("id", ""),
@@ -291,6 +314,13 @@ class AgentLoopExecutor:
                 "tool_calls": [],
                 "errors": []
             }
+
+            # Log LLM call event
+            if self._session_manager:
+                try:
+                    self._session_manager.log_llm_call(model, tokens=None)
+                except Exception:
+                    pass  # Don't fail if logging fails
 
             # Call LLM with retry logic
             response = await self._llm_with_retry(
