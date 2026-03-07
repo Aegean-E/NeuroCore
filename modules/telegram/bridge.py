@@ -110,7 +110,7 @@ class TelegramBridge:
                         "id": update["update_id"],
                         "chat_id": msg.get("chat", {}).get("id"),
                         "from": msg.get("from", {}).get("first_name", "Unknown"),
-                        "timestamp": datetime.now().isoformat(),
+                        "timestamp": datetime.utcnow().isoformat() + 'Z',
                         "date": msg.get("date", int(time.time())), # Capture Telegram timestamp
                         "type": "unknown"
                     }

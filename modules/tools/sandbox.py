@@ -137,12 +137,13 @@ class SafeOpen:
         except (OSError, ValueError):
             return False
         
-        # Check for path traversal attempts
-        if '..' in path or path.startswith('/'):
+        # Check for path traversal attempts (but allow absolute paths that resolve to allowed dirs)
+        if '..' in path:
             # Path traversal detected - reject it
             return False
         
-        # Check if path is within allowed directories
+        # Check if path is within allowed directories using realpath containment
+        # This allows absolute paths like /home/user/data that resolve inside allowed dirs
         for allowed_dir in self.allowed_dirs:
             try:
                 real_allowed = os.path.realpath(os.path.abspath(allowed_dir))

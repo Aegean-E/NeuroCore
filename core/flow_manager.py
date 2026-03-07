@@ -177,7 +177,7 @@ class FlowManager:
                     {"from": "node-12", "to": "node-11"}
                 ],
                 "bridges": [],
-                "created_at": datetime.now().isoformat()
+                "created_at": datetime.utcnow().isoformat() + 'Z'
             }
         }
 
@@ -234,7 +234,7 @@ class FlowManager:
                 "nodes": nodes,
                 "connections": connections,
                 "bridges": bridges or [],
-                "created_at": datetime.now().isoformat()
+                "created_at": datetime.utcnow().isoformat() + 'Z'
             }
             self._save_flows()
             return self.flows[flow_id]
@@ -312,7 +312,7 @@ class FlowManager:
             
             active_flow["id"] = default_id
             active_flow["name"] = "Default Chat Flow"
-            active_flow["created_at"] = datetime.now().isoformat()
+            active_flow["created_at"] = datetime.utcnow().isoformat() + 'Z'
             
             self.flows[default_id] = active_flow
             self._save_flows()

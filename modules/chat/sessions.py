@@ -61,10 +61,10 @@ class SessionManager:
     def create_session(self, name=None):
         with self._lock:
             session_id = str(uuid.uuid4())
-            now = datetime.now().isoformat()
+            now = datetime.utcnow().isoformat() + 'Z'
             self.sessions[session_id] = {
                 "id": session_id,
-                "name": name or f"Session {datetime.now().strftime('%Y-%m-%d %H:%M')}",
+                "name": name or f"Session {datetime.utcnow().strftime('%Y-%m-%d %H:%M')}",
                 "history": [],
                 "created_at": now,
                 "updated_at": now
@@ -101,7 +101,7 @@ class SessionManager:
         with self._lock:
             if session_id in self.sessions:
                 self.sessions[session_id]["history"].append({"role": role, "content": content})
-                self.sessions[session_id]["updated_at"] = datetime.now().isoformat()
+                self.sessions[session_id]["updated_at"] = datetime.utcnow().isoformat() + 'Z'
                 self._save_sessions()
                 return True
             return False
@@ -120,7 +120,7 @@ class SessionManager:
             current = self.sessions.get(session_id)
             if current and current['updated_at'] == snapshot_updated_at:
                 self.sessions[session_id]["history"] = new_history
-                self.sessions[session_id]["updated_at"] = datetime.now().isoformat()
+                self.sessions[session_id]["updated_at"] = datetime.utcnow().isoformat() + 'Z'
                 self._save_sessions()
                 return True
             return False

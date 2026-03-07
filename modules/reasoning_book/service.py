@@ -51,7 +51,7 @@ class ReasoningBookService:
         """
         entry = {
             "thought_id": str(uuid.uuid4()),
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": datetime.utcnow().isoformat() + 'Z',
             "content": content,
             "source": source,
             "step_id": step_id,

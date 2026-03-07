@@ -1,4 +1,5 @@
 from fastapi import Depends, Request
+import threading
 
 from core.settings import SettingsManager, settings as settings_manager
 from core.llm import LLMBridge
@@ -7,6 +8,7 @@ from core.module_manager import ModuleManager
 
 # Module-level cached LLM bridge instance
 _llm_bridge_instance: LLMBridge = None
+_llm_bridge_lock = threading.Lock()  # Lock for thread-safe singleton access
 
 
 def get_settings_manager() -> SettingsManager:
@@ -22,6 +24,7 @@ def get_llm_bridge(settings: SettingsManager = Depends(get_settings_manager)) ->
     with mutating the existing instance while it may be in use.
     The settings values (URLs, API keys) are read at request time
     and applied to either a new instance or the cached one.
+    Thread-safe using a lock to prevent race conditions.
     """
     global _llm_bridge_instance
     
@@ -32,24 +35,9 @@ def get_llm_bridge(settings: SettingsManager = Depends(get_settings_manager)) ->
     current_embedding_model = settings.get("embedding_model")
     current_timeout = float(settings.get("request_timeout", 60.0))
     
-    # Only create instance if it doesn't exist
-    if _llm_bridge_instance is None:
-        _llm_bridge_instance = LLMBridge(
-            base_url=current_base_url,
-            api_key=current_api_key,
-            embedding_base_url=current_embedding_base_url,
-            embedding_model=current_embedding_model,
-            timeout=current_timeout,
-        )
-    else:
-        # Check if settings have changed - create new instance if so
-        # to avoid mutating the singleton which can cause race conditions
-        # with concurrent background tasks
-        if (_llm_bridge_instance.base_url != current_base_url or
-            _llm_bridge_instance.api_key != current_api_key or
-            _llm_bridge_instance.embedding_base_url != (current_embedding_base_url or current_base_url) or
-            _llm_bridge_instance.embedding_model != current_embedding_model or
-            _llm_bridge_instance.timeout != current_timeout):
+    with _llm_bridge_lock:
+        # Only create instance if it doesn't exist
+        if _llm_bridge_instance is None:
             _llm_bridge_instance = LLMBridge(
                 base_url=current_base_url,
                 api_key=current_api_key,
@@ -57,8 +45,24 @@ def get_llm_bridge(settings: SettingsManager = Depends(get_settings_manager)) ->
                 embedding_model=current_embedding_model,
                 timeout=current_timeout,
             )
-    
-    return _llm_bridge_instance
+        else:
+            # Check if settings have changed - create new instance if so
+            # to avoid mutating the singleton which can cause race conditions
+            # with concurrent background tasks
+            if (_llm_bridge_instance.base_url != current_base_url or
+                _llm_bridge_instance.api_key != current_api_key or
+                _llm_bridge_instance.embedding_base_url != (current_embedding_base_url or current_base_url) or
+                _llm_bridge_instance.embedding_model != current_embedding_model or
+                _llm_bridge_instance.timeout != current_timeout):
+                _llm_bridge_instance = LLMBridge(
+                    base_url=current_base_url,
+                    api_key=current_api_key,
+                    embedding_base_url=current_embedding_base_url,
+                    embedding_model=current_embedding_model,
+                    timeout=current_timeout,
+                )
+        
+        return _llm_bridge_instance
 
 
 def get_module_manager(request: Request) -> ModuleManager:

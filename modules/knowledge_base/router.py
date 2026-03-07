@@ -13,6 +13,7 @@ import os
 import shutil
 import uuid
 import time as import_time
+import threading
 from datetime import datetime
 import numpy as np
 
@@ -183,6 +184,12 @@ async def list_docs(request: Request, q: str = Query(None)):
 
 @router.post("/upload", response_class=HTMLResponse)
 async def upload_doc(request: Request, background_tasks: BackgroundTasks, files: List[UploadFile] = File(...), llm: LLMBridge = Depends(get_llm_bridge)):
+    # Clean up stale entries before processing new uploads
+    try:
+        _cleanup_stale_uploads()
+    except Exception:
+        pass  # Non-critical, continue with upload
+    
     items_html = []
     errors = []
 
@@ -269,6 +276,12 @@ async def upload_doc(request: Request, background_tasks: BackgroundTasks, files:
 
 @router.get("/upload/progress/{tracking_id}", response_class=HTMLResponse)
 async def get_upload_progress(request: Request, tracking_id: str):
+    # Clean up stale entries periodically during progress polling
+    try:
+        _cleanup_stale_uploads()
+    except Exception:
+        pass  # Non-critical
+    
     with upload_progress_lock:
         info = upload_progress.get(tracking_id)
         if not info:

@@ -74,7 +74,7 @@ class EventManager:
                 "id": str(uuid.uuid4()),
                 "title": title,
                 "start_time": start_time,
-                "created_at": datetime.now().isoformat(),
+                "created_at": datetime.utcnow().isoformat() + 'Z',
                 "notified": False
             }
             events.append(event)
@@ -120,7 +120,7 @@ class EventManager:
                         event["title"] = title
                     if start_time is not None:
                         event["start_time"] = start_time
-                    event["updated_at"] = datetime.now().isoformat()
+                    event["updated_at"] = datetime.utcnow().isoformat() + 'Z'
                     return events  # Return modified events to save
             return None  # Event not found, don't save
         
@@ -135,7 +135,7 @@ class EventManager:
             for event in events:
                 if event.get("id") == event_id:
                     event["notified"] = True
-                    event["updated_at"] = datetime.now().isoformat()
+                    event["updated_at"] = datetime.utcnow().isoformat() + 'Z'
                     return events
             return None
         

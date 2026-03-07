@@ -669,7 +669,7 @@ async def run_flow_node(flow_id: str, node_id: str, request: Request, background
             # Inject some default data so nodes that expect input don't fail immediately
             payload = {
                 "trigger": True,
-                "timestamp": datetime.now().isoformat(),
+                "timestamp": datetime.utcnow().isoformat() + 'Z',
                 "manual": True
             }
             await runner.run(payload, start_node_id=node_id)
@@ -741,7 +741,6 @@ async def import_config(request: Request, file: UploadFile = File(...), settings
 @router.get("/settings/export/flows")
 async def export_flows():
     """Downloads the current ai_flows.json file."""
-    flows = flow_manager.list_flows()
     # Use thread-safe method to get flows dict with lock held
     data = flow_manager.get_all_flows_dict()
     return JSONResponse(

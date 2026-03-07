@@ -126,8 +126,8 @@ class SkillBackend:
             "description": description,
             "category": category,
             "tags": tags,
-            "created_at": datetime.now().isoformat(),
-            "updated_at": datetime.now().isoformat()
+            "created_at": datetime.utcnow().isoformat() + 'Z',
+            "updated_at": datetime.utcnow().isoformat() + 'Z'
         }
         self._save_metadata(metadata)
         
@@ -166,7 +166,7 @@ class SkillBackend:
         if tags is not None:
             meta["tags"] = tags
         
-        meta["updated_at"] = datetime.now().isoformat()
+        meta["updated_at"] = datetime.utcnow().isoformat() + 'Z'
         self._save_metadata(metadata)
         
         return self.get_skill(skill_id)
@@ -207,8 +207,8 @@ class SkillBackend:
             "description": description,
             "category": category,
             "tags": tags,
-            "created_at": datetime.now().isoformat(),
-            "updated_at": datetime.now().isoformat(),
+            "created_at": datetime.utcnow().isoformat() + 'Z',
+            "updated_at": datetime.utcnow().isoformat() + 'Z',
             "imported": True
         }
         self._save_metadata(metadata)
