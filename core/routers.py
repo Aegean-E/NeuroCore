@@ -847,6 +847,14 @@ async def get_debug_logs(request: Request):
 async def get_debug_events(request: Request, since: float = 0):
     return debug_logger.get_recent_logs(since)
 
+@router.get("/debug/agent-summary", response_class=JSONResponse)
+async def get_agent_summary(request: Request):
+    """Get a summary of the last agent session trace events."""
+    from core.session_manager import session_manager
+    
+    summary = session_manager.get_trace_summary(limit=5)
+    return JSONResponse(content=summary)
+
 @router.post("/debug/clear")
 async def clear_debug_logs(request: Request):
     debug_logger.clear()

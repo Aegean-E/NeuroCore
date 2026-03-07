@@ -468,6 +468,74 @@ class TestGetSessionManager:
         assert hasattr(session_manager, 'load_or_create_session')
         assert hasattr(session_manager, 'log_tool_call')
         assert hasattr(session_manager, 'get_trace')
+    
+    def test_get_trace_summary_empty(self):
+        """Test get_trace_summary with no events."""
+        from core.session_manager import SessionManager
+        
+        manager = SessionManager(
+            session_file=TEST_SESSION_FILE,
+            trace_file=TEST_TRACE_FILE
+        )
+        
+        # Get summary with no events
+        summary = manager.get_trace_summary(limit=5)
+        
+        assert summary["session_id"] == manager.get_session_id()
+        assert summary["total_llm_calls"] == 0
+        assert summary["total_tool_calls"] == 0
+        assert summary["total_tool_failures"] == 0
+        assert summary["last_events"] == []
+    
+    def test_get_trace_summary_with_events(self):
+        """Test get_trace_summary with various events."""
+        from core.session_manager import SessionManager
+        
+        manager = SessionManager(
+            session_file=TEST_SESSION_FILE,
+            trace_file=TEST_TRACE_FILE
+        )
+        
+        # Log various events
+        manager.log_llm_call("gpt-4", tokens=150)
+        manager.log_tool_call("calculator", {"expression": "2+2"})
+        manager.log_tool_result("calculator", "4", success=True)
+        manager.log_llm_call("gpt-4", tokens=200)
+        manager.log_tool_call("fetch_url", {"url": "http://example.com"})
+        manager.log_tool_result("fetch_url", None, success=False, error="Connection timeout")
+        
+        # Get summary with limit=3
+        summary = manager.get_trace_summary(limit=3)
+        
+        assert summary["total_llm_calls"] == 2
+        assert summary["total_tool_calls"] == 2
+        assert summary["total_tool_failures"] == 1
+        assert len(summary["last_events"]) == 3
+        
+        # Last events should be the most recent 3
+        assert summary["last_events"][0]["event"] == "llm_call"
+        assert summary["last_events"][1]["event"] == "tool_call"
+        assert summary["last_events"][2]["event"] == "tool_result"
+    
+    def test_get_trace_summary_limit_zero(self):
+        """Test get_trace_summary with limit=0."""
+        from core.session_manager import SessionManager
+        
+        manager = SessionManager(
+            session_file=TEST_SESSION_FILE,
+            trace_file=TEST_TRACE_FILE
+        )
+        
+        # Log some events
+        manager.log_llm_call("gpt-4", tokens=150)
+        manager.log_tool_call("calculator", {"expression": "2+2"})
+        
+        # Get summary with limit=0 (should return empty list)
+        summary = manager.get_trace_summary(limit=0)
+        
+        assert summary["total_llm_calls"] == 1
+        assert summary["total_tool_calls"] == 1
+        assert summary["last_events"] == []
 
 
 if __name__ == "__main__":

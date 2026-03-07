@@ -409,6 +409,41 @@ class SessionManager:
         """Get trace events since given timestamp."""
         return self.trace_writer.read_since(timestamp)
     
+    def get_trace_summary(self, limit: int = 5) -> Dict[str, Any]:
+        """
+        Get a summary of trace events.
+        
+        Args:
+            limit: Number of recent events to include (default: 5)
+            
+        Returns:
+            Dict with:
+                - session_id: Current session ID
+                - total_llm_calls: Count of llm_call events
+                - total_tool_calls: Count of tool_call events
+                - total_tool_failures: Count of tool_result events where success=False
+                - last_events: List of recent events (up to limit)
+        """
+        trace = self.get_trace()
+        
+        total_llm_calls = sum(1 for e in trace if e.get("event") == "llm_call")
+        total_tool_calls = sum(1 for e in trace if e.get("event") == "tool_call")
+        total_tool_failures = sum(
+            1 for e in trace 
+            if e.get("event") == "tool_result" and e.get("success") is False
+        )
+        
+        # Get last N events
+        last_events = trace[-limit:] if limit > 0 else []
+        
+        return {
+            "session_id": self._session_id,
+            "total_llm_calls": total_llm_calls,
+            "total_tool_calls": total_tool_calls,
+            "total_tool_failures": total_tool_failures,
+            "last_events": last_events,
+        }
+    
     @contextmanager
     def trace_context(self, operation: str):
         """
