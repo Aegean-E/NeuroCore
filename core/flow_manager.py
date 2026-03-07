@@ -181,16 +181,21 @@ class FlowManager:
             }
         }
 
-    def _ensure_default_active(self):
+    def _ensure_default_active(self, flows=None):
         """Ensure a default flow is active if one exists.
         
         Only sets active_ai_flows to include default flow if:
         1. No active flows are currently set, AND
         2. A default flow (default-flow-001) exists in the flows dictionary
+        
+        Args:
+            flows: Optional flows dictionary to check. If not provided, uses self.flows.
         """
         if not settings.get("active_ai_flows"):
+            # Use provided flows dict or self.flows
+            flows_to_check = flows if flows is not None else getattr(self, 'flows', {})
             # Only set if default flow exists
-            if "default-flow-001" in self.flows:
+            if "default-flow-001" in flows_to_check:
                 settings.save_settings({"active_ai_flows": ["default-flow-001"]})
             else:
                 settings.save_settings({"active_ai_flows": []})
