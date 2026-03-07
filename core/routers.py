@@ -677,7 +677,7 @@ async def run_flow_node(flow_id: str, node_id: str, request: Request, background
             # RuntimeError: Flow execution failed at runtime
             # ValueError: Invalid flow ID or node ID
             # TypeError/KeyError: Data structure issues during execution
-            print(f"[Manual Trigger] Warning: Flow execution failed: {e}")
+            logger.warning(f"[Manual Trigger] Flow execution failed: {e}")
 
 
     background_tasks.add_task(_run)

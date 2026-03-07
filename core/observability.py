@@ -24,6 +24,7 @@ import json
 import logging
 import contextvars
 import contextlib
+import threading
 from typing import Optional, Dict, Any, List, Callable
 from datetime import datetime, timezone
 from functools import wraps
@@ -282,8 +283,8 @@ class Metrics:
         self._counters: Dict[str, float] = defaultdict(float)
         self._timings: Dict[str, List[float]] = defaultdict(list)
         self._gauges: Dict[str, float] = {}
-        # FIX: Use asyncio.Lock for async safety instead of threading.RLock
-        self._lock = asyncio.Lock()
+        # FIX: Use threading.Lock for sync-safe operations instead of asyncio.Lock
+        self._lock = threading.Lock()
         self._max_timings_per_metric = 1000  # Keep last 1000 timings
     
     def increment(self, metric: str, value: float = 1.0, tags: Optional[Dict[str, str]] = None):
