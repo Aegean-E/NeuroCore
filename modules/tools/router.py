@@ -1,6 +1,7 @@
 import os
 import json
-from datetime import datetime
+import asyncio
+import filelock
 from fastapi import APIRouter, Request, Form, UploadFile, File, Query
 from fastapi.responses import HTMLResponse, Response, JSONResponse
 from fastapi.templating import Jinja2Templates
@@ -10,19 +11,34 @@ router = APIRouter()
 templates = Jinja2Templates(directory="web/templates")
 TOOLS_FILE = os.path.join(os.path.dirname(__file__), "tools.json")
 LIBRARY_DIR = os.path.join(os.path.dirname(__file__), "library")
+TOOLS_LOCK_FILE = TOOLS_FILE + ".lock"
 
 os.makedirs(LIBRARY_DIR, exist_ok=True)
 
 def load_tools():
-    if os.path.exists(TOOLS_FILE):
-        with open(TOOLS_FILE, "r") as f:
-            try: return json.load(f)
-            except: return {}
-    return {}
+    """Load tools from JSON file with file locking for thread safety."""
+    lock = filelock.FileLock(TOOLS_LOCK_FILE)
+    with lock:
+        if os.path.exists(TOOLS_FILE):
+            with open(TOOLS_FILE, "r") as f:
+                try: return json.load(f)
+                except: return {}
+        return {}
 
 def save_tools(tools):
-    with open(TOOLS_FILE, "w") as f:
-        json.dump(tools, f, indent=4)
+    """Save tools to JSON file with file locking for thread safety."""
+    lock = filelock.FileLock(TOOLS_LOCK_FILE)
+    with lock:
+        with open(TOOLS_FILE, "w") as f:
+            json.dump(tools, f, indent=4)
+
+async def load_tools_async():
+    """Async wrapper for load_tools to avoid blocking event loop."""
+    return await asyncio.to_thread(load_tools)
+
+async def save_tools_async(tools):
+    """Async wrapper for save_tools to avoid blocking event loop."""
+    return await asyncio.to_thread(save_tools, tools)
 
 @router.get("", response_class=HTMLResponse)
 async def tools_page(request: Request):
@@ -170,11 +186,8 @@ async def get_definitions():
     for name, tool in tools.items():
         if tool.get("enabled", True):
             definition = tool["definition"]
-            # Inject current time into SaveReminder description to help LLM with relative dates
-            if name == "SaveReminder":
-                now = datetime.now().strftime("%Y-%m-%d %H:%M %A")
-                desc = definition["function"].get("description", "")
-                definition["function"]["description"] = f"{desc} Current date/time: {now}."
+            # NOTE: Time injection was removed - it caused stale timestamps
+            # The SaveReminder tool should inject current time at runtime instead
             definitions.append(definition)
     return definitions
 

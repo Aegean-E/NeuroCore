@@ -3,10 +3,11 @@ import json
 import logging
 import asyncio
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 
 DATA_FILE = "data/reasoning_book.json"
 MAX_THOUGHTS = 100
+MAX_DAYS_OLD = 7  # Prune thoughts older than 7 days
 
 logger = logging.getLogger(__name__)
 
@@ -61,8 +62,18 @@ class ReasoningBookService:
         
         async with self._lock:
             self.thoughts.insert(0, entry)
+            
+            # Prune by count
             if len(self.thoughts) > MAX_THOUGHTS:
                 self.thoughts = self.thoughts[:MAX_THOUGHTS]
+            
+            # Prune by age (older than MAX_DAYS_OLD days)
+            cutoff = datetime.now() - timedelta(days=MAX_DAYS_OLD)
+            self.thoughts = [
+                t for t in self.thoughts 
+                if datetime.fromisoformat(t['timestamp']) > cutoff
+            ]
+            
             self._save()
         
         return entry["thought_id"]

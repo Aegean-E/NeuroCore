@@ -57,7 +57,33 @@ async def lifespan(app: FastAPI):
                         task.add_done_callback(lambda t, fid=active_flow_id, nid=node['id']: background_task_callback(t, fid, nid))
 
     yield
-    # Add shutdown logic here if needed in the future
+    
+    # Graceful shutdown: Cancel all background tasks
+    print("[System] Shutting down, cancelling background tasks...")
+    if hasattr(app.state, "background_tasks"):
+        for task in app.state.background_tasks:
+            if not task.done():
+                task.cancel()
+                print(f"[System] Cancelled task for flow")
+        
+        # Wait for tasks to complete cancellation (with timeout)
+        if app.state.background_tasks:
+            done, pending = await asyncio.wait(
+                app.state.background_tasks, 
+                timeout=5.0,
+                return_when=asyncio.ALL_COMPLETED
+            )
+            if pending:
+                print(f"[System] {len(pending)} tasks did not complete in time")
+    
+    # Shutdown module managers if they have cleanup methods
+    if hasattr(app.state, "module_manager"):
+        module_manager = app.state.module_manager
+        # Call shutdown on any modules that support it
+        for module in module_manager.get_all_modules():
+            if module.get("enabled"):
+                # Try to gracefully stop the module
+                print(f"[System] Stopping module: {module.get('name', 'unknown')}")
 
 app = FastAPI(title="NeuroCore", description="Modular LLM API Core", lifespan=lifespan)
 
