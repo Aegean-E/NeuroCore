@@ -48,7 +48,7 @@ templates.env.filters["format_reasoning"] = format_reasoning_content
 HIDDEN_CONFIG_KEYS = {
     'memory': ['save_default_confidence', 'save_confidence_threshold', 'recall_limit', 'recall_min_score', 'consolidation_threshold', 'auto_consolidation_hours', 'arbiter_model', 'arbiter_prompt', 'similarity_threshold', 'belief_ttl_days', 'recall_access_weight'],
     'llm_module': ['temperature', 'max_tokens'],
-    'chat': ['auto_rename_turns'],
+    'chat': ['auto_rename_turns', 'auto_compact_tokens', 'compact_keep_last'],
     'telegram': ['bot_token', 'chat_id']
 }
 
@@ -897,3 +897,43 @@ async def goals_page(request: Request, module_manager: ModuleManager = Depends(g
         "modules": module_manager.get_all_modules(),
         "settings": settings_man.settings
     })
+
+
+@router.get("/modules/{module_id}/default-config")
+async def get_default_config(module_id: str, module_manager: ModuleManager = Depends(get_module_manager)):
+    """Returns the default configuration for modules that support loading defaults (e.g., agent_loop)."""
+    from pathlib import Path
+    
+    module = module_manager.modules.get(module_id)
+    if not module:
+        raise HTTPException(status_code=404, detail="Module not found")
+    
+    # Only support agent_loop for now
+    if module_id != 'agent_loop':
+        raise HTTPException(status_code=400, detail="Module does not support loading default config")
+    
+    # Read the module.json file to get default config
+    module_dir = Path(__file__).resolve().parent.parent / "modules" / module_id
+    module_json_path = module_dir / "module.json"
+    
+    if not module_json_path.exists():
+        raise HTTPException(status_code=404, detail="Module configuration file not found")
+    
+    try:
+        with open(module_json_path, 'r') as f:
+            module_data = json.load(f)
+    except (json.JSONDecodeError, OSError):
+        raise HTTPException(status_code=500, detail="Failed to read module configuration")
+    
+    # Extract default values from config schema
+    config_schema = module_data.get('config', {})
+    default_config = {}
+    
+    for key, value in config_schema.items():
+        if isinstance(value, dict) and 'value' in value:
+            default_config[key] = value['value']
+        else:
+            # For flat config values (like in chat module)
+            default_config[key] = value
+    
+    return JSONResponse(content=default_config)

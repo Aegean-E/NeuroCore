@@ -31,7 +31,15 @@
 
     {% if module.id == 'agent_loop' and module.enabled %}
     <div class="bg-slate-900 rounded-xl border border-slate-800 p-6 mt-6">
-        <form hx-post="/modules/{{ module.id }}/config" 
+        <div class="flex items-center justify-between mb-6">
+            <h3 class="font-semibold text-lg text-slate-200">Agent Loop Settings</h3>
+            <button type="button" 
+                    onclick="loadAgentLoopDefaults()"
+                    class="text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 px-3 py-1.5 rounded-lg transition-colors border border-slate-700">
+                ↺ Load Default Settings
+            </button>
+        </div>
+        <form id="agent-loop-settings-form" hx-post="/modules/{{ module.id }}/config"
               hx-swap="none"
               hx-on::after-request="const btn = this.querySelector('button[type=submit]'); const orig = btn.innerText; btn.innerText = 'Saved!'; btn.classList.remove('bg-blue-600', 'hover:bg-blue-500'); btn.classList.add('bg-emerald-600', 'hover:bg-emerald-500'); setTimeout(() => { btn.innerText = orig; btn.classList.add('bg-blue-600', 'hover:bg-blue-500'); btn.classList.remove('bg-emerald-600', 'hover:bg-emerald-500'); }, 2000);">
             
@@ -702,4 +710,76 @@
         </div>
     </div>
     {% endif %}
+
+    <script>
+        function confirmWipe() {
+            const input = prompt("⚠️ DANGER ZONE ⚠️\n\nThis will permanently delete ALL stored memories. This action cannot be undone.\n\nTo confirm, type 'DELETE' in the box below:");
+            if (input === 'DELETE') {
+                htmx.ajax('POST', '/memory/wipe', {swap: 'none'});
+            } else if (input !== null) {
+                alert("Incorrect confirmation code. Action cancelled.");
+            }
+        }
+
+        function loadAgentLoopDefaults() {
+            fetch('/modules/agent_loop/default-config')
+                .then(response => response.json())
+                .then(data => {
+                    const form = document.getElementById('agent-loop-settings-form');
+                    if (!form) return;
+                    
+                    // Update number/text inputs
+                    if (data.max_iterations !== undefined) {
+                        const el = form.querySelector('[name="max_iterations"]');
+                        if (el) el.value = data.max_iterations;
+                    }
+                    if (data.max_tokens !== undefined) {
+                        const el = form.querySelector('[name="max_tokens"]');
+                        if (el) el.value = data.max_tokens;
+                    }
+                    if (data.temperature !== undefined) {
+                        const el = form.querySelector('[name="temperature"]');
+                        if (el) el.value = data.temperature;
+                    }
+                    if (data.max_llm_retries !== undefined) {
+                        const el = form.querySelector('[name="max_llm_retries"]');
+                        if (el) el.value = data.max_llm_retries;
+                    }
+                    if (data.retry_delay !== undefined) {
+                        const el = form.querySelector('[name="retry_delay"]');
+                        if (el) el.value = data.retry_delay;
+                    }
+                    if (data.timeout !== undefined) {
+                        const el = form.querySelector('[name="timeout"]');
+                        if (el) el.value = data.timeout;
+                    }
+                    
+                    // Update checkboxes
+                    const checkboxes = ['include_plan_in_context', 'include_memory_context', 'include_knowledge_context', 'include_reasoning_context'];
+                    checkboxes.forEach(name => {
+                        const el = form.querySelector('[name="' + name + '"]');
+                        if (el && data[name] !== undefined) {
+                            el.checked = data[name];
+                        }
+                    });
+                    
+                    // Update radio buttons for tool_error_strategy
+                    const radios = form.querySelectorAll('[name="tool_error_strategy"]');
+                    radios.forEach(el => {
+                        if (el.value === data.tool_error_strategy) {
+                            el.checked = true;
+                        }
+                    });
+                    
+                    // Show feedback
+                    const btn = document.querySelector('button[onclick="loadAgentLoopDefaults()"]');
+                    if (btn) {
+                        const origText = btn.innerText;
+                        btn.innerText = 'Loaded!';
+                        setTimeout(() => btn.innerText = origText, 1500);
+                    }
+                })
+                .catch(err => console.error('Error loading defaults:', err));
+        }
+    </script>
 </div>
