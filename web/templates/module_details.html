@@ -31,7 +31,6 @@
 
     {% if module.id == 'agent_loop' and module.enabled %}
     <div class="bg-slate-900 rounded-xl border border-slate-800 p-6 mt-6">
-        <h3 class="font-semibold text-lg mb-4">Agent Loop Settings</h3>
         <form hx-post="/modules/{{ module.id }}/config" 
               hx-swap="none"
               hx-on::after-request="const btn = this.querySelector('button[type=submit]'); const orig = btn.innerText; btn.innerText = 'Saved!'; btn.classList.remove('bg-blue-600', 'hover:bg-blue-500'); btn.classList.add('bg-emerald-600', 'hover:bg-emerald-500'); setTimeout(() => { btn.innerText = orig; btn.classList.add('bg-blue-600', 'hover:bg-blue-500'); btn.classList.remove('bg-emerald-600', 'hover:bg-emerald-500'); }, 2000);">
@@ -145,8 +144,7 @@
 
     {% if module.id == 'reflection' and module.enabled %}
     <div class="bg-slate-900 rounded-xl border border-slate-800 p-6 mt-6">
-        <h3 class="font-semibold text-lg mb-4">Reflection Settings</h3>
-        <form hx-post="/modules/{{ module.id }}/config" 
+        <form hx-post="/modules/{{ module.id }}/config"
               hx-swap="none"
               hx-on::after-request="const btn = this.querySelector('button[type=submit]'); const orig = btn.innerText; btn.innerText = 'Saved!'; btn.classList.remove('bg-blue-600', 'hover:bg-blue-500'); btn.classList.add('bg-emerald-600', 'hover:bg-emerald-500'); setTimeout(() => { btn.innerText = orig; btn.classList.add('bg-blue-600', 'hover:bg-blue-500'); btn.classList.remove('bg-emerald-600', 'hover:bg-emerald-500'); }, 2000);">
             
@@ -207,8 +205,7 @@
 
     {% if module.id == 'planner' and module.enabled %}
     <div class="bg-slate-900 rounded-xl border border-slate-800 p-6 mt-6">
-        <h3 class="font-semibold text-lg mb-4">Task Planner Settings</h3>
-        <form hx-post="/modules/{{ module.id }}/config" 
+        <form hx-post="/modules/{{ module.id }}/config"
               hx-swap="none"
               hx-on::after-request="const btn = this.querySelector('button[type=submit]'); const orig = btn.innerText; btn.innerText = 'Saved!'; btn.classList.remove('bg-blue-600', 'hover:bg-blue-500'); btn.classList.add('bg-emerald-600', 'hover:bg-emerald-500'); setTimeout(() => { btn.innerText = orig; btn.classList.add('bg-blue-600', 'hover:bg-blue-500'); btn.classList.remove('bg-emerald-600', 'hover:bg-emerald-500'); }, 2000);">
             
@@ -295,8 +292,7 @@
 
     {% if module.id == 'system_prompt' and module.enabled %}
     <div class="bg-slate-900 rounded-xl border border-slate-800 p-6 mt-6">
-        <h3 class="font-semibold text-lg mb-4">System Prompt Settings</h3>
-        <form hx-post="/modules/{{ module.id }}/config" 
+        <form hx-post="/modules/{{ module.id }}/config"
               hx-swap="none"
               hx-on::after-request="const btn = this.querySelector('button[type=submit]'); const orig = btn.innerText; btn.innerText = 'Saved!'; btn.classList.remove('bg-blue-600', 'hover:bg-blue-500'); btn.classList.add('bg-emerald-600', 'hover:bg-emerald-500'); setTimeout(() => { btn.innerText = orig; btn.classList.add('bg-blue-600', 'hover:bg-blue-500'); btn.classList.remove('bg-emerald-600', 'hover:bg-emerald-500'); }, 2000);">
             
@@ -339,8 +335,7 @@
 
     {% if module.id == 'skills' and module.enabled %}
     <div class="bg-slate-900 rounded-xl border border-slate-800 p-6 mt-6">
-        <h3 class="font-semibold text-lg mb-4">Skills Storage Settings</h3>
-        <form hx-post="/modules/{{ module.id }}/config" 
+        <form hx-post="/modules/{{ module.id }}/config"
               hx-swap="none"
               hx-on::after-request="const btn = this.querySelector('button[type=submit]'); const orig = btn.innerText; btn.innerText = 'Saved!'; btn.classList.remove('bg-blue-600', 'hover:bg-blue-500'); btn.classList.add('bg-emerald-600', 'hover:bg-emerald-500'); setTimeout(() => { btn.innerText = orig; btn.classList.add('bg-blue-600', 'hover:bg-blue-500'); btn.classList.remove('bg-emerald-600', 'hover:bg-emerald-500'); }, 2000);">
             
@@ -659,8 +654,7 @@
 
     {% if module.id == 'telegram' and module.enabled %}
     <div class="bg-slate-900 rounded-xl border border-slate-800 p-6 mt-6">
-        <h3 class="font-semibold text-lg mb-4">Telegram Bridge Settings</h3>
-        <form hx-post="/telegram/settings/save" 
+        <form hx-post="/telegram/settings/save"
               hx-swap="none"
               hx-on::after-request="const btn = this.querySelector('button[type=submit]'); const orig = btn.innerText; btn.innerText = 'Saved!'; btn.classList.remove('bg-blue-600', 'hover:bg-blue-500'); btn.classList.add('bg-emerald-600', 'hover:bg-emerald-500'); setTimeout(() => { btn.innerText = orig; btn.classList.add('bg-blue-600', 'hover:bg-blue-500'); btn.classList.remove('bg-emerald-600', 'hover:bg-emerald-500'); }, 2000);">
             
