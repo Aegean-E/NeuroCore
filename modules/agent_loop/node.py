@@ -2,9 +2,11 @@ import json
 import os
 import asyncio
 import logging
+import time
 from core.llm import LLMBridge
 from core.settings import settings
 from modules.tools.sandbox import ToolSandbox
+from core.session_manager import session_manager, get_session_manager
 
 
 logger = logging.getLogger(__name__)
@@ -26,6 +28,11 @@ class AgentLoopExecutor:
         )
         # Create sandbox instance for secure tool execution
         self._sandbox = ToolSandbox(timeout=30.0)
+        # Initialize session manager for tracing
+        try:
+            self._session_manager = get_session_manager()
+        except Exception:
+            self._session_manager = None
 
     def _estimate_tokens(self, text: str) -> int:
         """
@@ -422,6 +429,21 @@ class AgentLoopExecutor:
 
         config = config or {}
 
+        # --- Session initialization ---
+        # Load or create session for tracing
+        try:
+            sm = get_session_manager()
+            session_id = sm.load_or_create_session()
+            # Log agent start event
+            sm.log_agent_event("agent_start", {
+                "input_keys": list(input_data.keys()),
+                "config_keys": list(config.keys())
+            })
+        except Exception as e:
+            logger.warning(f"Failed to initialize session manager: {e}")
+            sm = None
+            session_id = None
+
         # --- Read configuration ---
         max_iterations = int(config.get("max_iterations", 10))
         max_tokens = int(config.get("max_tokens", 2048))
@@ -772,6 +794,11 @@ class RLMAgentLoopExecutor:
         )
         from modules.tools.sandbox import ToolSandbox
         self._sandbox = ToolSandbox(timeout=30.0)
+        # Initialize session manager for tracing
+        try:
+            self._session_manager = get_session_manager()
+        except Exception:
+            self._session_manager = None
 
     def _estimate_tokens(self, text: str) -> int:
         """Estimate token count: ~4 characters per token."""

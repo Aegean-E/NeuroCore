@@ -737,3 +737,163 @@ def get_dashboard_data() -> Dict[str, Any]:
         "timestamp": datetime.utcnow().isoformat() + "Z",
     }
 
+
+# =============================================================================
+# Optional File-Based Trace Sink (Session Integration)
+# =============================================================================
+
+def get_trace_file_path() -> str:
+    """Get the path to the execution trace file."""
+    return "data/execution_trace.jsonl"
+
+
+def export_trace_to_file(trace_data: Dict[str, Any], file_path: Optional[str] = None) -> bool:
+    """
+    Export trace data to JSON Lines file.
+    
+    Args:
+        trace_data: Dictionary containing trace information
+        file_path: Optional custom file path (defaults to execution_trace.jsonl)
+    
+    Returns:
+        True if export was successful, False otherwise
+    """
+    if file_path is None:
+        file_path = get_trace_file_path()
+    
+    try:
+        import os
+        # Ensure directory exists
+        directory = os.path.dirname(file_path)
+        if directory:
+            os.makedirs(directory, exist_ok=True)
+        
+        # Create trace event
+        event = {
+            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "event": "observability_export",
+            "trace_data": trace_data,
+        }
+        
+        # Append to file as JSON Line
+        with open(file_path, 'a') as f:
+            f.write(json.dumps(event, default=str) + '\n')
+        
+        return True
+    except Exception:
+        return False
+
+
+def get_session_trace_summary() -> Dict[str, Any]:
+    """
+    Get a summary of the current session's trace data.
+    
+    Returns:
+        Dict with session info and trace summary
+    """
+    try:
+        from core.session_manager import session_manager
+        
+        trace = session_manager.get_trace()
+        
+        # Count events by type
+        event_counts: Dict[str, int] = {}
+        for event in trace:
+            event_type = event.get("event", "unknown")
+            event_counts[event_type] = event_counts.get(event_type, 0) + 1
+        
+        return {
+            "session_id": session_manager.get_session_id(),
+            "total_events": len(trace),
+            "event_counts": event_counts,
+            "tick": session_manager.get_tick(),
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
+
+# Optional: Auto-export spans to trace file when using observability tracing
+def _maybe_export_span(span_data: Dict[str, Any]) -> None:
+    """
+    Optionally export span data to trace file.
+    This is a no-op unless explicitly enabled via settings.
+    """
+    # Check if file-based trace export is enabled
+    try:
+        from core.settings import settings
+        if settings.get("enable_trace_file_export", False):
+            import os
+            trace_file = get_trace_file_path()
+            
+            # Ensure directory exists
+            directory = os.path.dirname(trace_file)
+            if directory:
+                os.makedirs(directory, exist_ok=True)
+            
+            # Get session info if available
+            session_info = {}
+            try:
+                from core.session_manager import session_manager
+                session_info = {
+                    "session_id": session_manager.get_session_id(),
+                    "tick": session_manager.get_tick()
+                }
+            except Exception:
+                pass
+            
+            # Build trace event
+            event = {
+                "timestamp": datetime.utcnow().isoformat() + "Z",
+                "event": "observability_span",
+                "trace_id": span_data.get("trace_id"),
+                "span_id": span_data.get("span_id"),
+                "span_name": span_data.get("name"),
+                "duration_ms": span_data.get("duration_ms"),
+                "status": span_data.get("status"),
+                "session_info": session_info,
+                "attributes": span_data.get("attributes", {}),
+            }
+            
+            # Append to trace file
+            with open(trace_file, 'a') as f:
+                f.write(json.dumps(event, default=str) + '\n')
+    except Exception:
+        # Silently fail - this is optional functionality
+        pass
+
+
+# Global flag for enabling trace file export
+_trace_file_export_enabled = False
+
+
+def enable_trace_file_export(enabled: bool = True) -> None:
+    """
+    Enable or disable trace file export.
+    
+    Args:
+        enabled: Whether to enable exporting spans to trace file
+    """
+    global _trace_file_export_enabled
+    _trace_file_export_enabled = enabled
+    
+    # Also update settings if it exists
+    try:
+        from core.settings import settings
+        settings._data["enable_trace_file_export"] = enabled
+    except Exception:
+        pass
+
+
+def is_trace_file_export_enabled() -> bool:
+    """Check if trace file export is enabled."""
+    global _trace_file_export_enabled
+    if _trace_file_export_enabled:
+        return True
+    
+    # Also check settings
+    try:
+        from core.settings import settings
+        return settings.get("enable_trace_file_export", False)
+    except Exception:
+        return False
+
