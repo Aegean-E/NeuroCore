@@ -12,6 +12,38 @@
     </style>
 </head>
 <body class="bg-slate-900 text-slate-100 min-h-screen flex flex-col font-sans">
+    <script>
+    function copySummaryJson() {
+        // Get the summary data from the DOM
+        const summaryElement = document.querySelector('#debug-summary');
+        if (!summaryElement) return;
+        
+        // Extract the data from the rendered template
+        // We need to fetch it from the API endpoint instead
+        fetch('/debug/agent-summary')
+            .then(response => response.json())
+            .then(data => {
+                navigator.clipboard.writeText(JSON.stringify(data, null, 2))
+                    .then(() => {
+                        const btnText = document.getElementById('copy-btn-text');
+                        if (btnText) {
+                            btnText.textContent = 'Copied!';
+                            setTimeout(() => {
+                                btnText.textContent = 'Copy Summary JSON';
+                            }, 2000);
+                        }
+                    })
+                    .catch(err => {
+                        console.error('Failed to copy:', err);
+                        alert('Failed to copy to clipboard');
+                    });
+            })
+            .catch(err => {
+                console.error('Failed to fetch summary:', err);
+                alert('Failed to fetch summary data');
+            });
+    }
+    </script>
     
     {% include 'navbar.html' %}
 
