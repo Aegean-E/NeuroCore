@@ -58,10 +58,20 @@ class TelegramService:
         self.bridge = TelegramBridge(token, 0, log_fn=print)
         self.running = True
         
-        self.thread = threading.Thread(target=self.bridge.listen, args=(self.handle_message, self.check_running))
+        # Run the async listen method in a thread using the event loop
+        self.thread = threading.Thread(target=self._run_async_listen)
         self.thread.daemon = True
         self.thread.start()
         print("Telegram Bridge Service Started")
+
+    def _run_async_listen(self):
+        """Run the async listen method in a new event loop."""
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            loop.run_until_complete(self.bridge.listen(self.handle_message, self.check_running))
+        finally:
+            loop.close()
 
     def check_running(self):
         # Check if module is still enabled in file
@@ -101,14 +111,14 @@ class TelegramService:
                 "/help - Show this message\n\n"
                 "Just type to chat! Send images to use vision capabilities."
             )
-            self.bridge.send_message(help_text, chat_id)
+            await self.bridge.send_message(help_text, chat_id)
             return
 
         if command_text == "/new_session":
             session = session_manager.create_session(f"Telegram {chat_id}")
             self.session_map[str(chat_id)] = session["id"]
             self._save_session_map()
-            self.bridge.send_message("🆕 New session started.", chat_id)
+            await self.bridge.send_message("🆕 New session started.", chat_id)
             return
 
         if command_text == "/delete_session":
@@ -117,9 +127,9 @@ class TelegramService:
                 session_manager.delete_session(sess_id)
                 del self.session_map[str(chat_id)]
                 self._save_session_map()
-                self.bridge.send_message("🗑️ Session deleted.", chat_id)
+                await self.bridge.send_message("🗑️ Session deleted.", chat_id)
             else:
-                self.bridge.send_message("No active session to delete.", chat_id)
+                await self.bridge.send_message("No active session to delete.", chat_id)
             return
 
         # --- Normal Chat Flow ---
@@ -145,7 +155,7 @@ class TelegramService:
             
             file_id = photo_data.get("file_id")
             try:
-                file_info = self.bridge.get_file_info(file_id)
+                file_info = await self.bridge.get_file_info(file_id)
                 file_path_remote = file_info.get("file_path")
                 
                 if file_path_remote:
@@ -155,9 +165,8 @@ class TelegramService:
                     local_filename = f"{file_id}_{os.path.basename(file_path_remote)}"
                     local_path = os.path.join(temp_dir, local_filename)
                     
-                    # Run blocking download in a separate thread to avoid freezing the event loop
-                    loop = asyncio.get_running_loop()
-                    if await loop.run_in_executor(None, self.bridge.download_file, file_path_remote, local_path):
+                    # Download file asynchronously
+                    if await self.bridge.download_file(file_path_remote, local_path):
                         with open(local_path, "rb") as img_file:
                             b64_data = base64.b64encode(img_file.read()).decode('utf-8')
                         
@@ -183,14 +192,14 @@ class TelegramService:
                             "image_url": {"url": f"data:{mime_type};base64,{b64_data}"}
                         })
                     else:
-                        self.bridge.send_message("⚠️ Failed to download image.", chat_id)
+                        await self.bridge.send_message("⚠️ Failed to download image.", chat_id)
                         return
                 else:
-                    self.bridge.send_message("⚠️ Could not retrieve file info.", chat_id)
+                    await self.bridge.send_message("⚠️ Could not retrieve file info.", chat_id)
                     return
             except Exception as e:
                 print(f"Telegram image error: {e}")
-                self.bridge.send_message("⚠️ Error processing image.", chat_id)
+                await self.bridge.send_message("⚠️ Error processing image.", chat_id)
                 return
 
         if not user_content: return
@@ -201,7 +210,7 @@ class TelegramService:
         # 4. Run Active Flow
         active_flow_ids = settings.get("active_ai_flows", [])
         if not active_flow_ids:
-            self.bridge.send_message("⚠️ No active AI Flow configured on server.", chat_id)
+            await self.bridge.send_message("⚠️ No active AI Flow configured on server.", chat_id)
             return
 
         active_flow_id = active_flow_ids[0]
@@ -233,10 +242,11 @@ class TelegramService:
 
             # 5. Add Assistant Message & Reply
             session_manager.add_message(sess_id, "assistant", response_text)
-            self.bridge.send_message(response_text, chat_id)
+            await self.bridge.send_message(response_text, chat_id)
 
         except Exception as e:
             print(f"Flow execution error: {e}")
-            self.bridge.send_message(f"❌ Internal Error: {e}", chat_id)
+            await self.bridge.send_message(f"❌ Internal Error: {e}", chat_id)
 
 telegram_service = TelegramService()
+

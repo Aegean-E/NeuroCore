@@ -144,14 +144,25 @@ class DocumentProcessor:
             async def process_chunk(chunk):
                 async with sem:
                     emb = await batch_bridge.get_embedding(chunk['text'])
-                    chunk['embedding'] = emb if emb else []
+                    if emb:
+                        chunk['embedding'] = emb
+                    else:
+                        # Embedding call returned empty/None - mark as failed
+                        chunk['embedding'] = None
                     nonlocal completed
                     completed += 1
                     if progress_callback:
                         await progress_callback(completed, total)
 
-            # Use return_exceptions=True to ensure all tasks complete before client closes
-            await asyncio.gather(*(process_chunk(chunk) for chunk in chunks), return_exceptions=True)
+            # Use return_exceptions=True to handle individual failures without breaking the whole batch
+            results = await asyncio.gather(*(process_chunk(chunk) for chunk in chunks), return_exceptions=True)
+            
+            # Check for exceptions and log them
+            for chunk, result in zip(chunks, results):
+                if isinstance(result, Exception):
+                    self.log.warning(f'Embedding failed for chunk: {result}')
+                    chunk['embedding'] = None  # Mark as failed, skip FAISS indexing
+                    
         finally:
             # Always close the client after all tasks complete
             await client.aclose()

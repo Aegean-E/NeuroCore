@@ -68,7 +68,7 @@ async def test_clear(service):
     await service.log_thought("Thought 1")
     await service.log_thought("Thought 2")
     
-    service.clear()
+    await service.clear()
     
     thoughts = service.get_thoughts()
     assert len(thoughts) == 0

@@ -73,17 +73,22 @@ class ReasoningBookService:
                 t for t in self.thoughts 
                 if datetime.fromisoformat(t['timestamp']) > cutoff
             ]
-            
-            self._save()
+        
+        # Offload I/O outside the lock to avoid blocking the event loop
+        await asyncio.to_thread(self._save)
         
         return entry["thought_id"]
 
     def get_thoughts(self):
-        return self.thoughts
+        """Return a copy of thoughts to avoid internal state corruption."""
+        return list(self.thoughts)
 
-    def clear(self):
-        self.thoughts = []
-        self._save()
+    async def clear(self):
+        """Clear all thoughts. Thread-safe with lock."""
+        async with self._lock:
+            self.thoughts = []
+        # Offload I/O outside the lock to avoid blocking the event loop
+        await asyncio.to_thread(self._save)
 
     async def reload(self):
         """Reload thoughts from disk. Thread-safe."""
