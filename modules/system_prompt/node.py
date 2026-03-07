@@ -200,14 +200,23 @@ class SystemPromptExecutor:
 
     def _estimate_tokens(self, text: str) -> int:
         """
-        Rough token estimation with CJK support.
-        - English/ASCII: ~4 characters per token
-        - CJK (Chinese/Japanese/Korean): 1 token per character
+        Token estimation with CJK support and tiktoken fallback.
+        Uses tiktoken if available for more accurate estimation.
         """
         if not text:
             return 0
         
-        # Count CJK characters (Unicode ranges)
+        # Try to use tiktoken for more accurate estimation
+        try:
+            import tiktoken
+            enc = tiktoken.get_encoding("cl100k_base")
+            return len(enc.encode(text))
+        except ImportError:
+            pass
+        except Exception:
+            pass
+        
+        # Fall back to character-based estimation with CJK support
         # Chinese: 4E00-9FFF, Japanese Hiragana/Katakana: 3040-309F, 30A0-30FF
         # Korean: AC00-D7AF, Hangul
         cjk_count = sum(1 for char in text if (
