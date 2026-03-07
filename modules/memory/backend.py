@@ -787,17 +787,13 @@ REASON: Brief explanation (1-2 sentences)"""
                 
                 try:
                     import asyncio
-                    loop = asyncio.new_event_loop()
-                    asyncio.set_event_loop(loop)
-                    try:
-                        response = loop.run_until_complete(client.chat_completion(
-                            messages=[{"role": "user", "content": prompt}],
-                            temperature=0,
-                            max_tokens=100
-                        ))
-                        result_text = response.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
-                    finally:
-                        loop.close()
+                    # Use asyncio.run() instead of creating a new event loop
+                    response = asyncio.run(client.chat_completion(
+                        messages=[{"role": "user", "content": prompt}],
+                        temperature=0,
+                        max_tokens=100
+                    ))
+                    result_text = response.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
                     
                     if result_text.startswith("CONFLICT: YES"):
                         reason_start = result_text.find("REASON:") + 7
@@ -976,6 +972,13 @@ REASON: Brief explanation (1-2 sentences)"""
             "deadline": row[7],
             "completed_at": row[8]
         }
+
+    def shutdown(self):
+        """Shutdown the ThreadPoolExecutor to prevent resource leak."""
+        if hasattr(self, 'executor') and self.executor is not None:
+            self.executor.shutdown(wait=True)
+            self.executor = None
+            logger.info("MemoryStore ThreadPoolExecutor shut down successfully.")
 
 # Global Instance
 memory_store = MemoryStore()

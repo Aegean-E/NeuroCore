@@ -236,9 +236,8 @@ class AgentLoopExecutor:
             except Exception as e:
                 last_error = str(e)
 
-        return {
-            "error": f"LLM failed after {max_retries + 1} attempt(s): {last_error}"
-        }
+        # Return None instead of error dict so caller can handle gracefully
+        return None
 
     async def _run_agent_loop(
         self,
@@ -327,7 +326,14 @@ class AgentLoopExecutor:
                 tool_args = tool_call.get("function", {}).get("arguments", "{}")
                 
                 # Tool call deduplication: detect loops
-                call_signature = f"{tool_name}:{tool_args}"
+                # Normalize tool_args for deduplication by sorting keys
+                # This ensures different JSON representations of same args are treated as duplicates
+                try:
+                    args_dict = json.loads(tool_args)
+                    normalized_args = json.dumps(args_dict, sort_keys=True)
+                except (json.JSONDecodeError, TypeError):
+                    normalized_args = tool_args
+                call_signature = f"{tool_name}:{normalized_args}"
                 if call_signature in seen_calls:
                     # Model is spinning - same tool call detected
                     iteration_trace["errors"].append(
@@ -1123,9 +1129,8 @@ Call set_final() when complete."""
             except Exception as e:
                 last_error = str(e)
 
-        return {
-            "error": f"LLM failed after {max_retries + 1} attempt(s): {last_error}"
-        }
+        # Return None instead of error dict so caller can handle gracefully
+        return None
 
     async def _run_rlm_loop(
         self,

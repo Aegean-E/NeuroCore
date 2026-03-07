@@ -733,8 +733,8 @@ class TestLLMWithRetryDirect:
         assert executor.llm.chat_completion.call_count == 1
 
     @pytest.mark.asyncio
-    async def test_returns_error_dict_after_all_retries(self):
-        """Should return an error dict when all retries are exhausted."""
+    async def test_returns_none_after_all_retries(self):
+        """Should return None when all retries are exhausted."""
         executor = make_executor()
         executor.llm.chat_completion = AsyncMock(return_value={"error": "Always fails"})
 
@@ -749,8 +749,7 @@ class TestLLMWithRetryDirect:
                 retry_delay=0.1,
             )
 
-        assert "error" in result
-        assert "attempt(s)" in result["error"]
+        assert result is None
         # 1 initial + 2 retries = 3 total calls
         assert executor.llm.chat_completion.call_count == 3
 
