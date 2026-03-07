@@ -80,18 +80,23 @@ class AgentLoopExecutor:
         available_tokens = max_context_tokens - system_tokens
         
         result = []
-        if system_msg:
-            result.append(system_msg)
         
         # Add from end until we hit limit
         tokens_used = 0
         for msg in reversed(non_system_messages):
             msg_tokens = self._estimate_tokens(msg.get("content", ""))
             if tokens_used + msg_tokens <= available_tokens:
-                result.insert(0 if system_msg else len(result), msg)
+                result.append(msg)  # Append to end (chronologically later)
                 tokens_used += msg_tokens
             else:
                 break
+        
+        # Reverse to restore chronological order (oldest first)
+        result.reverse()
+        
+        # Add system message at the beginning if present
+        if system_msg:
+            result.insert(0, system_msg)
         
         return result
 

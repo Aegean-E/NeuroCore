@@ -70,8 +70,60 @@ class SkillService:
         )
     
     def import_from_url(self, url: str) -> Dict[str, Any]:
-        """Import a skill from a URL."""
+        """Import a skill from a URL with SSRF protection."""
+        import socket
+        import re
+        from urllib.parse import urlparse
+        
+        # SSRF protection: Validate URL before making request
+        # Blocked IP patterns (private/internal networks)
+        blocked_ip_patterns = [
+            r'^127\.',  # Loopback
+            r'^10\.',   # Private Class A
+            r'^172\.(1[6-9]|2[0-9]|3[0-1])\.',  # Private Class B
+            r'^192\.168\.',  # Private Class C
+            r'^169\.254\.',  # Link-local
+            r'^0\.',    # Current network
+            r'^::1$',   # IPv6 loopback
+            r'^fc00:',  # IPv6 private
+            r'^fe80:',  # IPv6 link-local
+            r'^localhost$',
+            r'^::ffff:127\.',  # IPv4-mapped IPv6 loopback
+            r'^::ffff:10\.',   # IPv4-mapped IPv6 private
+            r'^::ffff:192\.168\.',  # IPv4-mapped IPv6 private
+        ]
+        
         try:
+            parsed = urlparse(url)
+            
+            # Only allow http and https schemes
+            if parsed.scheme not in ('http', 'https'):
+                raise ValueError(f"Invalid URL scheme '{parsed.scheme}'. Only http and https are allowed.")
+            
+            # Get the hostname
+            hostname = parsed.hostname
+            if not hostname:
+                raise ValueError("Invalid URL: no hostname specified")
+            
+            # Resolve hostname to IP and check against blocked patterns
+            try:
+                ip = socket.gethostbyname(hostname)
+            except socket.gaierror:
+                raise ValueError(f"Could not resolve hostname '{hostname}'")
+            
+            # Check if resolved IP matches blocked patterns
+            blocked_patterns_compiled = [re.compile(p) for p in blocked_ip_patterns]
+            for pattern in blocked_patterns_compiled:
+                if pattern.match(ip):
+                    raise ValueError(f"URL resolves to blocked IP address '{ip}' - internal/network addresses are not allowed")
+            
+            # Additional check: block common internal hostnames
+            hostname_lower = hostname.lower()
+            blocked_hostnames = ['localhost', 'localhost.localdomain', 'metadata', 'metadata.google.internal']
+            if hostname_lower in blocked_hostnames:
+                raise ValueError(f"Hostname '{hostname}' is not allowed")
+            
+            # Make the HTTP request
             response = httpx.get(url, timeout=30.0)
             response.raise_for_status()
             

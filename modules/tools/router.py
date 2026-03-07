@@ -313,16 +313,35 @@ async def save_tool_config(request: Request, name: str):
             smtp_email = form_data.get("smtp_email", "")
             smtp_password = form_data.get("smtp_password", "")
             
+            # Update process environment
             os.environ["SMTP_SERVER"] = smtp_server
             os.environ["SMTP_PORT"] = smtp_port
             os.environ["SMTP_EMAIL"] = smtp_email
             os.environ["SMTP_PASSWORD"] = smtp_password
             
-            with open(".env.local", "a") as f:
-                f.write(f"\nSMTP_SERVER={smtp_server}\n")
-                f.write(f"SMTP_PORT={smtp_port}\n")
-                f.write(f"SMTP_EMAIL={smtp_email}\n")
-                f.write(f"SMTP_PASSWORD={smtp_password}\n")
+            # Atomic rewrite of .env.local to prevent duplicate entries
+            env_path = ".env.local"
+            env_vars = {}
+            
+            # Read existing environment variables
+            if os.path.exists(env_path):
+                with open(env_path, "r") as f:
+                    for line in f:
+                        line = line.strip()
+                        if line and '=' in line:
+                            key, val = line.split('=', 1)
+                            env_vars[key] = val
+            
+            # Update with new values
+            env_vars['SMTP_SERVER'] = smtp_server
+            env_vars['SMTP_PORT'] = smtp_port
+            env_vars['SMTP_EMAIL'] = smtp_email
+            env_vars['SMTP_PASSWORD'] = smtp_password
+            
+            # Write all environment variables atomically
+            with open(env_path, "w") as f:
+                for key, val in env_vars.items():
+                    f.write(f"{key}={val}\n")
             
             return Response(content="<div class='text-center py-8 text-emerald-400 font-semibold'>Configuration saved successfully!</div>", status_code=200)
         
@@ -404,3 +423,4 @@ async def import_tools(request: Request, file: UploadFile = File(...)):
         return await tools_list(request)
     except Exception as e:
         return Response(status_code=400, headers={"HX-Trigger": json.dumps({"showMessage": {"level": "error", "message": f"Import failed: {str(e)}"}})})
+

@@ -150,7 +150,13 @@ async def debug_fire_flow():
         if flow:
             tasks = _fire_repeater_nodes(app, active_flow_id, flow, is_auto_start=False)
             if tasks:
-                return {"status": "fired", "node": tasks[0]}
+                # Return serializable data instead of asyncio.Task object
+                task = tasks[0]
+                return {
+                    "status": "fired",
+                    "node_id": task.get_name() if hasattr(task, 'get_name') else f"task_{id(task)}",
+                    "flow_id": active_flow_id
+                }
     return {"status": "failed"}
 
 # --- Server Startup ---

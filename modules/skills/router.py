@@ -2,6 +2,7 @@
 Router for Skills module - API endpoints for skill management.
 """
 
+import json
 from fastapi import APIRouter, Request, HTTPException, UploadFile, File
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
 from fastapi.templating import Jinja2Templates
@@ -164,8 +165,9 @@ async def export_skill(skill_id: str, format: str = "json"):
     skill = export_data["skill"]
     
     if format == "json":
+        # Parse the JSON string to return a proper JSON object (not double-encoded)
         return JSONResponse(
-            content=export_data["export_json"],
+            content=json.loads(export_data["export_json"]),
             media_type="application/json",
             headers={"Content-Disposition": f'attachment; filename="{skill_id}.json"'}
         )

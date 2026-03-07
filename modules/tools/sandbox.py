@@ -103,11 +103,20 @@ class RestrictedImport:
         if base_module in self.blocked:
             raise SecurityError(f"Import of module '{name}' is not allowed in sandboxed environment")
         
+        # Check if full name or any prefix is in allowed list
+        # This supports both 'urllib.parse' and 'urllib' when 'urllib.parse' is in SAFE_MODULES
+        parts = name.split('.')
+        for i in range(len(parts)):
+            prefix = '.'.join(parts[:i+1])
+            if prefix in self.allowed:
+                # Use the stored real __import__ function instead of __builtins__ subscript
+                return _real_import(name, globals, locals, fromlist, level)
+        
+        # If no prefix matches, check if base module is in allowed
         if base_module not in self.allowed:
             raise SecurityError(f"Import of module '{name}' is not permitted. Allowed modules: {sorted(self.allowed)}")
         
         # Use the stored real __import__ function instead of __builtins__ subscript
-        # This avoids issues where __builtins__ might be a module instead of a dict
         return _real_import(name, globals, locals, fromlist, level)
 
 

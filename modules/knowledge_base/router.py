@@ -71,41 +71,46 @@ def validate_upload(file: UploadFile) -> None:
 # --- Progress Tracking ---
 upload_progress = {}
 UPLOAD_PROGRESS_TTL = 3600  # 1 hour TTL for stale entries
+upload_progress_lock = threading.Lock()  # Thread safety for concurrent access
 
 def _cleanup_stale_uploads():
     """Remove stale entries from upload_progress that exceed TTL."""
     import time
     current_time = time.time()
     stale_keys = []
-    for tracking_id, info in upload_progress.items():
-        # Check if entry is older than TTL (only for pending/processing entries)
-        if info.get("status") in ("pending", "processing"):
-            # Check created_at timestamp if available
-            created_at = info.get("created_at", current_time)
-            if current_time - created_at > UPLOAD_PROGRESS_TTL:
-                stale_keys.append(tracking_id)
-    for key in stale_keys:
-        del upload_progress[key]
+    with upload_progress_lock:
+        for tracking_id, info in upload_progress.items():
+            # Check if entry is older than TTL (only for pending/processing entries)
+            if info.get("status") in ("pending", "processing"):
+                # Check created_at timestamp if available
+                created_at = info.get("created_at", current_time)
+                if current_time - created_at > UPLOAD_PROGRESS_TTL:
+                    stale_keys.append(tracking_id)
+        for key in stale_keys:
+            del upload_progress[key]
     return len(stale_keys)
 
 async def process_and_save_document(tracking_id: str, file_path: str, original_filename: str, stored_filename: str, llm: LLMBridge):
     """Background task to process document and update progress."""
     try:
-        upload_progress[tracking_id]["status"] = "processing"
+        with upload_progress_lock:
+            upload_progress[tracking_id]["status"] = "processing"
         
         async def progress_callback(current, total):
-            if upload_progress.get(tracking_id, {}).get("status") == "aborted":
-                raise Exception("ABORTED")
+            with upload_progress_lock:
+                if upload_progress.get(tracking_id, {}).get("status") == "aborted":
+                    raise Exception("ABORTED")
 
-            if total > 0:
-                percent = int((current / total) * 100)
-                upload_progress[tracking_id]["progress"] = percent
+                if total > 0:
+                    percent = int((current / total) * 100)
+                    upload_progress[tracking_id]["progress"] = percent
 
         processor = DocumentProcessor(llm)
         chunks, page_count, file_type = await processor.process_document(file_path, progress_callback=progress_callback)
         
-        if upload_progress.get(tracking_id, {}).get("status") == "aborted":
-            raise Exception("ABORTED")
+        with upload_progress_lock:
+            if upload_progress.get(tracking_id, {}).get("status") == "aborted":
+                raise Exception("ABORTED")
 
         # Save chunks to disk
         # (We need to re-fetch doc ID logic or just use hash/filename, but here we use a temp ID logic or just skip file saving if not strictly needed for DB)
@@ -125,16 +130,18 @@ async def process_and_save_document(tracking_id: str, file_path: str, original_f
             # Use the original filename for storage, not the UUID-prefixed one
             document_store.add_document(file_hash, original_filename, file_type, file_size, page_count, chunks)
 
-        upload_progress[tracking_id]["status"] = "done"
-        upload_progress[tracking_id]["progress"] = 100
+        with upload_progress_lock:
+            upload_progress[tracking_id]["status"] = "done"
+            upload_progress[tracking_id]["progress"] = 100
 
     except Exception as e:
-        if str(e) == "ABORTED" or upload_progress.get(tracking_id, {}).get("status") == "aborted":
-            upload_progress[tracking_id]["status"] = "aborted"
-        else:
-            print(f"Error processing document {original_filename}: {e}")
-            upload_progress[tracking_id]["status"] = "error"
-            upload_progress[tracking_id]["message"] = str(e)
+        with upload_progress_lock:
+            if str(e) == "ABORTED" or upload_progress.get(tracking_id, {}).get("status") == "aborted":
+                upload_progress[tracking_id]["status"] = "aborted"
+            else:
+                print(f"Error processing document {original_filename}: {e}")
+                upload_progress[tracking_id]["status"] = "error"
+                upload_progress[tracking_id]["message"] = str(e)
             
         # Cleanup file
         if os.path.exists(file_path):
@@ -211,13 +218,14 @@ async def upload_doc(request: Request, background_tasks: BackgroundTasks, files:
             continue
 
         # Initialize progress with created_at timestamp for TTL tracking
-        upload_progress[tracking_id] = {
-            "filename": file.filename,
-            "stored_filename": safe_filename,
-            "progress": 0,
-            "status": "pending",
-            "created_at": import_time.time()
-        }
+        with upload_progress_lock:
+            upload_progress[tracking_id] = {
+                "filename": file.filename,
+                "stored_filename": safe_filename,
+                "progress": 0,
+                "status": "pending",
+                "created_at": import_time.time()
+            }
         
         # Start background processing - pass both original filename and stored filename
         background_tasks.add_task(process_and_save_document, tracking_id, file_path, file.filename, safe_filename, llm)
@@ -261,29 +269,31 @@ async def upload_doc(request: Request, background_tasks: BackgroundTasks, files:
 
 @router.get("/upload/progress/{tracking_id}", response_class=HTMLResponse)
 async def get_upload_progress(request: Request, tracking_id: str):
-    info = upload_progress.get(tracking_id)
-    if not info:
-        return Response(status_code=404)
-    
-    if info["status"] == "done":
-        del upload_progress[tracking_id]
-        return Response(content="", headers={"HX-Trigger": json.dumps({"docsChanged": None, "showMessage": {"level": "success", "message": f"Processed {info['filename']}"}})})
-    
-    if info["status"] == "aborted":
-        del upload_progress[tracking_id]
-        return Response(content="", headers={"HX-Trigger": json.dumps({"showMessage": {"level": "info", "message": "Upload aborted."}})})
+    with upload_progress_lock:
+        info = upload_progress.get(tracking_id)
+        if not info:
+            return Response(status_code=404)
+        
+        if info["status"] == "done":
+            del upload_progress[tracking_id]
+            return Response(content="", headers={"HX-Trigger": json.dumps({"docsChanged": None, "showMessage": {"level": "success", "message": f"Processed {info['filename']}"}})})
+        
+        if info["status"] == "aborted":
+            del upload_progress[tracking_id]
+            return Response(content="", headers={"HX-Trigger": json.dumps({"showMessage": {"level": "info", "message": "Upload aborted."}})})
 
-    if info["status"] == "error":
-        msg = info.get("message", "Unknown error")
-        del upload_progress[tracking_id]
-        return Response(content="", headers={"HX-Trigger": json.dumps({"showMessage": {"level": "error", "message": f"Failed: {msg}"}})})
+        if info["status"] == "error":
+            msg = info.get("message", "Unknown error")
+            del upload_progress[tracking_id]
+            return Response(content="", headers={"HX-Trigger": json.dumps({"showMessage": {"level": "error", "message": f"Failed: {msg}"}})})
 
-    return templates.TemplateResponse(request, "knowledge_base_progress_item.html", {"tracking_id": tracking_id, "filename": info["filename"], "progress": info["progress"]})
+        return templates.TemplateResponse(request, "knowledge_base_progress_item.html", {"tracking_id": tracking_id, "filename": info["filename"], "progress": info["progress"]})
 
 @router.post("/upload/abort/{tracking_id}")
 async def abort_upload(request: Request, tracking_id: str):
-    if tracking_id in upload_progress:
-        upload_progress[tracking_id]["status"] = "aborted"
+    with upload_progress_lock:
+        if tracking_id in upload_progress:
+            upload_progress[tracking_id]["status"] = "aborted"
     return Response(status_code=200)
 
 @router.delete("/delete/{doc_id}", response_class=HTMLResponse)

@@ -67,7 +67,9 @@ class EventManager:
             os.replace(tmp_path, self.storage_file)  # Atomic on POSIX, works on Windows
 
     def add_event(self, title, start_time):
+        created_event = None
         def _add(events):
+            nonlocal created_event
             event = {
                 "id": str(uuid.uuid4()),
                 "title": title,
@@ -76,14 +78,10 @@ class EventManager:
                 "notified": False
             }
             events.append(event)
+            created_event = event  # Store reference to the newly created event
             return events
         self._with_lock(_add)
-        # Return the added event
-        events = self._load_events()
-        for e in events:
-            if e.get("title") == title and e.get("start_time") == start_time:
-                return e
-        return None
+        return created_event  # Return the newly created event directly
 
     def get_events_by_date(self, date_str):
         events = self._load_events()

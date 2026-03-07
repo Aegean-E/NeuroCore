@@ -731,9 +731,10 @@ async def import_config(request: Request, file: UploadFile = File(...), settings
         return Response(status_code=200, headers={"HX-Trigger": json.dumps({"settingsChanged": None, "showMessage": {"level": "success", "message": "Configuration imported successfully"}})})
     except json.JSONDecodeError:
         return Response(status_code=400, headers={"HX-Trigger": json.dumps({"showMessage": {"level": "error", "message": "Invalid JSON file"}})})
-    except (OSError, PermissionError, TypeError, KeyError) as e:
+    except (OSError, PermissionError, TypeError, KeyError, ValueError) as e:
         # OSError/PermissionError: File system issues during import
         # TypeError/KeyError: Invalid settings structure
+        # ValueError: Invalid settings values (from _validate_settings)
         return Response(status_code=500, headers={"HX-Trigger": json.dumps({"showMessage": {"level": "error", "message": f"Import failed: {e}"}})})
 
 
