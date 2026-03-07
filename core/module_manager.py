@@ -16,7 +16,8 @@ class ModuleManager:
     def __init__(self, app: FastAPI, modules_dir=MODULES_DIR):
         self.modules_dir = modules_dir
         self.app = app
-        self.lock = threading.Lock()
+        # Use RLock for reentrant locking to allow nested lock acquisition
+        self.lock = threading.RLock()
         self.modules = self._discover_modules()
         # Runtime-only tracking for load errors (not persisted)
         self._load_errors = {}
@@ -61,7 +62,12 @@ class ModuleManager:
             if any(isinstance(r, Mount) and r.path == f"/{module_id}" for r in self.app.router.routes):
                 return True
 
-            # FIX: Properly reload all submodules by removing them from sys.modules first
+            # Note: sys.modules modification under lock can theoretically interact with 
+            # Python's import lock in edge cases. However, this is a hot-reload scenario
+            # and the trade-off of holding the lock during sys.modules cleanup is 
+            # necessary to prevent race conditions when multiple threads try to 
+            # load/reload the same module simultaneously.
+            # Properly reload all submodules by removing them from sys.modules first
             # This ensures hot-reload actually picks up changes in node.py, router.py, service.py, etc.
             modules_to_remove = [
                 key for key in list(sys.modules.keys())
@@ -154,11 +160,12 @@ class ModuleManager:
         import time
         start_time = time.time()
         
+        # Build list of changes under lock, then release lock before file I/O
         with self.lock:
             # Create a map for quick lookups
             id_to_meta = {m['id']: m for m in self.modules.values()}
             
-            # FIX: Build diff first - only write to modules whose order actually changed
+            # Build diff first - only track modules whose order actually changed
             modules_to_write = []
             
             for index, module_id in enumerate(module_ids):
@@ -169,14 +176,18 @@ class ModuleManager:
                         id_to_meta[module_id]['order'] = index
                         modules_to_write.append(module_id)
             
-            # Write only the modules whose order changed
+            # Update in-memory modules
             for module_id in modules_to_write:
-                meta_path = os.path.join(self.modules_dir, module_id, "module.json")
-                if os.path.exists(meta_path):
-                    # Don't include load_error in saved metadata
-                    meta_to_save = {k: v for k, v in id_to_meta[module_id].items() if k != 'load_error'}
-                    with open(meta_path, "w") as f:
-                        json.dump(meta_to_save, f, indent=4)
+                self.modules[module_id]['order'] = id_to_meta[module_id].get('order')
+        
+        # File I/O outside lock to avoid blocking other operations
+        for module_id in modules_to_write:
+            meta_path = os.path.join(self.modules_dir, module_id, "module.json")
+            if os.path.exists(meta_path):
+                # Don't include load_error in saved metadata
+                meta_to_save = {k: v for k, v in id_to_meta[module_id].items() if k != 'load_error'}
+                with open(meta_path, "w") as f:
+                    json.dump(meta_to_save, f, indent=4)
         
         # Log warning if operation took too long (potential lock contention)
         elapsed = time.time() - start_time

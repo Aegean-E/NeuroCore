@@ -19,8 +19,8 @@ MAX_BACKUP_COUNT = 5  # Maximum number of default flow backups to keep
 
 class FlowManager:
     def __init__(self, storage_file=FLOWS_FILE):
-        # Initialize lock FIRST before any method calls
-        self.lock = threading.Lock()
+        # Initialize lock FIRST before any method calls (RLock for reentrant locking)
+        self.lock = threading.RLock()
         self.storage_file = storage_file
         self.flows = self._load_flows()
 
@@ -31,7 +31,7 @@ class FlowManager:
             default_flows = self._create_default_flows()
             self._ensure_default_active()
             # Save without holding lock - file doesn't exist yet so no race
-            self._save_flows_to_disk_unsafe(default_flows)
+            self._save_flows_to_disk_no_lock_required(default_flows)
             return default_flows
         
         with open(self.storage_file, "r") as f:
@@ -41,7 +41,7 @@ class FlowManager:
                     default_flows = self._create_default_flows()
                     self._ensure_default_active()
                     # Save without holding lock - file is empty so no race
-                    self._save_flows_to_disk_unsafe(default_flows)
+                    self._save_flows_to_disk_no_lock_required(default_flows)
                     return default_flows
                 # Validate loaded flows - if invalid, reset to defaults
                 validation_result = self._validate_flows(flows)
@@ -50,14 +50,14 @@ class FlowManager:
                     default_flows = self._create_default_flows()
                     self._ensure_default_active()
                     # Save without holding lock - we're replacing invalid data
-                    self._save_flows_to_disk_unsafe(default_flows)
+                    self._save_flows_to_disk_no_lock_required(default_flows)
                     return default_flows
                 return flows
             except json.JSONDecodeError:
                 default_flows = self._create_default_flows()
                 self._ensure_default_active()
                 # Save without holding lock - file is corrupt so no race
-                self._save_flows_to_disk_unsafe(default_flows)
+                self._save_flows_to_disk_no_lock_required(default_flows)
                 return default_flows
 
     def _validate_flows(self, flows: dict) -> dict:
@@ -67,8 +67,9 @@ class FlowManager:
         if not isinstance(flows, dict):
             return {"valid": False, "errors": ["flows_data must be a dictionary"]}
         
+        # Empty dict is valid - represents "no flows" state
         if not flows:
-            return {"valid": False, "errors": ["flows_data cannot be empty"]}
+            return {"valid": True, "errors": []}
         
         for flow_id, flow in flows.items():
             # Check required keys
@@ -184,9 +185,16 @@ class FlowManager:
         if not settings.get("active_ai_flows"):
             settings.save_settings({"active_ai_flows": []})
 
-    def _save_flows_to_disk_unsafe(self, flows):
-        """Internal method to save flows to disk without acquiring lock.
-        Caller must hold self.lock when calling this method.
+    def _save_flows_to_disk_no_lock_required(self, flows):
+        """Internal method to save flows to disk WITHOUT acquiring lock.
+        
+        This method can be called without holding self.lock. It is safe to call
+        when: (a) the file doesn't exist yet (initialization), (b) the file is
+        empty/corrupt (resetting to defaults), or (c) from _load_flows() during
+        initialization before other threads can access the manager.
+        
+        Args:
+            flows: The flows dictionary to save to disk.
         """
         with open(self.storage_file, "w") as f:
             json.dump(flows, f, indent=4)

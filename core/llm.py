@@ -1,6 +1,7 @@
 import httpx
 import logging
 import asyncio
+import json
 
 from core.settings import settings
 
@@ -15,9 +16,10 @@ async def get_shared_client(timeout: float = 60.0) -> httpx.AsyncClient:
     """Get or create a shared AsyncClient for connection pooling."""
     global _shared_client
     
+    # In asyncio, the outer check is unnecessary because the event loop is single-threaded.
+    # The lock ensures atomic creation of the client.
     if _shared_client is None:
         async with _client_lock:
-            # Double-check after acquiring lock to prevent race condition
             if _shared_client is None:
                 _shared_client = httpx.AsyncClient(
                     timeout=httpx.Timeout(timeout),
@@ -86,9 +88,85 @@ class LLMBridge:
             response = await client_to_use.post(url, json=payload, headers=headers, timeout=self.timeout)
             response.raise_for_status()
             return response.json()
+        except httpx.TimeoutException as e:
+            logger.warning(f"LLM timeout: {e}")
+            return {"error": "timeout", "detail": str(e)}
+        except httpx.HTTPStatusError as e:
+            logger.error(f"LLM HTTP error {e.response.status_code}: {e}")
+            return {"error": "http_error", "status": e.response.status_code, "detail": str(e)}
         except Exception as e:
-            logger.error(f"Chat completion error: {e}")
-            return {"error": str(e)}
+            logger.error(f"LLM unexpected error: {e}")
+            return {"error": "unknown", "detail": str(e)}
+
+    async def chat_completion_stream(self, messages, model: str = None, temperature: float = None, max_tokens: int = None, tools: list = None, tool_choice: str = None, response_format: dict = None):
+        """Sends a streaming chat completion request to the LLM API.
+        
+        Yields each token/chunk as it arrives (SSE format).
+        
+        Args:
+            messages: List of message dictionaries
+            model: Model name (fallback to settings.default_model)
+            temperature: Sampling temperature
+            max_tokens: Maximum tokens to generate
+            tools: List of tool definitions
+            tool_choice: Tool choice specification
+            response_format: Response format (e.g., {"type": "json_object"})
+            
+        Yields:
+            dict: Each chunk containing delta content and other streaming data
+        """
+        url = self._get_url("/chat/completions")
+        
+        # Use settings as a fallback for model and temperature
+        final_model = model or settings.get("default_model")
+        final_temperature = temperature if temperature is not None else settings.get("temperature", 0.7)
+        final_max_tokens = max_tokens if max_tokens is not None else settings.get("max_tokens", 2048)
+
+        headers = {}
+        if self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
+
+        payload = {
+            "model": final_model,
+            "messages": messages,
+            "temperature": final_temperature,
+            "max_tokens": final_max_tokens,
+            "stream": True  # Enable streaming
+        }
+
+        if tools:
+            payload["tools"] = tools
+        if tool_choice:
+            payload["tool_choice"] = tool_choice
+        if response_format:
+            payload["response_format"] = response_format
+        
+        try:
+            # Use injected client if provided, otherwise use shared client
+            client_to_use = self.client if self.client else await get_shared_client(self.timeout)
+            
+            async with client_to_use.stream("POST", url, json=payload, headers=headers, timeout=self.timeout) as response:
+                response.raise_for_status()
+                async for line in response.aiter_lines():
+                    if line.startswith("data: "):
+                        data = line[6:]  # Remove "data: " prefix
+                        if data == "[DONE]":
+                            break
+                        try:
+                            import json
+                            chunk = json.loads(data)
+                            yield chunk
+                        except json.JSONDecodeError:
+                            logger.warning(f"Failed to parse streaming chunk: {data}")
+        except httpx.TimeoutException as e:
+            logger.warning(f"LLM streaming timeout: {e}")
+            yield {"error": "timeout", "detail": str(e)}
+        except httpx.HTTPStatusError as e:
+            logger.error(f"LLM streaming HTTP error {e.response.status_code}: {e}")
+            yield {"error": "http_error", "status": e.response.status_code, "detail": str(e)}
+        except Exception as e:
+            logger.error(f"LLM streaming unexpected error: {e}")
+            yield {"error": "unknown", "detail": str(e)}
 
     async def get_models(self):
         """Fetches available models from the LLM API."""
