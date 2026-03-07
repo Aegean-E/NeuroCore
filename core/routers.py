@@ -90,7 +90,7 @@ async def get_dashboard_stats(request: Request):
         except (sqlite3.Error, OSError) as e:
             # sqlite3.Error: Database connection or query failed
             # OSError: File system issues (permissions, disk full, etc.)
-            print(f"[Dashboard Stats] Warning: Could not read memory count: {e}")
+            logger.warning(f"[Dashboard Stats] Could not read memory count: {e}")
 
     
     # Chat sessions count
@@ -105,7 +105,7 @@ async def get_dashboard_stats(request: Request):
             # JSONDecodeError: Corrupted JSON file
             # OSError: File read permissions or I/O issues
             # KeyError: Unexpected structure in sessions data
-            print(f"[Dashboard Stats] Warning: Could not read sessions count: {e}")
+            logger.warning(f"[Dashboard Stats] Could not read sessions count: {e}")
 
     
     # Knowledge base docs count
@@ -121,7 +121,7 @@ async def get_dashboard_stats(request: Request):
         except (sqlite3.Error, OSError) as e:
             # sqlite3.Error: Database connection or query failed
             # OSError: File system issues
-            print(f"[Dashboard Stats] Warning: Could not read knowledge base count: {e}")
+            logger.warning(f"[Dashboard Stats] Warning: Could not read knowledge base count: {e}")
 
     
     # Tools count
@@ -238,7 +238,7 @@ async def get_recent_sessions(request: Request):
         # JSONDecodeError: Corrupted sessions file
         # OSError: File system issues
         # KeyError/ValueError: Data structure issues
-        print(f"[Recent Sessions] Warning: Could not load recent sessions: {e}")
+        logger.warning(f"[Recent Sessions] Warning: Could not load recent sessions: {e}")
         return f'<p class="text-slate-500 text-sm italic">Error loading sessions</p>'
 
 
@@ -587,7 +587,7 @@ async def set_active_flow(request: Request, flow_id: str, action: str = Form("to
             from fastapi import BackgroundTasks
             
             node = start_nodes[0]
-            print(f"[System] Auto-starting flow '{flow.get('name')}' from {node['nodeTypeId']} '{node['id']}'.")
+            logger.info(f"[System] Auto-starting flow '{flow.get('name')}' from {node['nodeTypeId']} '{node['id']}'.")
             
             async def run_flow():
                 runner = FlowRunner(flow_id)
@@ -620,7 +620,7 @@ async def stop_active_flow(request: Request, settings_man: SettingsManager = Dep
         if tasks_to_cancel:
             await asyncio.gather(*tasks_to_cancel, return_exceptions=True)
         
-        print(f"[System] Cancelled {stopped_count} background tasks")
+        logger.info(f"[System] Cancelled {stopped_count} background tasks")
     
     settings_man.save_settings({"active_ai_flows": []})
     return templates.TemplateResponse(request, "ai_flow_list.html", {
@@ -817,7 +817,15 @@ async def save_settings_route(request: Request, settings_man: SettingsManager = 
     if "save_ui_show_footer" in form_data:
         updates["ui_show_footer"] = form_data.get("ui_show_footer") == "on"
 
-    settings_man.save_settings(updates)
+    # Catch validation errors and return 400 with helpful message
+    try:
+        settings_man.save_settings(updates)
+    except ValueError as e:
+        return Response(
+            status_code=400, 
+            headers={"HX-Trigger": json.dumps({"showMessage": {"level": "error", "message": f"Invalid settings: {str(e)}"}})}
+        )
+    
     return Response(status_code=200, headers={"HX-Trigger": json.dumps({"settingsChanged": None, "showMessage": {"level": "success", "message": "Settings saved successfully"}})})
 
 # --- Debug ---

@@ -2,6 +2,9 @@ from collections import deque
 from datetime import datetime
 import json
 import time
+import logging
+
+logger = logging.getLogger(__name__)
 
 class DebugLogger:
     def __init__(self, max_logs=50):
@@ -18,8 +21,8 @@ class DebugLogger:
             "details": details
         }
         self.logs.append(entry)
-        # Print to console for immediate feedback
-        print(f"[DEBUG] [{flow_id}] {node_name} ({event_type}): {json.dumps(details, default=str)}")
+        # Log to console for immediate feedback using proper logging
+        logger.debug(f"[{flow_id}] {node_name} ({event_type}): {json.dumps(details, default=str)}")
     
     def get_logs(self, reverse: bool = True):
         """

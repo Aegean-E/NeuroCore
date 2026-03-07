@@ -24,13 +24,24 @@ def get_llm_bridge(settings: SettingsManager = Depends(get_settings_manager)) ->
     3. Only the bridge wrapper object is cached, not the settings values
     """
     global _llm_bridge_instance
-    _llm_bridge_instance = LLMBridge(
-        base_url=settings.get("llm_api_url"),
-        api_key=settings.get("llm_api_key"),
-        embedding_base_url=settings.get("embedding_api_url"),
-        embedding_model=settings.get("embedding_model"),
-        timeout=float(settings.get("request_timeout", 60.0)),
-    )
+    
+    # Only create instance if it doesn't exist
+    if _llm_bridge_instance is None:
+        _llm_bridge_instance = LLMBridge(
+            base_url=settings.get("llm_api_url"),
+            api_key=settings.get("llm_api_key"),
+            embedding_base_url=settings.get("embedding_api_url"),
+            embedding_model=settings.get("embedding_model"),
+            timeout=float(settings.get("request_timeout", 60.0)),
+        )
+    else:
+        # Update settings in case they changed at runtime
+        _llm_bridge_instance.base_url = settings.get("llm_api_url")
+        _llm_bridge_instance.api_key = settings.get("llm_api_key")
+        _llm_bridge_instance.embedding_base_url = settings.get("embedding_api_url") or _llm_bridge_instance.base_url
+        _llm_bridge_instance.embedding_model = settings.get("embedding_model")
+        _llm_bridge_instance.timeout = float(settings.get("request_timeout", 60.0))
+    
     return _llm_bridge_instance
 
 

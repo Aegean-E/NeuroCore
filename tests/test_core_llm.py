@@ -73,7 +73,8 @@ async def test_get_embedding_success(httpx_mock):
         method="POST"
     )
     
-    bridge = LLMBridge(base_url="http://localhost:1234/v1")
+    # Provide embedding_model to test embedding functionality
+    bridge = LLMBridge(base_url="http://localhost:1234/v1", embedding_model="text-embedding-3-small")
     embedding = await bridge.get_embedding("test text")
     
     assert embedding == [0.1, 0.2, 0.3]
@@ -86,7 +87,8 @@ async def test_get_embedding_error(httpx_mock):
         method="POST"
     )
     
-    bridge = LLMBridge(base_url="http://localhost:1234/v1")
+    # Provide embedding_model to test embedding functionality
+    bridge = LLMBridge(base_url="http://localhost:1234/v1", embedding_model="text-embedding-3-small")
     embedding = await bridge.get_embedding("test text")
     
     assert embedding is None

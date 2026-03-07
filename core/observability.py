@@ -17,15 +17,15 @@ Usage:
         metrics.timing("node.latency", elapsed_ms)
 """
 
+import asyncio
 import uuid
 import time
 import json
 import logging
-import threading
 import contextvars
 import contextlib
 from typing import Optional, Dict, Any, List, Callable
-from datetime import datetime
+from datetime import datetime, timezone
 from functools import wraps
 from collections import defaultdict
 from dataclasses import dataclass, field, asdict
@@ -198,6 +198,7 @@ def trace(span_name: str, kind: SpanKind = SpanKind.INTERNAL,
 
 
 # Thread-local trace context for async operations
+# FIX: Use single contextvar for both sync and async to ensure proper trace propagation
 _trace_ctx_async: contextvars.ContextVar[Optional['TraceContext']] = contextvars.ContextVar('trace_ctx_async', default=None)
 
 
@@ -206,15 +207,23 @@ def trace_async(span_name: str, kind: SpanKind = SpanKind.INTERNAL,
                 attributes: Optional[Dict[str, Any]] = None):
     """
     Context manager for creating spans in async context.
-    Creates a new TraceContext per async call to avoid concurrent span clobbering.
+    Uses the same contextvar as sync code for proper trace propagation.
     
     Usage:
         with trace_async("process_request") as ctx:
             ctx.add_span("database_query", attributes={"query": "SELECT *"})
     """
-    # Create a new TraceContext for this async operation
-    ctx = TraceContext(trace_id=uuid.uuid4().hex)
-    _trace_ctx_async.set(ctx)
+    # Use the same trace context as sync code for proper propagation
+    # Create new trace only if no existing context
+    existing_ctx = _trace_ctx.get()
+    if existing_ctx is not None:
+        # Reuse existing context for trace propagation
+        ctx = existing_ctx
+    else:
+        # Create new context for this async operation
+        ctx = TraceContext(trace_id=uuid.uuid4().hex)
+        _trace_ctx.set(ctx)
+    
     span = ctx.add_span(span_name, kind=kind, attributes=attributes)
     try:
         yield ctx
@@ -223,7 +232,9 @@ def trace_async(span_name: str, kind: SpanKind = SpanKind.INTERNAL,
         raise
     finally:
         ctx.end_span()
-        _trace_ctx_async.set(None)
+        # Only clear if we created a new context
+        if existing_ctx is None:
+            _trace_ctx.set(None)
 
 
 def traced(span_name: str = None, kind: SpanKind = SpanKind.INTERNAL):
@@ -271,7 +282,8 @@ class Metrics:
         self._counters: Dict[str, float] = defaultdict(float)
         self._timings: Dict[str, List[float]] = defaultdict(list)
         self._gauges: Dict[str, float] = {}
-        self._lock = threading.RLock()
+        # FIX: Use asyncio.Lock for async safety instead of threading.RLock
+        self._lock = asyncio.Lock()
         self._max_timings_per_metric = 1000  # Keep last 1000 timings
     
     def increment(self, metric: str, value: float = 1.0, tags: Optional[Dict[str, str]] = None):

@@ -115,10 +115,16 @@ class LLMBridge:
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
         
-        # Some local servers use 'text-embedding-nomic-embed-text-v1.5' or similar
+        # Use dedicated embedding_model setting, not default_model (which may be a chat model)
+        embedding_model = model or self.embedding_model
+        if not embedding_model:
+            # Raise error if no embedding model configured - using chat model would cause errors
+            logger.error("No embedding_model configured. Please set embedding_model in settings.")
+            return None
+        
         payload = {
             "input": text,
-            "model": model or self.embedding_model or settings.get("default_model") 
+            "model": embedding_model
         }
 
         try:
@@ -134,6 +140,5 @@ class LLMBridge:
                 return data["data"][0]["embedding"]
             return None
         except Exception as e:
-            # FIX: Use logger instead of print
             logger.error(f"Embedding error: {e}")
             return None
