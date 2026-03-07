@@ -116,11 +116,15 @@ class SessionManager:
         Returns:
             (compacted: bool, tokens_before: int)
         """
-        session = self.get_session(session_id)
-        if not session:
-            return False, 0
+        # Snapshot history under lock to avoid TOCTOU race
+        async with self._async_lock:
+            session = self.sessions.get(session_id)
+            if not session:
+                return False, 0
+            session_copy = copy.deepcopy(session)
+            snapshot_updated_at = session_copy['updated_at']
+            history = session_copy["history"]
 
-        history = session["history"]
         tokens_before = _estimate_tokens(history)
 
         # Need at least keep_last + 2 messages to be worth compacting
@@ -173,11 +177,14 @@ class SessionManager:
             }
         ] + recent_messages
 
+        # Re-validate timestamp before writing back to avoid race condition
         async with self._async_lock:
-            if session_id in self.sessions:
+            current = self.sessions.get(session_id)
+            if current and current['updated_at'] == snapshot_updated_at:
                 self.sessions[session_id]["history"] = new_history
                 self.sessions[session_id]["updated_at"] = datetime.now().isoformat()
-                self._save_sessions()
+                # Use asyncio.to_thread to avoid blocking event loop with sync I/O
+                await asyncio.to_thread(self._save_sessions)
                 return True, tokens_before
 
         return False, tokens_before

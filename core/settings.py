@@ -112,10 +112,13 @@ class SettingsManager:
             if str_field in new_settings:
                 validated[str_field] = str(new_settings[str_field])
         
-        # active_ai_flows: list
+        # active_ai_flows: list of strings
         if "active_ai_flows" in new_settings:
             if not isinstance(new_settings["active_ai_flows"], list):
                 raise ValueError("active_ai_flows must be a list")
+            for item in new_settings["active_ai_flows"]:
+                if not isinstance(item, str):
+                    raise ValueError(f"active_ai_flows items must be strings, got {type(item).__name__}")
             validated["active_ai_flows"] = new_settings["active_ai_flows"]
         
         return validated

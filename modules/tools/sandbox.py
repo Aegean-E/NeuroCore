@@ -38,7 +38,7 @@ except ImportError:
 DANGEROUS_BUILTINS: Set[str] = {
     'open', 'input', 'raw_input', 'exec', 'eval', 'compile', 
     'breakpoint', 'help', 'quit', 'exit', '__import__',
-    'reload', 'open', 'file', 'execfile',
+    'reload', 'file', 'execfile',
 }
 
 # Dangerous modules that should not be importable
@@ -64,7 +64,7 @@ SAFE_MODULES: Set[str] = {
     'textwrap', 'unicodedata', 'stringprep', 'codecs',
     'dataclasses', 'abc', 'contextlib', 'contextvars',
     'types', 'weakref', 'array', 'bisect', 'heapq',
-    'copyreg', 'pickletools', 'shelve', 'dbm', 'dbm.dumb',
+    'copyreg', 'pickletools',
 }
 
 
@@ -125,8 +125,8 @@ class SafeOpen:
         
         # Check for path traversal attempts
         if '..' in path or path.startswith('/'):
-            # Additional check for absolute paths
-            pass
+            # Path traversal detected - reject it
+            return False
         
         # Check if path is within allowed directories
         for allowed_dir in self.allowed_dirs:
@@ -143,7 +143,7 @@ class SafeOpen:
         if not self._is_path_allowed(file):
             raise SecurityError(f"Access to file '{file}' is not permitted in sandboxed environment")
         
-        if self.read_only and 'w' in mode or 'a' in mode or 'x' in mode:
+        if self.read_only and ('w' in mode or 'a' in mode or 'x' in mode):
             raise SecurityError(f"Write access to file '{file}' is not permitted in sandboxed environment")
         
         return builtins.open(file, mode, *args, **kwargs)
@@ -156,7 +156,7 @@ class SafeHttpxClient:
     
     # Default allowed domains (can be configured)
     DEFAULT_ALLOWED_DOMAINS: Set[str] = {
-        'api.openai.com', 'api.openai.com',
+        'api.openai.com',
         'api.anthropic.com',
         'api.together.xyz',
         'api.groq.com',
@@ -429,6 +429,27 @@ class ToolSandbox:
         # Check for file path traversal
         if '..' in code or '/etc/' in code or 'C:\\\\Windows' in code:
             raise SecurityError("Potential path traversal or system file access detected")
+        
+        # AST-based analysis to detect dangerous function calls (harder to bypass)
+        try:
+            import ast
+            tree = ast.parse(code)
+            dangerous_funcs = {'exec', 'eval', 'compile', 'breakpoint', 'open', '__import__'}
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Call):
+                    # Check direct function calls like exec()
+                    if isinstance(node.func, ast.Name) and node.func.id in dangerous_funcs:
+                        # Allow open() if it's our SafeOpen (will be checked at runtime)
+                        if node.func.id == 'open' and self.allowed_file_dirs:
+                            continue
+                        raise SecurityError(f"Dangerous call detected: {node.func.id}()")
+                    # Check getattr(builtins, "exec")() style calls
+                    if isinstance(node.func, ast.Attribute):
+                        if node.func.attr in dangerous_funcs:
+                            raise SecurityError(f"Dangerous call detected: .{node.func.attr}()")
+        except SyntaxError:
+            # If code can't be parsed, let it fail at execution time
+            pass
     
     def _execute_internal(self, code: str, local_vars: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """Internal execution without multiprocessing - used by child process."""
