@@ -1,9 +1,10 @@
 import asyncio
 import importlib
+import json
 import logging
 import sys
 import types
-from collections import deque
+from collections import deque, defaultdict
 from .flow_manager import flow_manager
 from core.settings import settings
 from core.debug import debug_logger
@@ -13,18 +14,25 @@ logger = logging.getLogger(__name__)
 class FlowRunner:
     _executor_cache = {}
     _max_cache_size = 100  # Maximum number of cached executor classes
-    _cache_lock = asyncio.Lock()  # Lock for thread-safe cache operations
+    _cache_lock = None  # Lazy-initialized lock for thread-safe cache operations
     
     @classmethod
     def clear_cache(cls):
         cls._executor_cache.clear()
     
     @classmethod
+    def _get_cache_lock(cls):
+        """Lazy-initialize the lock to avoid attaching to wrong event loop."""
+        if cls._cache_lock is None:
+            cls._cache_lock = asyncio.Lock()
+        return cls._cache_lock
+    
+    @classmethod
     async def _get_executor_class(cls, module_id: str, node_type_id: str):
         """Thread-safe method to get or create an executor class from the cache."""
         cache_key = f"{module_id}.{node_type_id}"
         
-        async with cls._cache_lock:
+        async with cls._get_cache_lock():
             # Check if already in cache (after acquiring lock)
             if cache_key in cls._executor_cache:
                 return cls._executor_cache[cache_key]
@@ -37,6 +45,8 @@ class FlowRunner:
             # Only reload in debug mode to pick up hot-code changes;
             # in production this is wasteful and can cause state issues.
             if settings.get("debug_mode") and isinstance(node_dispatcher, types.ModuleType) and node_dispatcher.__name__ in sys.modules:
+                # Invalidate cache before reloading to ensure fresh class is used
+                cls._executor_cache.pop(cache_key, None)
                 importlib.reload(node_dispatcher)
             # Get the specific executor class for this node type
             executor_class = await node_dispatcher.get_executor_class(node_type_id)
@@ -70,6 +80,17 @@ class FlowRunner:
         self.connections = self.flow['connections']
         self.bridges = self.flow.get('bridges', [])
         self.bridge_groups = self._build_bridge_groups()
+        
+        # Precompute incoming edges adjacency dict for O(1) lookups
+        self.incoming_edges = defaultdict(list)
+        for c in self.connections:
+            self.incoming_edges[c['to']].append(c)
+        
+        # Precompute downstream nodes for O(1) lookups
+        self.downstream_nodes = defaultdict(list)
+        for c in self.connections:
+            self.downstream_nodes[c['from']].append(c['to'])
+        
         self.execution_order = self._compute_execution_order()
         
         if settings.get("debug_mode"):
@@ -145,16 +166,6 @@ class FlowRunner:
         """
         if node_id not in self.bridge_groups:
             return []
-        
-        # Build directed adjacency list from bridge definitions
-        # Each bridge defines: from_node runs BEFORE to_node
-        bridge_dir = {}
-        for b in self.bridges:
-            from_node = b['from']
-            to_node = b['to']
-            if from_node not in bridge_dir:
-                bridge_dir[from_node] = []
-            bridge_dir[from_node].append(to_node)
         
         # Get all nodes in this bridge group
         group = self.bridge_groups[node_id]
@@ -467,8 +478,12 @@ class FlowRunner:
             node_run_counts = {node_id: 0 for node_id in self.nodes}
             max_loops = settings.get("max_node_loops", 1000)
             
+            # Parallel set for O(1) membership checks instead of O(n) deque scan
+            pending_nodes = set(execution_queue)
+            
             while execution_queue:
                 node_id = execution_queue.popleft()
+                pending_nodes.discard(node_id)
                 
                 if max_loops > 0 and node_run_counts[node_id] >= max_loops:
                     logger.warning(f"Warning: Node {node_id} hit max execution limit ({max_loops}). Stopping branch.")
@@ -480,8 +495,8 @@ class FlowRunner:
                 module_id = node_meta['moduleId']
                 node_type_id = node_meta['nodeTypeId']
 
-                # 1. Determine Input Data (DAG Logic)
-                incoming_edges = [c for c in self.connections if c['to'] == node_id]
+                # 1. Determine Input Data (DAG Logic) - use precomputed incoming_edges for O(1) lookup
+                incoming_edges = self.incoming_edges.get(node_id, [])
                 
                 # Bridge Execution: Process upstream bridge nodes before this node
                 # Bridges create implicit execution chains where earlier nodes in the
@@ -691,8 +706,9 @@ class FlowRunner:
                                     debug_logger.log(self.flow_id, node_id, node_meta['name'], "routing_skip", {"skipped": child_name})
                                 continue
 
-                        if child_id not in execution_queue:
+                        if child_id not in pending_nodes:
                             execution_queue.append(child_id)
+                            pending_nodes.add(child_id)
                             if settings.get("debug_mode"):
                                 child_name = self.nodes.get(child_id, {}).get('name', child_id)
                                 debug_logger.log(self.flow_id, node_id, node_meta['name'], "queue_next", {"next": child_name})
