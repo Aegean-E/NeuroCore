@@ -12,12 +12,13 @@ if not name:
 else:
     variables = repl_state.get("variables", {})
     variables[name] = value
-    repl_state["variables"] = variables
     
+    # Return state updates in result for proper propagation instead of direct mutation
     result = {
         "success": True,
         "name": name,
         "value_type": type(value).__name__,
-        "stored_keys": list(variables.keys())
+        "stored_keys": list(variables.keys()),
+        "_state_update": {"variables": variables}  # Return state update for executor to merge
     }
 

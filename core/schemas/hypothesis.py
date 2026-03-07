@@ -4,9 +4,14 @@ Hypothesis Schema
 Pydantic model for representing scientific hypotheses.
 """
 
+import uuid
 from pydantic import BaseModel, Field
-from typing import Optional, List
+from typing import Optional, List, Literal
 from datetime import datetime
+
+
+HypothesisType = Literal["correlation", "causal", "directional", "null"]
+HypothesisStatus = Literal["proposed", "tested", "supported", "rejected", "modified"]
 
 
 class Hypothesis(BaseModel):
@@ -17,8 +22,8 @@ class Hypothesis(BaseModel):
     tested through experimentation or observation.
     """
     
-    id: Optional[str] = Field(
-        default=None,
+    id: str = Field(
+        default_factory=lambda: str(uuid.uuid4()),
         description="Unique identifier for the hypothesis"
     )
     
@@ -51,7 +56,7 @@ class Hypothesis(BaseModel):
         description="The dependent variable (what is measured)"
     )
     
-    hypothesis_type: str = Field(
+    hypothesis_type: HypothesisType = Field(
         default="correlation",
         description="Type: correlation, causal, directional, null"
     )
@@ -68,7 +73,7 @@ class Hypothesis(BaseModel):
         description="Scientific domain or field"
     )
     
-    status: str = Field(
+    status: HypothesisStatus = Field(
         default="proposed",
         description="Status: proposed, tested, supported, rejected, modified"
     )

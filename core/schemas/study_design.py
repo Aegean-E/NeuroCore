@@ -4,9 +4,13 @@ Study Design Schema
 Pydantic model for representing research study designs.
 """
 
+import uuid
 from pydantic import BaseModel, Field
 from typing import Optional, List, Dict, Any, Literal
 from datetime import datetime
+
+
+StudyDesignStatus = Literal["planned", "approved", "recruiting", "active", "completed", "terminated"]
 
 
 class StudyDesign(BaseModel):
@@ -17,8 +21,8 @@ class StudyDesign(BaseModel):
     methodology, participants, procedures, and analysis plans.
     """
     
-    id: Optional[str] = Field(
-        default=None,
+    id: str = Field(
+        default_factory=lambda: str(uuid.uuid4()),
         description="Unique identifier for the study design"
     )
     
@@ -127,7 +131,7 @@ class StudyDesign(BaseModel):
     )
     
     # Status
-    status: str = Field(
+    status: StudyDesignStatus = Field(
         default="planned",
         description="Status: planned, approved, recruiting, active, completed, terminated"
     )

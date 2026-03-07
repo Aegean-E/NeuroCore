@@ -10,6 +10,8 @@ overlap = args.get("overlap", 200)
 
 if not prompt:
     result = {"error": "No prompt in repl_state", "chunks": [], "count": 0}
+elif size <= 0 or overlap < 0 or overlap >= size:
+    result = {"error": "size must be > overlap >= 0", "chunks": [], "count": 0}
 else:
     chunks = []
     i = 0

@@ -4,9 +4,14 @@ Article Schema
 Pydantic model for representing academic articles.
 """
 
+import uuid
 from pydantic import BaseModel, Field
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Literal
 from datetime import datetime
+
+
+ArticleType = Literal["research", "review", "meta_analysis", "case_study", "commentary"]
+ArticleStatus = Literal["active", "archived", "deleted"]
 
 
 class Article(BaseModel):
@@ -17,8 +22,8 @@ class Article(BaseModel):
     bibliographic information, abstract, and key findings.
     """
     
-    id: Optional[str] = Field(
-        default=None,
+    id: str = Field(
+        default_factory=lambda: str(uuid.uuid4()),
         description="Unique identifier for the article"
     )
     
@@ -84,9 +89,9 @@ class Article(BaseModel):
     )
     
     # Classification
-    article_type: str = Field(
+    article_type: ArticleType = Field(
         default="research",
-        description="Type: research, review, meta_analysis, case_study, commentary, etc."
+        description="Type: research, review, meta_analysis, case_study, commentary"
     )
     
     domain: str = Field(
@@ -148,7 +153,7 @@ class Article(BaseModel):
     )
     
     # Status
-    status: str = Field(
+    status: ArticleStatus = Field(
         default="active",
         description="Status: active, archived, deleted"
     )

@@ -4,9 +4,14 @@ Finding Schema
 Pydantic model for representing research findings.
 """
 
+import uuid
 from pydantic import BaseModel, Field
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Literal
 from datetime import datetime
+
+
+FindingSignificance = Literal["significant", "not_significant", "marginal"]
+FindingStatus = Literal["preliminary", "peer_reviewed", "published", "retracted"]
 
 
 class Finding(BaseModel):
@@ -17,8 +22,8 @@ class Finding(BaseModel):
     including statistical results, conclusions, and implications.
     """
     
-    id: Optional[str] = Field(
-        default=None,
+    id: str = Field(
+        default_factory=lambda: str(uuid.uuid4()),
         description="Unique identifier for the finding"
     )
     
@@ -99,7 +104,7 @@ class Finding(BaseModel):
         max_length=2000
     )
     
-    significance: str = Field(
+    significance: FindingSignificance = Field(
         default="not_significant",
         description="Statistical significance: significant, not_significant, marginal"
     )
@@ -132,7 +137,7 @@ class Finding(BaseModel):
     )
     
     # Status
-    status: str = Field(
+    status: FindingStatus = Field(
         default="preliminary",
         description="Status: preliminary, peer_reviewed, published, retracted"
     )
