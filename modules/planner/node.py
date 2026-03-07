@@ -246,6 +246,28 @@ class PlanStepTracker:
         - dependency_error: error message if circular dependencies detected
     """
     
+    def _generate_plan_context(self, plan: list, current_step: int, completed_steps: set) -> str:
+        """Generate plan_context string showing progress."""
+        if not plan:
+            return ""
+        
+        plan_lines = []
+        for i, p in enumerate(plan):
+            step_num = p.get('step', i + 1)
+            action = p['action']
+            target = p.get('target', '')
+            
+            # Mark completed steps, current step, and pending steps
+            if i in completed_steps:
+                plan_lines.append(f"✓ {step_num}. {action}: {target} (COMPLETED)")
+            elif i == current_step:
+                plan_lines.append(f"→ {step_num}. {action}: {target} (CURRENT)")
+            else:
+                plan_lines.append(f"  {step_num}. {action}: {target}")
+        
+        plan_text = "\n".join(plan_lines)
+        return f"## Execution Plan\nCurrently on step {current_step + 1} of {len(plan)}.\n{plan_text}"
+    
     def _build_dependency_graph(self, plan: list) -> dict:
         """Build adjacency list and in-degree count for topological sort."""
         n = len(plan)
@@ -392,6 +414,9 @@ class PlanStepTracker:
         
         # Check if plan is complete
         result["plan_complete"] = len(completed_steps) >= len(plan)
+        
+        # Update plan_context to reflect progress (shows completed, current, and pending steps)
+        result["plan_context"] = self._generate_plan_context(plan, result["current_step"], completed_steps)
         
         return result
 

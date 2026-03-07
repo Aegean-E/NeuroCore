@@ -22,7 +22,15 @@ class TelegramService:
             cls._instance.thread = None
             cls._instance.running = False
             cls._instance.session_map = cls._instance._load_session_map()
+            # Use a persistent event loop for the message handler thread
+            cls._instance._loop = None
         return cls._instance
+
+    def _get_or_create_loop(self):
+        """Get or create an event loop for the message handler thread."""
+        if self._loop is None or self._loop.is_closed():
+            self._loop = asyncio.new_event_loop()
+        return self._loop
 
     def _load_session_map(self):
         if os.path.exists(SESSION_MAPPING_FILE):
@@ -63,8 +71,9 @@ class TelegramService:
 
     def handle_message(self, msg):
         try:
-            # Run async process_message in a new event loop for this thread
-            asyncio.run(self.process_message(msg))
+            # Use persistent event loop to avoid creating a new one per message
+            loop = self._get_or_create_loop()
+            loop.run_until_complete(self.process_message(msg))
         except Exception as e:
             print(f"Error processing Telegram message: {e}")
 

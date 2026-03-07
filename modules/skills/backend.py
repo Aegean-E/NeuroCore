@@ -45,16 +45,29 @@ class SkillBackend:
     
     def _generate_skill_id(self, name: str) -> str:
         """Generate a URL-friendly skill ID from name."""
+        import time
         # Convert to lowercase, replace spaces with underscores, remove special chars
         skill_id = re.sub(r'[^a-zA-Z0-9\s]', '', name.lower())
         skill_id = re.sub(r'\s+', '_', skill_id)
         
-        # Ensure uniqueness
+        # Ensure uniqueness with timestamp suffix for more robust generation
         metadata = self._load_metadata()
         base_id = skill_id
+        
+        # First check if base_id exists
+        if skill_id not in metadata:
+            return skill_id
+        
+        # If exists, try with timestamp first (most robust)
+        timestamp = int(time.time())
+        skill_id = f"{base_id}_{timestamp}"
+        if skill_id not in metadata:
+            return skill_id
+        
+        # Fall back to counter if timestamp collision occurs (rare)
         counter = 1
         while skill_id in metadata:
-            skill_id = f"{base_id}_{counter}"
+            skill_id = f"{base_id}_{timestamp}_{counter}"
             counter += 1
         return skill_id
     

@@ -171,7 +171,7 @@ The `module.json` file defines how NeuroCore loads and displays your module.
 | `singleton` | boolean | Only one instance allowed |
 | `order` | number | Sort order in UI (lower = first) |
 | `config` | object | Default configuration values |
-| `provides_nodes` | array | Nodes provided for AI Flows |
+| `provides_nodes` | array | Nodes provided for AI Flows. Note: The `config` field in `provides_nodes` is for documentation/display purposes only. Per-node runtime configuration is defined in the node's executor class in `node.py` and exposed via the node's config UI in the flow editor. |
 | `load_error` | string/null | System tracking field |
 
 ### Icon Format

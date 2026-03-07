@@ -74,10 +74,30 @@ class SkillService:
         try:
             response = httpx.get(url, timeout=30.0)
             response.raise_for_status()
-            content = response.text
             
-            # Try to extract name from URL or content
-            file_name = url.split("/")[-1] or "imported_skill.md"
+            # Validate content type before importing
+            content_type = response.headers.get("content-type", "").lower()
+            allowed_types = ["text/markdown", "text/plain", "text/x-markdown", "application/json"]
+            
+            # Also check for HTML which is not allowed
+            if "html" in content_type:
+                raise ValueError("Cannot import HTML content. Only markdown or plain text files are allowed.")
+            
+            # For JSON, check if it's a valid skill format
+            if "json" in content_type:
+                try:
+                    data = response.json()
+                    if "content" in data and "name" in data:
+                        # It's a skill export JSON, convert to markdown
+                        content = f"# {data['name']}\n\n{data.get('description', '')}\n\n{data['content']}"
+                        file_name = f"{data.get('name', 'imported_skill')}.md"
+                    else:
+                        raise ValueError("Invalid skill JSON format")
+                except json.JSONDecodeError:
+                    raise ValueError("Invalid JSON content")
+            else:
+                content = response.text
+                file_name = url.split("/")[-1] or "imported_skill.md"
             
             return self.import_from_file(content, file_name)
         except httpx.HTTPError as e:
@@ -148,7 +168,7 @@ class SkillService:
         return has_structure and is_substantial
     
     def _extract_metadata_from_content(self, content: str, file_name: str) -> Dict[str, Any]:
-        """Try to extract metadata from skill content."""
+        """Try to extract metadata from skill content, supporting YAML frontmatter."""
         metadata = {
             "name": self._extract_title(content) or self._clean_file_name(file_name),
             "description": self._extract_description(content),
@@ -156,31 +176,55 @@ class SkillService:
             "tags": []
         }
         
-        # Try to extract category from content
-        category_match = re.search(r'(?i)category:\s*(.+)', content)
-        if category_match:
-            metadata["category"] = category_match.group(1).strip()
+        # Try to parse YAML frontmatter first (more robust)
+        frontmatter_match = re.search(r'^---\s*\n(.*?)\n---\s*\n', content, re.DOTALL)
+        if frontmatter_match:
+            try:
+                import yaml
+                frontmatter = yaml.safe_load(frontmatter_match.group(1))
+                if isinstance(frontmatter, dict):
+                    if "name" in frontmatter:
+                        metadata["name"] = frontmatter["name"]
+                    if "description" in frontmatter:
+                        metadata["description"] = frontmatter["description"]
+                    if "category" in frontmatter:
+                        metadata["category"] = frontmatter["category"]
+                    if "tags" in frontmatter and isinstance(frontmatter["tags"], list):
+                        metadata["tags"] = frontmatter["tags"]
+            except ImportError:
+                # yaml not available, fall back to regex
+                pass
+            except Exception:
+                # YAML parse error, fall back to regex
+                pass
         
-        # Try to extract tags from content
-        tags_match = re.search(r'(?i)tags:\s*(.+)', content)
-        if tags_match:
-            tags_str = tags_match.group(1)
-            metadata["tags"] = [t.strip() for t in tags_str.split(",")]
+        # Fall back to regex extraction for non-YAML formats
+        if not frontmatter_match:
+            # Try to extract category from content
+            category_match = re.search(r'(?i)category:\s*(.+)', content)
+            if category_match:
+                metadata["category"] = category_match.group(1).strip()
+            
+            # Try to extract tags from content
+            tags_match = re.search(r'(?i)tags:\s*(.+)', content)
+            if tags_match:
+                tags_str = tags_match.group(1)
+                metadata["tags"] = [t.strip() for t in tags_str.split(",")]
         
         return metadata
     
     def _extract_title(self, content: str) -> Optional[str]:
         """Extract title from markdown content (first H1)."""
-        match = re.search(r'^#\\s+(.+)$', content, re.MULTILINE)
+        match = re.search(r'^#\s+(.+)$', content, re.MULTILINE)
         return match.group(1).strip() if match else None
     
     def _extract_description(self, content: str) -> str:
         """Extract description from content (first paragraph after title)."""
         # Remove title
-        content_without_title = re.sub(r'^#\\s+.+$', '', content, count=1, flags=re.MULTILINE)
+        content_without_title = re.sub(r'^#\s+.+$', '', content, count=1, flags=re.MULTILINE)
         
         # Find first substantial paragraph
-        paragraphs = content_without_title.strip().split('\\n\\n')
+        paragraphs = content_without_title.strip().split('\n\n')
         for para in paragraphs:
             para = para.strip()
             if para and len(para) > 20 and not para.startswith('#'):
@@ -191,7 +235,7 @@ class SkillService:
     def _clean_file_name(self, file_name: str) -> str:
         """Clean file name to use as skill name."""
         # Remove extension
-        name = re.sub(r'\\.md$', '', file_name, flags=re.IGNORECASE)
+        name = re.sub(r'\.md$', '', file_name, flags=re.IGNORECASE)
         # Replace underscores and hyphens with spaces
         name = name.replace('_', ' ').replace('-', ' ')
         # Capitalize words
@@ -203,24 +247,38 @@ class SkillService:
         from datetime import datetime
         
         # Clean name
-        base_id = re.sub(r'[^a-zA-Z0-9\\s]', '', name.lower())
-        base_id = re.sub(r'\\s+', '_', base_id)
+        base_id = re.sub(r'[^a-zA-Z0-9\s]', '', name.lower())
+        base_id = re.sub(r'\s+', '_', base_id)
         
         # Add timestamp to ensure uniqueness
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         return f"{base_id}_{timestamp}"
     
     def _create_export_markdown(self, skill: Dict[str, Any]) -> str:
-        """Create a formatted markdown export of a skill."""
-        lines = [
-            f"# {skill['name']}",
-            "",
-            f"**Description:** {skill['description']}",
-            "",
-            f"**Category:** {skill.get('category', 'general')}",
-            f"**Tags:** {', '.join(skill.get('tags', []))}",
-            "---",
-            "",
-            skill['content']
-        ]
-        return "\\n".join(lines)
+        """Create a formatted markdown export of a skill with YAML frontmatter."""
+        try:
+            import yaml
+            # Use YAML frontmatter for reliable metadata extraction on re-import
+            frontmatter = yaml.dump({
+                "name": skill['name'],
+                "description": skill['description'],
+                "category": skill.get('category', 'general'),
+                "tags": skill.get('tags', [])
+            }, default_flow_style=False, allow_unicode=True)
+            
+            return f"---\n{frontmatter}---\n\n{skill['content']}"
+        except ImportError:
+            # Fall back to plain text format if yaml not available
+            lines = [
+                f"# {skill['name']}",
+                "",
+                f"**Description:** {skill['description']}",
+                "",
+                f"**Category:** {skill.get('category', 'general')}",
+                f"**Tags:** {', '.join(skill.get('tags', []))}",
+                "---",
+                "",
+                skill['content']
+            ]
+            return "\n".join(lines)
+
