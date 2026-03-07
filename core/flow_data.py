@@ -19,7 +19,28 @@ Usage:
 
 from typing import TypedDict, Any, Optional, List, Dict, Union, Callable, TypeVar, overload
 from typing_extensions import TypeAlias
+import copy
 import logging
+
+
+def _deep_copy_maybe(value: Any) -> Any:
+    """
+    Create a deep copy of a value if it's mutable (list or dict).
+    
+    This prevents state corruption when the same mutable object is
+    shared across multiple flow data instances.
+    
+    Args:
+        value: The value to potentially deep copy
+        
+    Returns:
+        Deep copy if mutable, otherwise the original value
+    """
+    if isinstance(value, list):
+        return copy.deepcopy(value)
+    elif isinstance(value, dict):
+        return copy.deepcopy(value)
+    return value
 
 logger = logging.getLogger(__name__)
 
@@ -140,7 +161,7 @@ def get_content(data: FlowData, default: str = "") -> str:
     result = data.get("content")
     if result is None:
         return default
-    return str(result) if result else default
+    return str(result) if result is not None else default
 
 
 def get_plan(data: FlowData, default: Plan = None) -> Plan:
@@ -596,9 +617,9 @@ def get_planning_error(data: FlowData) -> Optional[str]:
 # =============================================================================
 
 def set_messages(data: FlowData, messages: Messages) -> FlowData:
-    """Set messages in flow data (returns new dict)."""
+    """Set messages in flow data (returns new dict with deep copy of list)."""
     result = data.copy() if data else {}
-    result["messages"] = messages
+    result["messages"] = _deep_copy_maybe(messages)
     return result
 
 
@@ -610,9 +631,9 @@ def set_content(data: FlowData, content: str) -> FlowData:
 
 
 def set_plan(data: FlowData, plan: Plan) -> FlowData:
-    """Set plan in flow data."""
+    """Set plan in flow data (returns new dict with deep copy of list)."""
     result = data.copy() if data else {}
-    result["plan"] = plan
+    result["plan"] = _deep_copy_maybe(plan)
     return result
 
 
@@ -652,23 +673,23 @@ def set_plan_complete(data: FlowData, plan_complete: bool) -> FlowData:
 
 
 def set_next_step(data: FlowData, next_step: PlanStep) -> FlowData:
-    """Set next_step in flow data."""
+    """Set next_step in flow data (returns new dict with deep copy of dict)."""
     result = data.copy() if data else {}
-    result["next_step"] = next_step
+    result["next_step"] = _deep_copy_maybe(next_step)
     return result
 
 
 def set_step_completed(data: FlowData, step_completed: PlanStep) -> FlowData:
-    """Set step_completed in flow data."""
+    """Set step_completed in flow data (returns new dict with deep copy of dict)."""
     result = data.copy() if data else {}
-    result["step_completed"] = step_completed
+    result["step_completed"] = _deep_copy_maybe(step_completed)
     return result
 
 
 def set_completed_steps(data: FlowData, completed_steps: List[int]) -> FlowData:
-    """Set completed_steps in flow data."""
+    """Set completed_steps in flow data (returns new dict with deep copy of list)."""
     result = data.copy() if data else {}
-    result["completed_steps"] = completed_steps
+    result["completed_steps"] = _deep_copy_maybe(completed_steps)
     return result
 
 
@@ -680,9 +701,9 @@ def set_dependency_error(data: FlowData, dependency_error: str) -> FlowData:
 
 
 def set_reflection(data: FlowData, reflection: ReflectionResult) -> FlowData:
-    """Set reflection in flow data."""
+    """Set reflection in flow data (returns new dict with deep copy of dict)."""
     result = data.copy() if data else {}
-    result["reflection"] = reflection
+    result["reflection"] = _deep_copy_maybe(reflection)
     return result
 
 
@@ -708,9 +729,9 @@ def set_iterations(data: FlowData, iterations: int) -> FlowData:
 
 
 def set_agent_loop_trace(data: FlowData, trace: List[TraceEntry]) -> FlowData:
-    """Set agent_loop_trace in flow data."""
+    """Set agent_loop_trace in flow data (returns new dict with deep copy of list)."""
     result = data.copy() if data else {}
-    result["agent_loop_trace"] = trace
+    result["agent_loop_trace"] = _deep_copy_maybe(trace)
     return result
 
 
@@ -757,16 +778,9 @@ def set_replan_depth_exceeded(data: FlowData, exceeded: bool) -> FlowData:
 
 
 def set_response(data: FlowData, response: Dict[str, Any]) -> FlowData:
-    """Set response in flow data."""
+    """Set response in flow data (returns new dict with deep copy of dict)."""
     result = data.copy() if data else {}
-    result["response"] = response
-    return result
-
-
-def set_memory_context(data: FlowData, context: str) -> FlowData:
-    """Set _memory_context in flow data."""
-    result = data.copy() if data else {}
-    result["_memory_context"] = context
+    result["response"] = _deep_copy_maybe(response)
     return result
 
 
@@ -785,30 +799,39 @@ def set_reasoning_context(data: FlowData, context: str) -> FlowData:
 
 
 def set_reasoning_history(data: FlowData, history: List[Dict[str, Any]]) -> FlowData:
-    """Set reasoning_history in flow data."""
+    """Set reasoning_history in flow data (returns new dict with deep copy of list)."""
     result = data.copy() if data else {}
-    result["reasoning_history"] = history
+    result["reasoning_history"] = _deep_copy_maybe(history)
     return result
 
 
 def set_reasoning_structured(data: FlowData, structured: List[Dict[str, Any]]) -> FlowData:
-    """Set reasoning_structured in flow data."""
+    """Set reasoning_structured in flow data (returns new dict with deep copy of list)."""
     result = data.copy() if data else {}
-    result["reasoning_structured"] = structured
+    result["reasoning_structured"] = _deep_copy_maybe(structured)
     return result
 
 
 def set_tool_count(data: FlowData, count: int) -> FlowData:
-    """Set _tool_count in flow data."""
+    """Set tool_count in flow data.
+    
+    Sets both _tool_count (FlowData) and tool_count (FlowContext) for compatibility.
+    """
     result = data.copy() if data else {}
-    result["_tool_count"] = count
+    result["tool_count"] = count
+    result["_tool_count"] = count  # For backward compatibility
     return result
 
 
 def set_remaining_tool_calls(data: FlowData, calls: List[ToolCall]) -> FlowData:
-    """Set _remaining_tool_calls in flow data."""
+    """Set remaining_tool_calls in flow data.
+    
+    Sets both _remaining_tool_calls (FlowData) and remaining_tool_calls (FlowContext) for compatibility.
+    Returns new dict with deep copy of list.
+    """
     result = data.copy() if data else {}
-    result["_remaining_tool_calls"] = calls
+    result["remaining_tool_calls"] = _deep_copy_maybe(calls)
+    result["_remaining_tool_calls"] = _deep_copy_maybe(calls)  # For backward compatibility
     return result
 
 
@@ -820,30 +843,30 @@ def set_requires_continuation(data: FlowData, requires: bool) -> FlowData:
 
 
 def set_choices(data: FlowData, choices: List[Dict[str, Any]]) -> FlowData:
-    """Set choices in flow data."""
+    """Set choices in flow data (returns new dict with deep copy of list)."""
     result = data.copy() if data else {}
-    result["choices"] = choices
+    result["choices"] = _deep_copy_maybe(choices)
     return result
 
 
 def set_tools(data: FlowData, tools: List[Dict[str, Any]]) -> FlowData:
-    """Set tools in flow data."""
+    """Set tools in flow data (returns new dict with deep copy of list)."""
     result = data.copy() if data else {}
-    result["tools"] = tools
+    result["tools"] = _deep_copy_maybe(tools)
     return result
 
 
 def set_available_tools(data: FlowData, tools: List[str]) -> FlowData:
-    """Set available_tools in flow data."""
+    """Set available_tools in flow data (returns new dict with deep copy of list)."""
     result = data.copy() if data else {}
-    result["available_tools"] = tools
+    result["available_tools"] = _deep_copy_maybe(tools)
     return result
 
 
 def set_route_targets(data: FlowData, targets: List[str]) -> FlowData:
-    """Set _route_targets in flow data."""
+    """Set _route_targets in flow data (returns new dict with deep copy of list)."""
     result = data.copy() if data else {}
-    result["_route_targets"] = targets
+    result["_route_targets"] = _deep_copy_maybe(targets)
     return result
 
 
@@ -862,9 +885,9 @@ def set_input_source(data: FlowData, source: str) -> FlowData:
 
 
 def set_current_goal(data: FlowData, goal: Dict[str, Any]) -> FlowData:
-    """Set current_goal in flow data."""
+    """Set current_goal in flow data (returns new dict with deep copy of dict)."""
     result = data.copy() if data else {}
-    result["current_goal"] = goal
+    result["current_goal"] = _deep_copy_maybe(goal)
     return result
 
 
@@ -902,7 +925,7 @@ def validate_flow_data(data: Any) -> List[str]:
         issues.append("FlowData must be a dict")
         return issues
     
-    # Check types for known fields
+    # Check types for known fields - Basic types
     if "messages" in data and not isinstance(data["messages"], list):
         issues.append("'messages' must be a list")
     
@@ -918,17 +941,53 @@ def validate_flow_data(data: Any) -> List[str]:
         except (ValueError, TypeError):
             issues.append("'current_step' must be int-like")
     
+    if "original_request" in data and not isinstance(data["original_request"], str):
+        issues.append("'original_request' must be a string")
+    
     if "plan_needed" in data and not isinstance(data["plan_needed"], bool):
         issues.append("'plan_needed' must be a bool")
     
+    if "plan_context" in data and not isinstance(data["plan_context"], str):
+        issues.append("'plan_context' must be a string")
+    
+    if "plan_complete" in data and not isinstance(data["plan_complete"], bool):
+        issues.append("'plan_complete' must be a bool")
+    
+    if "next_step" in data and not isinstance(data["next_step"], dict):
+        issues.append("'next_step' must be a dict")
+    
+    if "step_completed" in data and not isinstance(data["step_completed"], dict):
+        issues.append("'step_completed' must be a dict")
+    
+    if "completed_steps" in data and not isinstance(data["completed_steps"], list):
+        issues.append("'completed_steps' must be a list")
+    
+    if "dependency_error" in data and not isinstance(data["dependency_error"], str):
+        issues.append("'dependency_error' must be a string")
+    
+    if "reflection" in data and not isinstance(data["reflection"], dict):
+        issues.append("'reflection' must be a dict")
+    
     if "satisfied" in data and not isinstance(data["satisfied"], bool):
         issues.append("'satisfied' must be a bool")
+    
+    if "reflection_retry_count" in data:
+        try:
+            int(data["reflection_retry_count"])
+        except (ValueError, TypeError):
+            issues.append("'reflection_retry_count' must be int-like")
     
     if "iterations" in data and not isinstance(data["iterations"], int):
         try:
             int(data["iterations"])
         except (ValueError, TypeError):
             issues.append("'iterations' must be int-like")
+    
+    if "agent_loop_trace" in data and not isinstance(data["agent_loop_trace"], list):
+        issues.append("'agent_loop_trace' must be a list")
+    
+    if "agent_loop_error" in data and not isinstance(data["agent_loop_error"], str):
+        issues.append("'agent_loop_error' must be a string")
     
     if "replan_needed" in data and not isinstance(data["replan_needed"], bool):
         issues.append("'replan_needed' must be a bool")
@@ -938,6 +997,79 @@ def validate_flow_data(data: Any) -> List[str]:
             int(data["replan_count"])
         except (ValueError, TypeError):
             issues.append("'replan_count' must be int-like")
+    
+    if "replan_reason" in data and not isinstance(data["replan_reason"], str):
+        issues.append("'replan_reason' must be a string")
+    
+    if "suggested_approach" in data and not isinstance(data["suggested_approach"], str):
+        issues.append("'suggested_approach' must be a string")
+    
+    if "replan_depth_exceeded" in data and not isinstance(data["replan_depth_exceeded"], bool):
+        issues.append("'replan_depth_exceeded' must be a bool")
+    
+    if "response" in data and not isinstance(data["response"], dict):
+        issues.append("'response' must be a dict")
+    
+    # Context providers
+    if "_memory_context" in data and not isinstance(data["_memory_context"], str):
+        issues.append("'_memory_context' must be a string")
+    
+    if "knowledge_context" in data and not isinstance(data["knowledge_context"], str):
+        issues.append("'knowledge_context' must be a string")
+    
+    if "reasoning_context" in data and not isinstance(data["reasoning_context"], str):
+        issues.append("'reasoning_context' must be a string")
+    
+    if "reasoning_history" in data and not isinstance(data["reasoning_history"], list):
+        issues.append("'reasoning_history' must be a list")
+    
+    if "reasoning_structured" in data and not isinstance(data["reasoning_structured"], list):
+        issues.append("'reasoning_structured' must be a list")
+    
+    # Tools
+    if "_tool_count" in data:
+        try:
+            int(data["_tool_count"])
+        except (ValueError, TypeError):
+            issues.append("'_tool_count' must be int-like")
+    
+    if "_remaining_tool_calls" in data and not isinstance(data["_remaining_tool_calls"], list):
+        issues.append("'_remaining_tool_calls' must be a list")
+    
+    if "requires_continuation" in data and not isinstance(data["requires_continuation"], bool):
+        issues.append("'requires_continuation' must be a bool")
+    
+    if "choices" in data and not isinstance(data["choices"], list):
+        issues.append("'choices' must be a list")
+    
+    if "tools" in data and not isinstance(data["tools"], list):
+        issues.append("'tools' must be a list")
+    
+    if "available_tools" in data and not isinstance(data["available_tools"], list):
+        issues.append("'available_tools' must be a list")
+    
+    # Routing
+    if "_route_targets" in data and not isinstance(data["_route_targets"], list):
+        issues.append("'_route_targets' must be a list")
+    
+    # Internal/State
+    if "_repeat_count" in data:
+        try:
+            int(data["_repeat_count"])
+        except (ValueError, TypeError):
+            issues.append("'_repeat_count' must be int-like")
+    
+    if "_input_source" in data and not isinstance(data["_input_source"], str):
+        issues.append("'_input_source' must be a string")
+    
+    if "current_goal" in data and not isinstance(data["current_goal"], dict):
+        issues.append("'current_goal' must be a dict")
+    
+    if "error" in data and not isinstance(data["error"], str):
+        issues.append("'error' must be a string")
+    
+    if "planning_error" in data and not isinstance(data["planning_error"], str):
+        issues.append("'planning_error' must be a string")
     
     return issues
 
@@ -1033,8 +1165,6 @@ TYPO_MAPPINGS = {
     "reasn_context": "reasoning_context",
     "currnt_step": "current_step",
     "curent_step": "current_step",
-    "plan_needed": "plan_needed",  # Correct
-    "replan_needed": "replan_needed",  # Correct
     "satifised": "satisfied",
     "satified": "satisfied",
     "agent_loop_trac": "agent_loop_trace",

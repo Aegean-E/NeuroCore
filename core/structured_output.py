@@ -8,6 +8,7 @@ Provides guaranteed schema-valid JSON output from LLM calls using:
 """
 
 import asyncio
+import copy
 import logging
 from typing import Type, Optional, List, Any
 from pydantic import BaseModel, ValidationError
@@ -16,6 +17,9 @@ from core.llm import LLMBridge
 from core.settings import settings
 
 logger = logging.getLogger(__name__)
+
+# Maximum number of messages to keep in conversation history during retries
+MAX_CONVERSATION_HISTORY = 20
 
 
 class StructuredOutputError(Exception):
@@ -87,6 +91,8 @@ async def structured_completion(
         print(result.name)  # "John"
         print(result.age)   # 30
     """
+    # Track if we created the bridge (so we can close it)
+    bridge_created = False
     # Create bridge if not provided
     if llm_bridge is None:
         llm_bridge = LLMBridge(
@@ -94,6 +100,7 @@ async def structured_completion(
             api_key=settings.get("llm_api_key"),
             timeout=timeout
         )
+        bridge_created = True
     
     schema_name = schema.__name__
     schema_json = schema.model_json_schema() if hasattr(schema, 'model_json_schema') else schema.schema()
@@ -101,107 +108,152 @@ async def structured_completion(
     # Create a working copy to avoid mutating the caller's messages list
     working_messages = list(messages)
     
-    for attempt in range(max_retries):
-        try:
-            # Prepare response format for JSON schema enforcement
-            response_format = {
-                "type": "json_object"  # Modern API format
-            }
-            
-            # Add strict JSON schema if supported by the model
-            # Note: This depends on the LLM provider support
-            response_format["schema"] = schema_json
-            
-            # Make the LLM call
-            response = await llm_bridge.chat_completion(
-                messages=working_messages,
-                model=model or settings.get("default_model"),
-                temperature=temperature if temperature is not None else settings.get("temperature", 0.3),
-                max_tokens=max_tokens or settings.get("max_tokens", 4096),
-                response_format=response_format
-            )
-            
-            # Check for API errors
-            if "error" in response:
-                error_msg = response.get("error", "Unknown error")
-                logger.warning(f"LLM API error (attempt {attempt + 1}/{max_retries}): {error_msg}")
-                
-                # Add error context and retry
-                working_messages.append({
-                    "role": "user",
-                    "content": f"API Error: {error_msg}. Please retry with valid JSON output."
-                })
-                continue
-            
-            # Extract content from response
-            content = None
-            try:
-                choices = response.get("choices", [])
-                if choices and len(choices) > 0:
-                    message = choices[0].get("message", {})
-                    content = message.get("content", "")
-            except Exception as e:
-                logger.warning(f"Failed to extract content from response: {e}")
-                content = None
-            
-            if not content:
-                logger.warning(f"Empty response (attempt {attempt + 1}/{max_retries})")
-                working_messages.append({
-                    "role": "user", 
-                    "content": "Empty response. Please provide valid JSON output."
-                })
-                continue
-            
-            # Attempt to parse the content as the schema
-            try:
-                # First try parsing directly
-                parsed = schema.model_validate_json(content) if hasattr(schema, 'model_validate_json') else schema.parse_raw(content)
-                logger.debug(f"Successfully parsed structured output on attempt {attempt + 1}")
-                return parsed
-            except ValidationError as e:
-                validation_errors = e.errors()
-                error_summary = "; ".join([
-                    f"{err.get('loc', 'unknown')}: {err.get('msg', 'invalid')}" 
-                    for err in validation_errors
-                ])
-                
-                logger.warning(f"Validation error (attempt {attempt + 1}/{max_retries}): {error_summary}")
-                
-                # Inject error feedback and retry
-                working_messages.append({
-                    "role": "assistant",
-                    "content": content
-                })
-                working_messages.append({
-                    "role": "user",
-                    "content": f"Invalid format for {schema_name} schema: {error_summary}. Please fix and output valid JSON matching this schema: {schema_json}"
-                })
-                continue
-                
-        except asyncio.TimeoutError:
-            logger.warning(f"Timeout (attempt {attempt + 1}/{max_retries})")
-            if attempt < max_retries - 1:
-                working_messages.append({
-                    "role": "user",
-                    "content": "Request timed out. Please retry with a shorter response."
-                })
-            continue
-            
-        except Exception as e:
-            logger.error(f"Unexpected error (attempt {attempt + 1}/{max_retries}): {e}")
-            if attempt < max_retries - 1:
-                working_messages.append({
-                    "role": "user",
-                    "content": f"Error: {str(e)}. Please retry with valid JSON."
-                })
-            continue
+    # Track last error for reporting (Issue 2.4)
+    last_error = None
     
-    # All retries exhausted
-    raise StructuredOutputError(
-        f"Failed to get valid {schema_name} after {max_retries} attempts",
-        schema=schema_name,
-        attempts=max_retries
-    )
+    # Get the LLM provider to determine response_format support (Issue 2.5)
+    llm_provider = settings.get("llm_provider", "").lower()
+    
+    try:
+        for attempt in range(max_retries):
+            try:
+                # Prepare response format for JSON schema enforcement (Issue 2.5: Provider-specific)
+                response_format = {
+                    "type": "json_object"  # Modern API format
+                }
+                
+                # Add strict JSON schema only for providers that support it
+                # OpenAI and Anthropic support "schema" in response_format
+                # Other providers may not support this key
+                if llm_provider in ("openai", "anthropic", "azure"):
+                    response_format["schema"] = schema_json
+                
+                # Make the LLM call
+                response = await llm_bridge.chat_completion(
+                    messages=working_messages,
+                    model=model or settings.get("default_model"),
+                    temperature=temperature if temperature is not None else settings.get("temperature", 0.3),
+                    max_tokens=max_tokens or settings.get("max_tokens", 4096),
+                    response_format=response_format
+                )
+                
+                # Check for API errors
+                if "error" in response:
+                    error_msg = response.get("error", "Unknown error")
+                    last_error = error_msg
+                    logger.warning(f"LLM API error (attempt {attempt + 1}/{max_retries}): {error_msg}")
+                    
+                    # Add error context and retry
+                    working_messages.append({
+                        "role": "user",
+                        "content": f"API Error: {error_msg}. Please retry with valid JSON output."
+                    })
+                    
+                    # Issue 2.3: Trim conversation if it grows too large
+                    if len(working_messages) > MAX_CONVERSATION_HISTORY:
+                        working_messages = working_messages[:MAX_CONVERSATION_HISTORY]
+                    continue
+                
+                # Extract content from response
+                content = None
+                try:
+                    choices = response.get("choices", [])
+                    if choices and len(choices) > 0:
+                        message = choices[0].get("message", {})
+                        content = message.get("content", "")
+                except Exception as e:
+                    logger.warning(f"Failed to extract content from response: {e}")
+                    content = None
+                
+                if not content:
+                    last_error = "Empty response"
+                    logger.warning(f"Empty response (attempt {attempt + 1}/{max_retries})")
+                    working_messages.append({
+                        "role": "user", 
+                        "content": "Empty response. Please provide valid JSON output."
+                    })
+                    
+                    # Issue 2.3: Trim conversation if it grows too large
+                    if len(working_messages) > MAX_CONVERSATION_HISTORY:
+                        working_messages = working_messages[:MAX_CONVERSATION_HISTORY]
+                    continue
+                
+                # Attempt to parse the content as the schema
+                try:
+                    # First try parsing directly
+                    parsed = schema.model_validate_json(content) if hasattr(schema, 'model_validate_json') else schema.parse_raw(content)
+                    logger.debug(f"Successfully parsed structured output on attempt {attempt + 1}")
+                    return parsed
+                except ValidationError as e:
+                    validation_errors = e.errors()
+                    error_summary = "; ".join([
+                        f"{err.get('loc', 'unknown')}: {err.get('msg', 'invalid')}" 
+                        for err in validation_errors
+                    ])
+                    last_error = f"Validation error: {error_summary}"
+                    
+                    logger.warning(f"Validation error (attempt {attempt + 1}/{max_retries}): {error_summary}")
+                    
+                    # Inject error feedback and retry
+                    working_messages.append({
+                        "role": "assistant",
+                        "content": content
+                    })
+                    working_messages.append({
+                        "role": "user",
+                        "content": f"Invalid format for {schema_name} schema: {error_summary}. Please fix and output valid JSON matching this schema: {schema_json}"
+                    })
+                    
+                    # Issue 2.3: Trim conversation if it grows too large
+                    if len(working_messages) > MAX_CONVERSATION_HISTORY:
+                        working_messages = working_messages[:MAX_CONVERSATION_HISTORY]
+                    continue
+                    
+            except asyncio.TimeoutError:
+                # Issue 2.2: Capture timeout error info
+                last_error = f"Request timed out after {timeout}s"
+                logger.warning(f"Timeout (attempt {attempt + 1}/{max_retries})")
+                if attempt < max_retries - 1:
+                    working_messages.append({
+                        "role": "user",
+                        "content": "Request timed out. Please retry with a shorter response."
+                    })
+                    # Issue 2.3: Trim conversation if it grows too large
+                    if len(working_messages) > MAX_CONVERSATION_HISTORY:
+                        working_messages = working_messages[:MAX_CONVERSATION_HISTORY]
+                # Continue to next attempt or exit loop
+                continue
+                
+            except Exception as e:
+                last_error = str(e)
+                logger.error(f"Unexpected error (attempt {attempt + 1}/{max_retries}): {e}")
+                if attempt < max_retries - 1:
+                    working_messages.append({
+                        "role": "user",
+                        "content": f"Error: {str(e)}. Please retry with valid JSON."
+                    })
+                    # Issue 2.3: Trim conversation if it grows too large
+                    if len(working_messages) > MAX_CONVERSATION_HISTORY:
+                        working_messages = working_messages[:MAX_CONVERSATION_HISTORY]
+                continue
+        
+        # All retries exhausted - Issue 2.4: Pass last_error to exception
+        raise StructuredOutputError(
+            f"Failed to get valid {schema_name} after {max_retries} attempts",
+            schema=schema_name,
+            attempts=max_retries,
+            last_error=last_error
+        )
+    finally:
+        # Issue 2.1: Ensure bridge is closed when we created it
+        if bridge_created and llm_bridge:
+            try:
+                if hasattr(llm_bridge, 'close'):
+                    await llm_bridge.close()
+                elif hasattr(llm_bridge, 'aclose'):
+                    await llm_bridge.aclose()
+            except Exception as e:
+                logger.warning(f"Error closing LLM bridge: {e}")
 
 
 async def structured_completion_with_fallback(
