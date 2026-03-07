@@ -41,7 +41,7 @@
 Built on the principles of **Speed**, **Simplicity**, and **Modularity**, NeuroCore delivers a solid foundation for building custom AI-powered applications with a fast, modern web stack and a powerful visual workflow editor.
 
 <p align="center">
-  <b>70+ Python files &nbsp;•&nbsp; 40+ HTML templates &nbsp;•&nbsp; 50+ tests &nbsp;•&nbsp; 15 modules &nbsp;•&nbsp; 16 built-in tools &nbsp;•&nbsp; 30+ API routes</b>
+  <b>70+ Python files &nbsp;•&nbsp; 32 HTML templates &nbsp;•&nbsp; 66 tests &nbsp;•&nbsp; 16 modules &nbsp;•&nbsp; 16 built-in tools &nbsp;•&nbsp; 37+ API routes</b>
 </p>
 
 
@@ -68,6 +68,8 @@ Built on the principles of **Speed**, **Simplicity**, and **Modularity**, NeuroC
 - **🔍 Hybrid Search** — Combines FAISS vector search + SQLite FTS5 keyword search with Reciprocal Rank Fusion (RRF) for best-in-class document retrieval.
 
 - **🔒 Secure Tool Sandbox** — All custom Python tools execute in a restricted environment with blocked dangerous imports, network whitelisting, resource limits, and SSRF protection.
+
+- **📊 Observability** — Built-in distributed tracing, metrics collection, and structured JSON logging for debugging and monitoring.
 
 
 ---
@@ -123,12 +125,15 @@ At its heart, NeuroCore is a **flow-based execution engine** that treats AI work
 ┌──────────────────────────────────────────────────────────────┐
 │           🌐 Web Layer                                       │
 
-│   HTMX + Jinja2 (40+ templates) + TailwindCSS                │
+│   HTMX + Jinja2 (32 templates) + TailwindCSS                │
 │   Zero heavy JS frameworks — server-driven UI updates        │
 ├──────────────────────────────────────────────────────────────┤
 │           ⚙️  Core Layer                                     │
 │   main.py          → FastAPI app + lifespan manager          │
-│   core/routers.py  → All HTTP routes (30+ endpoints)         │
+│   core/routers.py  → All HTTP routes (37+ endpoints)         │
+│   core/observability.py → Distributed tracing + metrics      │
+│   core/session_manager.py → Session persistence + tracing     │
+│   core/structured_output.py → Pydantic schema enforcement    │
 │   core/flow_runner.py  → DAG execution engine (Kahn's algo)  │
 │   core/flow_manager.py → Flow CRUD (ai_flows.json)           │
 │   core/module_manager.py → Dynamic hot-swap module loader    │
@@ -420,6 +425,16 @@ NeuroCore is built around a powerful, plugin-based architecture.
 | `planner` | Planner node | — | ✅ |
 | `agent_loop` | Agent loop node | — | ✅ |
 | `reflection` | Reflection node | — | ✅ |
+| `skills` | Instruction file management | ✅ | — |
+
+---
+
+### 📋 Skills Management
+Manage reusable instruction files for AI tasks.
+
+- **SKILL.md Files** — Create best practices, patterns, and guidelines
+- **Import/Export** — Share skills as files
+- **Prompt Injection** — Automatically inject skill content into system prompts
 
 ---
 
@@ -605,7 +620,7 @@ class NodeExecutor:
 |-------|-----------|---------|
 | **Backend** | Python 3.12+, FastAPI, Uvicorn, HTTPX | High-performance async API server |
 | **Frontend** | HTMX, TailwindCSS, Vanilla JavaScript | Lightweight, server-driven UI |
-| **Templating** | Jinja2 (40+ templates) | Server-side HTML generation |
+| **Templating** | Jinja2 (32 templates) | Server-side HTML generation |
 | **Vector Database** | FAISS (`faiss-cpu`) — `IndexIDMap(IndexFlatIP)` | Efficient similarity search |
 | **Relational Database** | SQLite (WAL mode, FTS5 full-text search) | Persistence + text search |
 | **LLM Integration** | OpenAI-compatible API | Universal LLM support |
@@ -723,9 +738,12 @@ NeuroCore/
 │   ├── flow_runner.py          # Flow execution engine (DAG)
 │   ├── llm.py                  # LLM API client (OpenAI-compatible)
 │   ├── module_manager.py       # Dynamic module loading & hot-swap
-│   ├── routers.py              # Main API routes (30+ endpoints)
-│   └── settings.py             # Thread-safe settings manager
-├── modules/                    # Self-contained feature modules (15)
+│   ├── routers.py              # Main API routes (37+ endpoints)
+│   ├── settings.py             # Thread-safe settings manager
+│   ├── observability.py         # Distributed tracing + metrics
+│   ├── session_manager.py      # Session persistence + tracing
+│   └── structured_output.py     # Pydantic schema enforcement
+├── modules/                    # Self-contained feature modules (16)
 │   ├── agent_loop/             # Agent loop node
 │   ├── annotations/            # Flow annotation nodes
 │   ├── calendar/               # Calendar and event management
@@ -738,15 +756,17 @@ NeuroCore/
 │   ├── planner/                # Planner node
 │   ├── reasoning_book/         # Reasoning journal
 │   ├── reflection/             # Reflection node
+│   ├── skills/                 # Instruction file management
 │   ├── system_prompt/          # System prompt injection
 │   ├── telegram/               # Telegram bot integration
 │   └── tools/                  # Tool library and dispatcher
-│       └── library/            # Built-in tool Python files (12)
-├── tests/                      # Comprehensive test suite (50+ files)
+│       └── library/            # Built-in tool Python files (16)
+├── tests/                      # Comprehensive test suite (66 files)
 ├── web/
-│   └── templates/              # Jinja2 HTML templates (40+)
+│   └── templates/              # Jinja2 HTML templates (32)
 ├── data/                       # Persistent data (SQLite + FAISS indexes)
 ├── screenshots/                # UI screenshots
+├── docs/                       # Documentation
 ├── main.py                     # FastAPI application entry point
 ├── pyproject.toml              # Project metadata & build config
 ├── requirements.txt            # Python dependencies
