@@ -412,8 +412,8 @@ class FaissDocumentStore(QueryExpansionMixin):
                 logging.info("🔧 Deleting corrupted index and creating a fresh one...")
                 try:
                     os.remove(index_path)
-                except:
-                    pass
+                except OSError:
+                    pass  # Ignore errors when removing corrupted index file
                 self._create_empty_index()
         else:
             self._create_empty_index()

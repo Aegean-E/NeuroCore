@@ -353,7 +353,7 @@ class MemoryStore:
                         candidate_ids.append(r[0])
                         candidate_scores[r[0]] = float(score)
             except Exception as e:
-                print(f"Linear search failed: {e}")
+                    logger.warning(f"Linear search failed: {e}")
 
         # 3. Fetch Details
         results = []
@@ -564,9 +564,9 @@ class MemoryStore:
             if os.path.exists(index_path):
                 try:
                     os.remove(index_path)
-                    print(f"Deleted stale FAISS index file: {index_path}")
+                    logger.info(f"Deleted stale FAISS index file: {index_path}")
                 except Exception as e:
-                    print(f"Warning: Failed to delete FAISS index file: {e}")
+                    logger.warning(f"Warning: Failed to delete FAISS index file: {e}")
 
     def get_memory_stats(self) -> Dict[str, Any]:
         """Returns statistics about the stored memories."""
@@ -809,7 +809,7 @@ REASON: Brief explanation (1-2 sentences)"""
                         self.log_meta_memory("conflict", [mem1['id'], mem2['id']], None, f"Conflict detected: #{mem1['id']} contradicts #{mem2['id']}: {reason}")
                         
                 except Exception as e:
-                    print(f"Conflict check failed for {mem1['id']} vs {mem2['id']}: {e}")
+                    logger.warning(f"Conflict check failed for {mem1['id']} vs {mem2['id']}: {e}")
         
         return conflicts
 
