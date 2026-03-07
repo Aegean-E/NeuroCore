@@ -85,7 +85,7 @@ async def get_dashboard_stats(request: Request):
             import sqlite3
             with sqlite3.connect(str(memory_path)) as conn:
                 cursor = conn.cursor()
-                cursor.execute("SELECT COUNT(*) FROM memories WHERE is_archived = 0")
+                cursor.execute("SELECT COUNT(*) FROM memories WHERE deleted = 0")
                 memory_count = cursor.fetchone()[0]
         except (sqlite3.Error, OSError) as e:
             # sqlite3.Error: Database connection or query failed
@@ -210,7 +210,7 @@ async def get_recent_sessions(request: Request):
         if not recent:
             return '<p class="text-slate-500 text-sm italic">No sessions yet</p>'
         
-        html = ""
+        html_content = ""
         for s in recent:
             updated = s.get('updated_at', '')
             try:
@@ -222,7 +222,7 @@ async def get_recent_sessions(request: Request):
             # Escape user-supplied session name to prevent XSS
             session_name = html.escape(s.get('name', 'Untitled'))
             
-            html += f"""
+            html_content += f"""
             <button onclick="htmx.ajax('GET', '/chat/gui?session_id={s['id']}', '#module-content')" class="w-full flex items-center justify-between p-3 rounded-lg hover:bg-slate-700/50 border border-transparent hover:border-slate-600/50 transition-all group text-left">
                 <div class="flex items-center gap-3 min-w-0">
                     <div class="w-8 h-8 rounded-lg bg-slate-700 flex items-center justify-center flex-shrink-0">
@@ -233,7 +233,7 @@ async def get_recent_sessions(request: Request):
                 <span class="text-xs text-slate-500 flex-shrink-0">{time_ago}</span>
             </button>
             """
-        return html
+        return html_content
     except (json.JSONDecodeError, OSError, KeyError, ValueError) as e:
         # JSONDecodeError: Corrupted sessions file
         # OSError: File system issues
