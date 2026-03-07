@@ -106,9 +106,14 @@ class ModuleManager:
             # Check regular routes by tags
             if hasattr(route, "tags") and module_id in route.tags:
                 return False
-            # Check Mount objects by path - mounted sub-apps have path prefix
-            if isinstance(route, Mount) and route.path.startswith(module_prefix):
-                return False
+            # Check Mount objects by exact path match OR startswith with slash boundary
+            # This prevents unloading "tool" from also removing "tools", "toolbar", etc.
+            if isinstance(route, Mount):
+                # Exact match: /tool
+                # Sub-path: /tool/something
+                # But NOT /toolbar, /toolbox, etc.
+                if route.path == module_prefix or route.path.startswith(module_prefix + "/"):
+                    return False
             return True
         
         self.app.router.routes = [route for route in self.app.router.routes if should_keep_route(route)]

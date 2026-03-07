@@ -31,8 +31,8 @@ def _estimate_tokens(messages: list) -> int:
 class SessionManager:
     def __init__(self, storage_file=SESSIONS_FILE):
         self.storage_file = storage_file
-        self._sync_lock = threading.Lock()  # For sync methods
-        self._async_lock = asyncio.Lock()   # For async methods
+        # Unified lock: use threading.Lock for all operations to avoid cross-lock races
+        self._lock = threading.Lock()
         self.sessions = self._load_sessions()
 
     def _load_sessions(self):
@@ -59,7 +59,7 @@ class SessionManager:
             raise e
 
     def create_session(self, name=None):
-        with self._sync_lock:
+        with self._lock:
             session_id = str(uuid.uuid4())
             now = datetime.now().isoformat()
             self.sessions[session_id] = {
@@ -73,12 +73,12 @@ class SessionManager:
             return self.sessions[session_id]
 
     def get_session(self, session_id):
-        with self._sync_lock:
+        with self._lock:
             session = self.sessions.get(session_id)
             return copy.deepcopy(session) if session is not None else None
 
     def delete_session(self, session_id):
-        with self._sync_lock:
+        with self._lock:
             if session_id in self.sessions:
                 del self.sessions[session_id]
                 self._save_sessions()
@@ -86,7 +86,7 @@ class SessionManager:
             return False
 
     def rename_session(self, session_id, new_name):
-        with self._sync_lock:
+        with self._lock:
             if session_id in self.sessions:
                 self.sessions[session_id]["name"] = new_name
                 self._save_sessions()
@@ -94,13 +94,32 @@ class SessionManager:
             return False
 
     def list_sessions(self):
-        with self._sync_lock:
+        with self._lock:
             return sorted(self.sessions.values(), key=lambda x: x.get('updated_at', x['created_at']), reverse=True)
 
     def add_message(self, session_id, role, content):
-        with self._sync_lock:
+        with self._lock:
             if session_id in self.sessions:
                 self.sessions[session_id]["history"].append({"role": role, "content": content})
+                self.sessions[session_id]["updated_at"] = datetime.now().isoformat()
+                self._save_sessions()
+                return True
+            return False
+
+    def _get_session_snapshot(self, session_id: str):
+        """Get a snapshot of session data under lock. Called from async context via to_thread."""
+        with self._lock:
+            session = self.sessions.get(session_id)
+            if not session:
+                return None, None
+            return copy.deepcopy(session), session['updated_at']
+
+    def _update_compacted_session(self, session_id: str, snapshot_updated_at: str, new_history: list) -> bool:
+        """Update session with compacted history under lock. Called from async context via to_thread."""
+        with self._lock:
+            current = self.sessions.get(session_id)
+            if current and current['updated_at'] == snapshot_updated_at:
+                self.sessions[session_id]["history"] = new_history
                 self.sessions[session_id]["updated_at"] = datetime.now().isoformat()
                 self._save_sessions()
                 return True
@@ -117,14 +136,13 @@ class SessionManager:
             (compacted: bool, tokens_before: int)
         """
         # Snapshot history under lock to avoid TOCTOU race
-        async with self._async_lock:
-            session = self.sessions.get(session_id)
-            if not session:
-                return False, 0
-            session_copy = copy.deepcopy(session)
-            snapshot_updated_at = session_copy['updated_at']
-            history = session_copy["history"]
-
+        # Use asyncio.to_thread to bridge threading.Lock with async context
+        session, snapshot_updated_at = await asyncio.to_thread(self._get_session_snapshot, session_id)
+        
+        if not session:
+            return False, 0
+            
+        history = session["history"]
         tokens_before = _estimate_tokens(history)
 
         # Need at least keep_last + 2 messages to be worth compacting
@@ -178,16 +196,10 @@ class SessionManager:
         ] + recent_messages
 
         # Re-validate timestamp before writing back to avoid race condition
-        async with self._async_lock:
-            current = self.sessions.get(session_id)
-            if current and current['updated_at'] == snapshot_updated_at:
-                self.sessions[session_id]["history"] = new_history
-                self.sessions[session_id]["updated_at"] = datetime.now().isoformat()
-                # Use asyncio.to_thread to avoid blocking event loop with sync I/O
-                await asyncio.to_thread(self._save_sessions)
-                return True, tokens_before
-
-        return False, tokens_before
+        success = await asyncio.to_thread(self._update_compacted_session, session_id, snapshot_updated_at, new_history)
+        
+        return success, tokens_before
 
 
 session_manager = SessionManager()
+

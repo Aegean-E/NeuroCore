@@ -182,8 +182,18 @@ class FlowManager:
         }
 
     def _ensure_default_active(self):
+        """Ensure a default flow is active if one exists.
+        
+        Only sets active_ai_flows to include default flow if:
+        1. No active flows are currently set, AND
+        2. A default flow (default-flow-001) exists in the flows dictionary
+        """
         if not settings.get("active_ai_flows"):
-            settings.save_settings({"active_ai_flows": []})
+            # Only set if default flow exists
+            if "default-flow-001" in self.flows:
+                settings.save_settings({"active_ai_flows": ["default-flow-001"]})
+            else:
+                settings.save_settings({"active_ai_flows": []})
 
     def _save_flows_to_disk_no_lock_required(self, flows):
         """Internal method to save flows to disk WITHOUT acquiring lock.

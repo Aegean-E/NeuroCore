@@ -15,6 +15,41 @@ TOOLS_LOCK_FILE = TOOLS_FILE + ".lock"
 
 os.makedirs(LIBRARY_DIR, exist_ok=True)
 
+
+def _sanitize_tool_name(name: str) -> str:
+    """Sanitize tool name to prevent path traversal attacks.
+    
+    Removes any path separators, parent directory references, and other
+    characters that could be used for path traversal.
+    
+    Args:
+        name: The raw tool name from user input.
+        
+    Returns:
+        Sanitized tool name safe for filesystem operations.
+        
+    Raises:
+        ValueError: If the sanitized name is empty or invalid.
+    """
+    if not name:
+        raise ValueError("Tool name cannot be empty")
+    
+    # Remove path separators and parent directory references
+    sanitized = name.replace("/", "").replace("\\", "")
+    sanitized = sanitized.replace("..", "")
+    
+    # Remove any characters that could be used for path traversal
+    # Only allow alphanumeric, underscore, hyphen, and spaces
+    sanitized = "".join(c for c in sanitized if c.isalnum() or c in ("_", "-", " "))
+    
+    # Strip leading/trailing whitespace
+    sanitized = sanitized.strip()
+    
+    if not sanitized:
+        raise ValueError("Invalid tool name after sanitization")
+    
+    return sanitized
+
 def load_tools():
     """Load tools from JSON file with file locking for thread safety."""
     lock = filelock.FileLock(TOOLS_LOCK_FILE)
@@ -79,8 +114,13 @@ async def save_tool(
         
         # Determine enabled state and handle renaming
         name = name.strip()
+        # Sanitize tool name to prevent path traversal
+        name = _sanitize_tool_name(name)
+        
         if original_name:
             original_name = original_name.strip()
+            # Sanitize original name as well for consistency
+            original_name = _sanitize_tool_name(original_name)
             
         is_enabled = True
         
@@ -118,6 +158,8 @@ async def save_tool(
 
 @router.post("/{name}/toggle")
 async def toggle_tool(request: Request, name: str):
+    # Sanitize tool name to prevent path traversal
+    name = _sanitize_tool_name(name)
     tools = load_tools()
     if name in tools:
         current_state = tools[name].get("enabled", True)
@@ -127,6 +169,8 @@ async def toggle_tool(request: Request, name: str):
 
 @router.delete("/{name}")
 async def delete_tool(request: Request, name: str):
+    # Sanitize tool name to prevent path traversal
+    name = _sanitize_tool_name(name)
     tools = load_tools()
     if name in tools:
         del tools[name]
@@ -140,6 +184,8 @@ async def delete_tool(request: Request, name: str):
 @router.get("/edit/{name}")
 async def edit_tool(name: str):
     """Returns tool metadata and code for editing."""
+    # Sanitize tool name to prevent path traversal
+    name = _sanitize_tool_name(name)
     tools = load_tools()
     if name not in tools:
         return Response(status_code=404)
@@ -193,6 +239,9 @@ async def get_definitions():
 
 @router.get("/export")
 async def export_tools(name: str = Query(None)):
+    # Sanitize tool name if provided to prevent path traversal
+    if name:
+        name = _sanitize_tool_name(name)
     tools = load_tools()
     export_data = []
     
@@ -231,6 +280,9 @@ async def export_tools(name: str = Query(None)):
 @router.get("/config/{name}", response_class=HTMLResponse)
 async def get_tool_config(request: Request, name: str):
     """Returns the configuration form for a tool."""
+    # Sanitize tool name to prevent path traversal
+    name = _sanitize_tool_name(name)
+    
     if name == "SendEmail":
         smtp_server = os.getenv("SMTP_SERVER", "smtp.gmail.com")
         smtp_port = os.getenv("SMTP_PORT", "587")
@@ -249,6 +301,9 @@ async def get_tool_config(request: Request, name: str):
 @router.post("/config/{name}", response_class=HTMLResponse)
 async def save_tool_config(request: Request, name: str):
     """Saves the configuration for a tool."""
+    # Sanitize tool name to prevent path traversal
+    name = _sanitize_tool_name(name)
+    
     try:
         form_data = await request.form()
         
@@ -292,6 +347,12 @@ async def import_tools(request: Request, file: UploadFile = File(...)):
                 name = tool_data.get("name")
                 if not name: continue
                 
+                # Sanitize tool name to prevent path traversal
+                try:
+                    name = _sanitize_tool_name(name)
+                except ValueError:
+                    continue  # Skip invalid tool names
+                
                 # Update tools.json structure
                 tools[name] = {
                     "definition": {
@@ -312,6 +373,12 @@ async def import_tools(request: Request, file: UploadFile = File(...)):
 
         elif filename.endswith(".py"):
             name = os.path.splitext(os.path.basename(filename))[0]
+            # Sanitize tool name to prevent path traversal
+            try:
+                name = _sanitize_tool_name(name)
+            except ValueError:
+                return Response(status_code=400, headers={"HX-Trigger": json.dumps({"showMessage": {"level": "error", "message": "Invalid tool name in filename"}})})
+            
             code = content.decode("utf-8")
             
             if name not in tools:

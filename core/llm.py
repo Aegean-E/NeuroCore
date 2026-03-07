@@ -15,7 +15,23 @@ logger = logging.getLogger(__name__)
 
 # Module-level shared client for connection pooling
 _shared_client: httpx.AsyncClient = None
-_client_lock = asyncio.Lock()
+_client_lock = None
+
+
+def get_client_lock():
+    """Get or create the client lock lazily to avoid loop-affinity issues.
+    
+    In multi-loop scenarios (reloaders/tests/background workers), creating
+    an asyncio.Lock at import time can raise loop-affinity errors.
+    This function ensures the lock is created in the correct event loop.
+    
+    Returns:
+        asyncio.Lock: The lock for client creation.
+    """
+    global _client_lock
+    if _client_lock is None:
+        _client_lock = asyncio.Lock()
+    return _client_lock
 
 
 async def get_shared_client(timeout: float = 60.0) -> httpx.AsyncClient:
@@ -25,7 +41,7 @@ async def get_shared_client(timeout: float = 60.0) -> httpx.AsyncClient:
     # In asyncio, the outer check is unnecessary because the event loop is single-threaded.
     # The lock ensures atomic creation of the client.
     if _shared_client is None:
-        async with _client_lock:
+        async with get_client_lock():
             if _shared_client is None:
                 _shared_client = httpx.AsyncClient(
                     timeout=httpx.Timeout(timeout),

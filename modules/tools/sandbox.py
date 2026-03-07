@@ -24,6 +24,10 @@ import tracemalloc
 
 logger = logging.getLogger(__name__)
 
+# Store the real __import__ function at module load time
+# This avoids issues where __builtins__ might be a module instead of a dict
+_real_import = builtins.__import__
+
 # Memory limit enforcement - platform specific
 try:
     import resource
@@ -102,8 +106,9 @@ class RestrictedImport:
         if base_module not in self.allowed:
             raise SecurityError(f"Import of module '{name}' is not permitted. Allowed modules: {sorted(self.allowed)}")
         
-        # Use the real __import__ for allowed modules
-        return __builtins__['__import__'](name, globals, locals, fromlist, level)
+        # Use the stored real __import__ function instead of __builtins__ subscript
+        # This avoids issues where __builtins__ might be a module instead of a dict
+        return _real_import(name, globals, locals, fromlist, level)
 
 
 class SafeOpen:
