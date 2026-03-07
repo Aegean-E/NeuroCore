@@ -1,25 +1,25 @@
 # NeuroCore Dependencies
 
 # Web Framework
-fastapi
-uvicorn
-python-multipart
+fastapi>=0.115.0
+uvicorn>=0.32.0
+python-multipart>=0.0.20
 
 # HTTP Client
-httpx
+httpx>=0.28.0
 
 # Templating
-jinja2
+jinja2>=3.1.0
 
 # Data & AI
-numpy
-faiss-cpu
+numpy>=1.26.0
+faiss-cpu>=1.8.0
 
-# Storage
-sqlite3 (built-in)
+# Data Validation
+pydantic>=2.10.0
 
 # Testing
-pytest<9
-pytest-cov
-pytest-httpx
-pytest-asyncio
+pytest>=8.0.0,<9
+pytest-cov>=4.1.0
+pytest-httpx>=0.27.0
+pytest-asyncio>=0.23.0

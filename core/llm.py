@@ -4,6 +4,12 @@ import asyncio
 import json
 
 from core.settings import settings
+from core.errors import (
+    LLMError,
+    LLMTimeoutError,
+    LLMHTTPError,
+    LLMResponseError,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -53,8 +59,27 @@ class LLMBridge:
         base = self.embedding_base_url if use_embedding_url else self.base_url
         return f"{base}/{path.lstrip('/')}"
 
-    async def chat_completion(self, messages, model: str = None, temperature: float = None, max_tokens: int = None, tools: list = None, tool_choice: str = None, response_format: dict = None):
-        """Sends a chat completion request to the LLM API."""
+    async def chat_completion(self, messages, model: str = None, temperature: float = None, max_tokens: int = None, tools: list = None, tool_choice: str = None, response_format: dict = None, raise_errors: bool = False):
+        """Sends a chat completion request to the LLM API.
+        
+        Args:
+            messages: List of message dictionaries
+            model: Model name (fallback to settings.default_model)
+            temperature: Sampling temperature
+            max_tokens: Maximum tokens to generate
+            tools: List of tool definitions
+            tool_choice: Tool choice specification
+            response_format: Response format (e.g., {"type": "json_object"})
+            raise_errors: If True, raises exceptions instead of returning error dicts
+            
+        Returns:
+            dict: Response from LLM, or error dict if raise_errors=False
+            
+        Raises:
+            LLMTimeoutError: On timeout (if raise_errors=True)
+            LLMHTTPError: On HTTP errors (if raise_errors=True)
+            LLMResponseError: On invalid responses (if raise_errors=True)
+        """
         url = self._get_url("/chat/completions")
         
         # Use settings as a fallback for model and temperature
@@ -90,12 +115,18 @@ class LLMBridge:
             return response.json()
         except httpx.TimeoutException as e:
             logger.warning(f"LLM timeout: {e}")
+            if raise_errors:
+                raise LLMTimeoutError(f"LLM request timed out: {e}", model=final_model)
             return {"error": "timeout", "detail": str(e)}
         except httpx.HTTPStatusError as e:
             logger.error(f"LLM HTTP error {e.response.status_code}: {e}")
+            if raise_errors:
+                raise LLMHTTPError(f"LLM HTTP error {e.response.status_code}: {e}", status_code=e.response.status_code, model=final_model)
             return {"error": "http_error", "status": e.response.status_code, "detail": str(e)}
         except Exception as e:
             logger.error(f"LLM unexpected error: {e}")
+            if raise_errors:
+                raise LLMError(f"LLM unexpected error: {e}", model=final_model)
             return {"error": "unknown", "detail": str(e)}
 
     async def chat_completion_stream(self, messages, model: str = None, temperature: float = None, max_tokens: int = None, tools: list = None, tool_choice: str = None, response_format: dict = None):

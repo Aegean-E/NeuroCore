@@ -18,13 +18,14 @@ classifiers = [
 ]
 
 dependencies = [
-    "fastapi",
-    "uvicorn",
-    "python-multipart",
-    "httpx",
-    "jinja2",
-    "numpy",
-    "faiss-cpu",
+    "fastapi>=0.115.0",
+    "uvicorn>=0.32.0",
+    "python-multipart>=0.0.20",
+    "httpx>=0.28.0",
+    "jinja2>=3.1.0",
+    "numpy>=1.26.0",
+    "faiss-cpu>=1.8.0",
+    "pydantic>=2.10.0",
 ]
 
 [project.optional-dependencies]

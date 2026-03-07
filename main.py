@@ -11,6 +11,11 @@ from core.flow_manager import flow_manager
 from core.flow_runner import FlowRunner
 from core.debug import debug_logger
 from core.llm import close_shared_client
+from core.observability import (
+    instrument_flow_runner,
+    instrument_llm_calls,
+    instrument_tools,
+)
 
 
 async def verify_debug_key(x_debug_key: str = Header(...)):
@@ -87,6 +92,11 @@ async def lifespan(app: FastAPI):
         flow = flow_manager.get_flow(active_flow_id)
         if flow:
             _fire_repeater_nodes(app, active_flow_id, flow, is_auto_start=True)
+
+    # Initialize observability instrumentation
+    instrument_flow_runner()
+    instrument_llm_calls()
+    instrument_tools()
 
     yield
     
