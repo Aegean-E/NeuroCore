@@ -8,6 +8,9 @@ python-multipart>=0.0.20
 # HTTP Client
 httpx>=0.28.0
 
+# File Locking
+filelock>=3.13.0
+
 # Templating
 jinja2>=3.1.0
 

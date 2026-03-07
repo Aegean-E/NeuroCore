@@ -23,14 +23,35 @@ def get_client_lock():
     
     In multi-loop scenarios (reloaders/tests/background workers), creating
     an asyncio.Lock at import time can raise loop-affinity errors.
-    This function ensures the lock is created in the correct event loop.
+    This function ensures the lock is created in the correct event loop
+    and recreates it if the loop changes.
     
     Returns:
         asyncio.Lock: The lock for client creation.
     """
     global _client_lock
+    
+    # Issue 2.4: Check if we need to recreate the lock for the current event loop
+    if _client_lock is not None:
+        try:
+            running_loop = asyncio.get_running_loop()
+            # Check if lock belongs to current loop
+            if hasattr(_client_lock, '_loop') and _client_lock._loop is not None:
+                if _client_lock._loop != running_loop:
+                    # Loop changed - recreate lock for new loop
+                    _client_lock = asyncio.Lock()
+            elif running_loop is not None:
+                # Lock was created without loop association, recreate to be safe
+                _client_lock = asyncio.Lock()
+        except RuntimeError:
+            # No running loop (e.g., at import time in main thread)
+            # Keep existing lock if any, or create new one
+            if _client_lock is None:
+                _client_lock = asyncio.Lock()
+    
     if _client_lock is None:
         _client_lock = asyncio.Lock()
+    
     return _client_lock
 
 

@@ -192,17 +192,26 @@ class SafeHttpxClient:
         'api.telegram.org',  # Telegram
     }
     
-    # Blocked IP ranges (private networks)
-    BLOCKED_IP_PATTERNS: List[str] = [
-        r'^127\.',  # Loopback
-        r'^10\.',   # Private Class A
-        r'^172\.(1[6-9]|2[0-9]|3[0-1])\.',  # Private Class B
-        r'^192\.168\.',  # Private Class C
-        r'^169\.254\.',  # Link-local
-        r'^0\.',    # Current network
-        r'^::1$',   # IPv6 loopback
-        r'^fc00:',  # IPv6 private
-        r'^fe80:',  # IPv6 link-local
+    # Allowed URL schemes
+    ALLOWED_SCHEMES: Set[str] = {'http', 'https'}
+    
+    # Blocked IP ranges (IPv4)
+    BLOCKED_IPV4_RANGES: List[str] = [
+        '127.0.0.0/8',      # Loopback
+        '10.0.0.0/8',       # Private Class A
+        '172.16.0.0/12',    # Private Class B
+        '192.168.0.0/16',   # Private Class C
+        '169.254.0.0/16',   # Link-local
+        '0.0.0.0/8',        # Current network
+    ]
+    
+    # Blocked IP ranges (IPv6)
+    BLOCKED_IPV6_RANGES: List[str] = [
+        '::1/128',          # Loopback
+        'fc00::/7',         # Unique local address (private)
+        'fe80::/10',        # Link-local
+        '::/128',           # Unspecified
+        '::ffff:0:0/96',    # IPv4-mapped
     ]
     
     def __init__(self, allowed_domains: Optional[Set[str]] = None, 
@@ -211,7 +220,26 @@ class SafeHttpxClient:
         self.allowed_domains = allowed_domains or self.DEFAULT_ALLOWED_DOMAINS
         self.timeout = timeout
         self.max_response_size = max_response_size
-        self._blocked_patterns = [re.compile(p) for p in self.BLOCKED_IP_PATTERNS]
+        
+        # Import ipaddress for proper CIDR-based IP validation
+        import ipaddress
+        self._ipaddress = ipaddress
+        
+        # Pre-compile IPv4 blocking patterns
+        self._blocked_ipv4_networks = []
+        for cidr in self.BLOCKED_IPV4_RANGES:
+            try:
+                self._blocked_ipv4_networks.append(ipaddress.ip_network(cidr, strict=False))
+            except ValueError:
+                pass
+        
+        # Pre-compile IPv6 blocking patterns  
+        self._blocked_ipv6_networks = []
+        for cidr in self.BLOCKED_IPV6_RANGES:
+            try:
+                self._blocked_ipv6_networks.append(ipaddress.ip_network(cidr, strict=False))
+            except ValueError:
+                pass
     
     def _is_domain_allowed(self, url: str) -> bool:
         """Check if a URL's domain is in the allowed list."""
@@ -235,40 +263,103 @@ class SafeHttpxClient:
             return False
     
     def _is_ip_blocked(self, host: str) -> bool:
-        """Check if a host/IP is in blocked ranges."""
-        for pattern in self._blocked_patterns:
-            if pattern.match(host):
-                return True
-        return False
+        """Check if a host/IP is in blocked ranges using CIDR notation."""
+        try:
+            # Try to parse as IP address directly
+            ip = self._ipaddress.ip_address(host)
+            
+            # Check IPv4 blocked ranges
+            if isinstance(ip, self._ipaddress.IPv4Address):
+                for network in self._blocked_ipv4_networks:
+                    if ip in network:
+                        return True
+            
+            # Check IPv6 blocked ranges
+            if isinstance(ip, self._ipaddress.IPv6Address):
+                for network in self._blocked_ipv6_networks:
+                    if ip in network:
+                        return True
+            
+            return False
+        except ValueError:
+            # Not an IP address, allow through (domain check happens elsewhere)
+            return False
+    
+    def _resolve_and_validate_ip(self, hostname: str) -> str:
+        """
+        Resolve hostname and validate the resulting IP(s).
+        
+        Uses getaddrinfo for IPv4/IPv6 support instead of gethostbyname.
+        
+        Returns:
+            The first valid IP address that is not blocked
+            
+        Raises:
+            SecurityError: If IP is blocked or resolution fails
+        """
+        import socket
+        
+        try:
+            # getaddrinfo returns list of (family, type, proto, canonname, sockaddr)
+            # We want to check both IPv4 and IPv6 results
+            results = socket.getaddrinfo(hostname, None, socket.AF_UNSPEC, socket.SOCK_STREAM)
+            
+            if not results:
+                raise SecurityError(f"Could not resolve domain '{hostname}' - no DNS results")
+            
+            # Check each resolved IP
+            for result in results:
+                family, _, _, _, sockaddr = result
+                ip_addr = sockaddr[0]
+                
+                # Check if this IP is blocked
+                if self._is_ip_blocked(ip_addr):
+                    continue  # Try next IP
+                
+                # Found a valid non-blocked IP
+                return ip_addr
+            
+            # All resolved IPs were blocked
+            resolved_ips = [sockaddr[0] for _, _, _, _, sockaddr in results]
+            raise SecurityError(f"Domain '{hostname}' resolves to blocked IP addresses: {resolved_ips}")
+            
+        except socket.gaierror:
+            raise SecurityError(f"Could not resolve domain '{hostname}' - DNS lookup failed")
+        except socket.herror:
+            raise SecurityError(f"Could not resolve domain '{hostname}' - host not found")
     
     def request(self, method: str, url: str, **kwargs):
         """Make a restricted HTTP request."""
         import httpx
-        import socket
         from urllib.parse import urlparse
         
-        # Parse URL to get domain
+        # Issue 2.3: Parse URL and validate scheme
         parsed = urlparse(url)
-        domain = parsed.netloc.lower()
         
-        # Remove port if present
-        if ':' in domain:
-            domain = domain.split(':')[0]
+        # Check scheme whitelist - reject file://, ftp://, etc.
+        if parsed.scheme.lower() not in self.ALLOWED_SCHEMES:
+            raise SecurityError(
+                f"URL scheme '{parsed.scheme}' is not allowed. "
+                f"Only {', '.join(self.ALLOWED_SCHEMES)} are permitted."
+            )
+        
+        # Get hostname from parsed.hostname (more reliable than netloc)
+        hostname = parsed.hostname
+        if not hostname:
+            raise SecurityError(f"Invalid URL '{url}': no hostname found")
+        
+        hostname = hostname.lower()
         
         # Check domain whitelist
         if not self._is_domain_allowed(url):
             raise SecurityError(f"HTTP requests to '{url}' are not permitted. Domain not in whitelist.")
         
-        # Resolve domain and check if it resolves to a blocked IP
-        # This prevents attackers from using DNS tricks to access internal services
-        try:
-            ip = socket.gethostbyname(domain)
-            if self._is_ip_blocked(ip):
-                raise SecurityError(f"Domain '{domain}' resolves to blocked IP address '{ip}'")
-        except socket.gaierror:
-            raise SecurityError(f"Could not resolve domain '{domain}' - DNS lookup failed")
-        except socket.herror:
-            raise SecurityError(f"Could not resolve domain '{domain}' - host not found")
+        # Issue 2.3: Resolve and validate IP using getaddrinfo (IPv4/IPv6)
+        # This replaces the old socket.gethostbyname() which only handled IPv4
+        validated_ip = self._resolve_and_validate_ip(hostname)
+        if validated_ip:
+            import logging
+            logging.getLogger(__name__).debug(f"Domain '{hostname}' validated, resolved to IP: {validated_ip}")
         
         # Enforce timeout
         kwargs['timeout'] = min(kwargs.get('timeout', self.timeout), self.timeout)

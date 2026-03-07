@@ -102,10 +102,11 @@ class SettingsManager:
                 raise ValueError("max_node_loops must be a positive integer")
             validated["max_node_loops"] = int(loops)
         
+        # Issue 2.2: Strict boolean parsing - bool("false") returns True in Python!
         # debug_mode, ui_wide_mode, ui_show_footer: booleans
         for bool_field in ["debug_mode", "ui_wide_mode", "ui_show_footer"]:
             if bool_field in new_settings:
-                validated[bool_field] = bool(new_settings[bool_field])
+                validated[bool_field] = self._parse_bool(new_settings[bool_field], bool_field)
         
         # String fields that should remain strings
         for str_field in ["llm_api_url", "llm_api_key", "embedding_api_url", "default_model", "embedding_model"]:
@@ -122,6 +123,42 @@ class SettingsManager:
             validated["active_ai_flows"] = new_settings["active_ai_flows"]
         
         return validated
+    
+    def _parse_bool(self, value, field_name: str = None) -> bool:
+        """
+        Parse a value to boolean with strict handling.
+        
+        Handles:
+        - Python bool: returned as-is
+        - String: "true", "1", "yes", "on" -> True
+        - String: "false", "0", "no", "off" -> False
+        - Other: raises ValueError
+        
+        Args:
+            value: The value to parse
+            field_name: Optional field name for error messages
+            
+        Returns:
+            Boolean value
+            
+        Raises:
+            ValueError: If value cannot be safely converted to boolean
+        """
+        field_desc = f"'{field_name}' " if field_name else ""
+        
+        if isinstance(value, bool):
+            return value
+        
+        if isinstance(value, str):
+            lower = value.lower().strip()
+            if lower in ('true', '1', 'yes', 'on'):
+                return True
+            if lower in ('false', '0', 'no', 'off'):
+                return False
+            raise ValueError(f"Invalid boolean value for {field_desc}: {value!r}")
+        
+        # For other types, use bool() but warn
+        raise ValueError(f"Cannot parse {field_desc}from value {value!r} (type: {type(value).__name__})")
 
     def get(self, key, default=None):
         with self.lock:

@@ -150,8 +150,9 @@ async def structured_completion(
                     })
                     
                     # Issue 2.3: Trim conversation if it grows too large
+                    # Keep newest messages (recent correction context) instead of oldest
                     if len(working_messages) > MAX_CONVERSATION_HISTORY:
-                        working_messages = working_messages[:MAX_CONVERSATION_HISTORY]
+                        working_messages = working_messages[-MAX_CONVERSATION_HISTORY:]
                     continue
                 
                 # Extract content from response
@@ -174,8 +175,9 @@ async def structured_completion(
                     })
                     
                     # Issue 2.3: Trim conversation if it grows too large
+                    # Keep newest messages (recent correction context) instead of oldest
                     if len(working_messages) > MAX_CONVERSATION_HISTORY:
-                        working_messages = working_messages[:MAX_CONVERSATION_HISTORY]
+                        working_messages = working_messages[-MAX_CONVERSATION_HISTORY:]
                     continue
                 
                 # Attempt to parse the content as the schema
@@ -205,8 +207,9 @@ async def structured_completion(
                     })
                     
                     # Issue 2.3: Trim conversation if it grows too large
+                    # Keep newest messages (recent correction context) instead of oldest
                     if len(working_messages) > MAX_CONVERSATION_HISTORY:
-                        working_messages = working_messages[:MAX_CONVERSATION_HISTORY]
+                        working_messages = working_messages[-MAX_CONVERSATION_HISTORY:]
                     continue
                     
             except asyncio.TimeoutError:
@@ -219,8 +222,9 @@ async def structured_completion(
                         "content": "Request timed out. Please retry with a shorter response."
                     })
                     # Issue 2.3: Trim conversation if it grows too large
+                    # Keep newest messages (recent correction context) instead of oldest
                     if len(working_messages) > MAX_CONVERSATION_HISTORY:
-                        working_messages = working_messages[:MAX_CONVERSATION_HISTORY]
+                        working_messages = working_messages[-MAX_CONVERSATION_HISTORY:]
                 # Continue to next attempt or exit loop
                 continue
                 
@@ -233,8 +237,9 @@ async def structured_completion(
                         "content": f"Error: {str(e)}. Please retry with valid JSON."
                     })
                     # Issue 2.3: Trim conversation if it grows too large
+                    # Keep newest messages (recent correction context) instead of oldest
                     if len(working_messages) > MAX_CONVERSATION_HISTORY:
-                        working_messages = working_messages[:MAX_CONVERSATION_HISTORY]
+                        working_messages = working_messages[-MAX_CONVERSATION_HISTORY:]
                 continue
         
         # All retries exhausted - Issue 2.4: Pass last_error to exception
