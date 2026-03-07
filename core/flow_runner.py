@@ -427,7 +427,7 @@ class FlowRunner:
             'warnings': warnings
         }
 
-    async def run(self, initial_input: dict, start_node_id: str = None, timeout: float = None):
+    async def run(self, initial_input: dict, start_node_id: str = None, timeout: float = None, raise_errors: bool = False):
         """
         Executes the flow in order, passing data between nodes.
         
@@ -435,6 +435,7 @@ class FlowRunner:
             initial_input: Input data for the flow
             start_node_id: Optional specific node to start from
             timeout: Optional timeout in seconds for the entire flow execution
+            raise_errors: If True, raise exceptions instead of returning error dicts
         """
         if settings.get("debug_mode"):
             debug_logger.log(self.flow_id, "SYSTEM", "FlowRunner", "flow_start", {"start_node": start_node_id, "input_source": initial_input.get("_input_source") if isinstance(initial_input, dict) else None, "timeout": timeout})
