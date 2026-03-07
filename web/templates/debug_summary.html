@@ -1,4 +1,27 @@
 <!-- Agent Summary Panel -->
+<!-- Time Window Filter -->
+<div class="flex items-center gap-2 mb-3">
+    <span class="text-xs text-slate-500 uppercase tracking-wider">Time Window:</span>
+    <div class="flex gap-1">
+        <button hx-get="/debug/summary" hx-target="#debug-summary" hx-swap="innerHTML"
+                class="px-2 py-1 text-xs rounded bg-slate-700 text-slate-300 hover:bg-slate-600 transition-all">
+            All
+        </button>
+        <button hx-get="/debug/summary?since=300" hx-target="#debug-summary" hx-swap="innerHTML"
+                class="px-2 py-1 text-xs rounded bg-slate-700 text-slate-300 hover:bg-slate-600 transition-all">
+            5m
+        </button>
+        <button hx-get="/debug/summary?since=900" hx-target="#debug-summary" hx-swap="innerHTML"
+                class="px-2 py-1 text-xs rounded bg-slate-700 text-slate-300 hover:bg-slate-600 transition-all">
+            15m
+        </button>
+        <button hx-get="/debug/summary?since=3600" hx-target="#debug-summary" hx-swap="innerHTML"
+                class="px-2 py-1 text-xs rounded bg-slate-700 text-slate-300 hover:bg-slate-600 transition-all">
+            1h
+        </button>
+    </div>
+</div>
+
 <div class="grid grid-cols-4 gap-4 mb-4">
     <!-- Session ID -->
     <div class="bg-slate-800/50 rounded-lg border border-slate-700/50 p-3">

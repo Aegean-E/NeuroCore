@@ -4,6 +4,7 @@ import sys
 import platform
 import asyncio
 import logging
+import time
 from datetime import datetime
 from fastapi import APIRouter, Request, Form, Depends, HTTPException, Response, BackgroundTasks, UploadFile, File
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
@@ -848,19 +849,39 @@ async def get_debug_events(request: Request, since: float = 0):
     return debug_logger.get_recent_logs(since)
 
 @router.get("/debug/agent-summary", response_class=JSONResponse)
-async def get_agent_summary(request: Request):
-    """Get a summary of the last agent session trace events."""
+async def get_agent_summary(request: Request, since: float = None, limit: int = 5):
+    """Get a summary of the last agent session trace events.
+    
+    Query params:
+        since: Optional time window in seconds (e.g., 300 = last 5 minutes, 900 = last 15 minutes)
+        limit: Number of recent events to include (default: 5)
+    """
     from core.session_manager import session_manager
     
-    summary = session_manager.get_trace_summary(limit=5)
+    # Convert relative time (seconds) to absolute timestamp
+    since_ts = None
+    if since is not None:
+        since_ts = time.time() - since
+    
+    summary = session_manager.get_trace_summary(limit=limit, since=since_ts)
     return JSONResponse(content=summary)
 
 @router.get("/debug/summary", response_class=HTMLResponse)
-async def get_debug_summary(request: Request):
-    """Get the agent summary panel for the debug page."""
+async def get_debug_summary(request: Request, since: float = None, limit: int = 5):
+    """Get the agent summary panel for the debug page.
+    
+    Query params:
+        since: Optional time window in seconds (e.g., 300 = last 5 minutes, 900 = last 15 minutes)
+        limit: Number of recent events to include (default: 5)
+    """
     from core.session_manager import session_manager
     
-    summary = session_manager.get_trace_summary(limit=5)
+    # Convert relative time (seconds) to absolute timestamp
+    since_ts = None
+    if since is not None:
+        since_ts = time.time() - since
+    
+    summary = session_manager.get_trace_summary(limit=limit, since=since_ts)
     return templates.TemplateResponse(request, "debug_summary.html", {"summary": summary})
 
 @router.post("/debug/clear")
