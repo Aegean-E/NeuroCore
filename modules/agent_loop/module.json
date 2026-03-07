@@ -26,6 +26,20 @@
             "description": "Autonomous agent that loops between LLM and tools until no more tool calls.",
             "singleton": false,
             "configurable": true
+        },
+        {
+            "id": "recursive_lm",
+            "name": "RLM Agent Loop",
+            "description": "Recursive Language Model agent for processing arbitrarily long inputs via REPL environment. Enables handling of inputs exceeding normal context limits.",
+            "singleton": false,
+            "configurable": true
+        },
+        {
+            "id": "repl_environment",
+            "name": "REPL Environment",
+            "description": "Initializes a persistent REPL state for RLM processing. Extracts user input and stores it as a variable outside the context window.",
+            "singleton": false,
+            "configurable": true
         }
     ]
 }

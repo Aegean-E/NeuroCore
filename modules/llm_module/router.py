@@ -7,7 +7,8 @@ router = APIRouter()
 @router.post("/settings/generation")
 async def save_generation_settings(request: Request, temperature: float = Form(...), max_tokens: int = Form(...)):
     module_manager = request.app.state.module_manager
-    llm_module = module_manager.modules.get("llm_module")
+    # FIX: Use proper accessor method with locking instead of direct modules access
+    llm_module = module_manager.get_module("llm_module")
     if not llm_module:
         return Response(status_code=404)
         
