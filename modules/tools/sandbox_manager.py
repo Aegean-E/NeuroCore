@@ -209,6 +209,9 @@ class WorkerPool:
         # Lock for thread safety
         self._lock = threading.Lock()
         
+        # Round-robin counter for worker dispatch
+        self._next_worker = 0
+        
         # Initialize workers
         self._initialize_workers()
     
@@ -230,6 +233,9 @@ class WorkerPool:
             
             # Create request queue for this worker
             self._worker_queues[i] = Queue()
+            
+            # Register the worker queue so subprocess can find it
+            WorkerPool._register_worker_queue(i, self._worker_queues[i])
             
             logger.info(f"Started worker {i} (PID: {p.pid})")
     
@@ -318,8 +324,8 @@ class WorkerPool:
         
         logger.info(f"Worker {worker_id} stopped")
     
-    @staticmethod
-    def _worker_queue_map: Dict[int, Queue] = {}
+    # Class-level shared state for worker queues (used by subprocesses)
+    _worker_queue_map: Dict[int, Queue] = {}
     _worker_queue_map_lock = threading.Lock()
     
     @staticmethod
@@ -357,9 +363,10 @@ class WorkerPool:
         if timeout:
             config.timeout = timeout
         
-        # Get available worker (round-robin)
+        # Get available worker (round-robin using atomic counter)
         with self._lock:
-            worker_id = len(self._worker_queues) % self.pool_size
+            worker_id = self._next_worker % self.pool_size
+            self._next_worker += 1
         
         # Create task
         task_id = uuid.uuid4().hex
@@ -452,7 +459,12 @@ class SandboxManager:
         worker_type = worker_type or self.default_worker_type
         
         # Run in executor to avoid blocking event loop
-        loop = asyncio.get_event_loop()
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            # If no running event loop, create a new one (for sync contexts)
+            loop = asyncio.new_event_loop()
+        
         result = await loop.run_in_executor(
             None,
             self._pool.execute,

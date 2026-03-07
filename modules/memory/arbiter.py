@@ -110,20 +110,23 @@ class MemoryArbiter:
 
     async def consider_batch(self, candidates: List[Dict]) -> List[int]:
         """
-        Process a batch of memory candidates.
+        Process a batch of memory candidates in parallel.
         """
-        promoted_ids = []
-        for c in candidates:
-            mid = await self.consider(
+        async def process_candidate(c: Dict) -> Optional[int]:
+            return await self.consider(
                 text=c.get("text", ""),
                 confidence=c.get("confidence", 1.0),
                 subject=c.get("subject", "User"),
                 source=c.get("source", "reasoning"),
                 embedding=c.get("embedding"),
-                mem_type=c.get("mem_type", c.get("type", "BELIEF")),  # Support both "mem_type" and "type" keys
+                mem_type=c.get("mem_type", c.get("type", "BELIEF")),
                 verified=c.get("verified", False),
                 expires_at=c.get("expires_at")
             )
-            if mid:
-                promoted_ids.append(mid)
+        
+        # Process all candidates in parallel using asyncio.gather
+        results = await asyncio.gather(*[process_candidate(c) for c in candidates])
+        
+        # Filter out None results and collect valid memory IDs
+        promoted_ids = [mid for mid in results if mid is not None]
         return promoted_ids
