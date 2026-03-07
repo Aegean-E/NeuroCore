@@ -8,13 +8,16 @@ import logging
 
 BASE_URL = "https://api.telegram.org/bot"
 
+# Create a logger for the TelegramBridge module
+logger = logging.getLogger(__name__)
+
 class TelegramBridge:
     """Handles communication with Telegram API"""
 
-    def __init__(self, bot_token: str, chat_id: int, log_fn: Callable[[str], None] = print):
+    def __init__(self, bot_token: str, chat_id: int, log_fn: Callable[[str], None] = None):
         self.bot_token = bot_token
         self.chat_id = chat_id
-        self.log = log_fn
+        self.log = log_fn if log_fn else logger.info
         self.is_connected = False
         self.last_update_id = None
         self.session = requests.Session()

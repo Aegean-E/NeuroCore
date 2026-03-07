@@ -12,7 +12,10 @@ from typing import Optional, List, Dict, Any
 class SkillBackend:
     """Handles file-based storage for skills."""
     
-    def __init__(self, storage_path: str = "modules/skills/data"):
+    def __init__(self, storage_path: str = None):
+        # Use absolute path based on this file's location for consistency
+        if storage_path is None:
+            storage_path = os.path.join(os.path.dirname(__file__), "data")
         self.storage_path = storage_path
         self.metadata_file = os.path.join(storage_path, "skills_metadata.json")
         self._ensure_storage_exists()

@@ -228,10 +228,31 @@ class SafeHttpxClient:
     def request(self, method: str, url: str, **kwargs):
         """Make a restricted HTTP request."""
         import httpx
+        import socket
+        from urllib.parse import urlparse
+        
+        # Parse URL to get domain
+        parsed = urlparse(url)
+        domain = parsed.netloc.lower()
+        
+        # Remove port if present
+        if ':' in domain:
+            domain = domain.split(':')[0]
         
         # Check domain whitelist
         if not self._is_domain_allowed(url):
             raise SecurityError(f"HTTP requests to '{url}' are not permitted. Domain not in whitelist.")
+        
+        # Resolve domain and check if it resolves to a blocked IP
+        # This prevents attackers from using DNS tricks to access internal services
+        try:
+            ip = socket.gethostbyname(domain)
+            if self._is_ip_blocked(ip):
+                raise SecurityError(f"Domain '{domain}' resolves to blocked IP address '{ip}'")
+        except socket.gaierror:
+            raise SecurityError(f"Could not resolve domain '{domain}' - DNS lookup failed")
+        except socket.herror:
+            raise SecurityError(f"Could not resolve domain '{domain}' - host not found")
         
         # Enforce timeout
         kwargs['timeout'] = min(kwargs.get('timeout', self.timeout), self.timeout)

@@ -46,6 +46,9 @@ class TelegramInputExecutor:
         return processed_data
 
 class TelegramOutputExecutor:
+    # Cache bridge instances to avoid recreating them for each message
+    _bridge_cache = {}
+    
     async def receive(self, input_data: dict, config: dict = None) -> dict:
         if not input_data or "content" not in input_data:
             return input_data
@@ -55,7 +58,11 @@ class TelegramOutputExecutor:
         chat_id = mod_config.get("chat_id")
         
         if bot_token and chat_id:
-            bridge = TelegramBridge(bot_token, chat_id)
+            # Use cached bridge instance for efficiency
+            cache_key = f"{bot_token}_{chat_id}"
+            if cache_key not in self._bridge_cache:
+                self._bridge_cache[cache_key] = TelegramBridge(bot_token, chat_id)
+            bridge = self._bridge_cache[cache_key]
             bridge.send_message(input_data["content"])
             
         return input_data

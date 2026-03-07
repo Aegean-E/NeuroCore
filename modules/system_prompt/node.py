@@ -44,8 +44,8 @@ class SystemPromptExecutor:
         
         return tools_list
 
-    def _load_skills_content(self, enabled_skills: list) -> str:
-        """Load content from enabled skills (cached by mtime)."""
+    async def _load_skills_content(self, enabled_skills: list) -> str:
+        """Load content from enabled skills (cached by mtime). Uses async to avoid blocking."""
         if not enabled_skills:
             return ""
         
@@ -60,8 +60,15 @@ class SystemPromptExecutor:
                 # Note: Using sync lock pattern (since _load_skills_content is sync)
                 # The skills cache is simple enough that we can use a basic check
                 if mtime > self._skills_cache["mtime"]:
-                    # Load all skills content
-                    skills_content = self._load_skills_from_disk(storage_path, metadata_file, enabled_skills)
+                    # Load all skills content using run_in_executor to avoid blocking event loop
+                    loop = asyncio.get_event_loop()
+                    skills_content = await loop.run_in_executor(
+                        None, 
+                        self._load_skills_from_disk, 
+                        storage_path, 
+                        metadata_file, 
+                        enabled_skills
+                    )
                     self._skills_cache["data"] = skills_content
                     self._skills_cache["mtime"] = mtime
                 return self._skills_cache["data"]
@@ -130,7 +137,7 @@ class SystemPromptExecutor:
         
         # Skills context (from enabled_skills config) - LOW PRIORITY
         enabled_skills = config.get("enabled_skills", [])
-        skills_context = self._load_skills_content(enabled_skills)
+        skills_context = await self._load_skills_content(enabled_skills)
         
         # Build context sections with priority-based ordering
         # Priority levels: 0=highest (plan, memory), 1=medium (knowledge, reasoning), 2=lowest (skills)
