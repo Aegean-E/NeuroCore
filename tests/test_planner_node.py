@@ -265,6 +265,225 @@ async def test_plan_context_empty_plan():
     assert "plan_context" not in result or result["plan_context"] is None
 
 
+# ============ NEW TESTS FOR AUTO_TRACK MODE ============
+
+@pytest.mark.asyncio
+async def test_auto_track_enabled_runs_progression():
+    """When auto_track=true and plan exists, should run progression tick."""
+    executor = make_executor()
+    
+    # Input with existing plan
+    input_data = {
+        "plan": [
+            {"step": 1, "action": "Search", "target": "docs"},
+            {"step": 2, "action": "Analyze", "target": "results"}
+        ],
+        "current_step": 0,
+        "messages": [{"role": "user", "content": "Do something"}]
+    }
+    
+    result = await executor.receive(input_data, config={"auto_track": True})
+    
+    # Should have progressed to step 2
+    assert result["current_step"] == 1
+    assert result["step_completed"]["step"] == 1
+    assert result["completed_steps"] == [0]
+    assert result["next_step"]["step"] == 2
+    assert result["plan_complete"] is False
+
+
+@pytest.mark.asyncio
+async def test_auto_track_disabled_passthrough():
+    """When auto_track=false (default), should create new plan from LLM."""
+    executor = make_executor()
+    plan_json = '[{"step": 1, "action": "New plan", "target": "task"}]'
+    executor.llm.chat_completion = AsyncMock(return_value=make_llm_response(plan_json))
+    
+    input_data = {
+        "plan": [
+            {"step": 1, "action": "Old step", "target": "old"}
+        ],
+        "current_step": 1,
+        "messages": [{"role": "user", "content": "Create new plan"}]
+    }
+    
+    result = await executor.receive(input_data, config={"auto_track": False})
+    
+    # Should have created new plan, not used existing one
+    assert result["plan"][0]["action"] == "New plan"
+    assert result["current_step"] == 0
+
+
+@pytest.mark.asyncio
+async def test_auto_track_no_plan_creates_plan():
+    """When auto_track=true but no plan exists, should create new plan."""
+    executor = make_executor()
+    plan_json = '[{"step": 1, "action": "New plan", "target": "task"}]'
+    executor.llm.chat_completion = AsyncMock(return_value=make_llm_response(plan_json))
+    
+    input_data = {
+        "messages": [{"role": "user", "content": "Create plan"}]
+    }
+    
+    result = await executor.receive(input_data, config={"auto_track": True})
+    
+    # Should have created new plan from LLM
+    assert result["plan"][0]["action"] == "New plan"
+    assert result["current_step"] == 0
+
+
+@pytest.mark.asyncio
+async def test_auto_track_plan_complete():
+    """When auto_track progresses to end of plan, should set plan_complete=True."""
+    executor = make_executor()
+    
+    input_data = {
+        "plan": [
+            {"step": 1, "action": "Single step", "target": "task"}
+        ],
+        "current_step": 0,
+        "messages": [{"role": "user", "content": "Do it"}]
+    }
+    
+    result = await executor.receive(input_data, config={"auto_track": True})
+    
+    # Should be complete
+    assert result["plan_complete"] is True
+    assert result["current_step"] == 1
+    assert result["next_step"] is None
+
+
+@pytest.mark.asyncio
+async def test_auto_track_respects_dependencies():
+    """Auto_track should respect dependencies like PlanStepTracker."""
+    executor = make_executor()
+    
+    input_data = {
+        "plan": [
+            {"step": 1, "action": "Fetch data", "target": "API"},
+            {"step": 2, "action": "Process", "target": "results", "depends_on": 1}
+        ],
+        "current_step": 0,
+        "messages": [{"role": "user", "content": "Do it"}]
+    }
+    
+    result = await executor.receive(input_data, config={"auto_track": True})
+    
+    # Should have completed step 1 and moved to step 2 (respecting dependency)
+    assert result["step_completed"]["step"] == 1
+    assert result["current_step"] == 1
+    assert result["next_step"]["step"] == 2
+
+
+@pytest.mark.asyncio
+async def test_auto_track_detects_circular_dependencies():
+    """Auto_track should detect circular dependencies."""
+    executor = make_executor()
+    
+    input_data = {
+        "plan": [
+            {"step": 1, "action": "A", "target": "", "depends_on": 2},
+            {"step": 2, "action": "B", "target": "", "depends_on": 1}
+        ],
+        "current_step": 0,
+        "messages": [{"role": "user", "content": "Do it"}]
+    }
+    
+    result = await executor.receive(input_data, config={"auto_track": True})
+    
+    # Should detect circular dependency
+    assert "dependency_error" in result
+    assert "Circular dependency" in result["dependency_error"]
+    assert result["plan_complete"] is True  # Should stop execution
+
+
+@pytest.mark.asyncio
+async def test_auto_track_multiple_steps():
+    """Auto_track should work correctly through multiple progression steps."""
+    executor = make_executor()
+    
+    input_data = {
+        "plan": [
+            {"step": 1, "action": "Step one", "target": "A"},
+            {"step": 2, "action": "Step two", "target": "B"},
+            {"step": 3, "action": "Step three", "target": "C"}
+        ],
+        "current_step": 0,
+        "messages": [{"role": "user", "content": "Do three things"}]
+    }
+    
+    # First progression
+    result = await executor.receive(input_data, config={"auto_track": True})
+    assert result["current_step"] == 1
+    assert result["step_completed"]["action"] == "Step one"
+    assert result["completed_steps"] == [0]
+    
+    # Second progression
+    result = await executor.receive(result, config={"auto_track": True})
+    assert result["current_step"] == 2
+    assert result["step_completed"]["action"] == "Step two"
+    assert set(result["completed_steps"]) == {0, 1}
+    
+    # Third progression
+    result = await executor.receive(result, config={"auto_track": True})
+    assert result["current_step"] == 3
+    assert result["step_completed"]["action"] == "Step three"
+    assert result["plan_complete"] is True
+
+
+@pytest.mark.asyncio
+async def test_auto_track_plan_context_shows_completed():
+    """Auto_track should update plan_context to show completed steps."""
+    executor = make_executor()
+    
+    input_data = {
+        "plan": [
+            {"step": 1, "action": "First", "target": "A"},
+            {"step": 2, "action": "Second", "target": "B"}
+        ],
+        "current_step": 0,
+        "messages": [{"role": "user", "content": "Do it"}]
+    }
+    
+    result = await executor.receive(input_data, config={"auto_track": True})
+    
+    # Should show completed step with checkmark
+    assert "✓ 1. First: A (COMPLETED)" in result["plan_context"]
+    assert "→ 2. Second: B (CURRENT)" in result["plan_context"]
+
+
+@pytest.mark.asyncio
+async def test_auto_track_matches_tracker_behavior():
+    """Auto_track behavior should match PlanStepTracker for same inputs."""
+    from modules.planner.node import PlanStepTracker
+    
+    executor = make_executor()
+    tracker = PlanStepTracker()
+    
+    input_data = {
+        "plan": [
+            {"step": 1, "action": "A", "target": ""},
+            {"step": 2, "action": "B", "target": "", "depends_on": 1},
+            {"step": 3, "action": "C", "target": ""}
+        ],
+        "current_step": 0,
+        "messages": [{"role": "user", "content": "Test"}]
+    }
+    
+    # Run auto_track
+    result_auto = await executor.receive(input_data.copy(), config={"auto_track": True})
+    
+    # Run tracker
+    result_tracker = await tracker.receive(input_data.copy())
+    
+    # Should match
+    assert result_auto["current_step"] == result_tracker["current_step"]
+    assert result_auto["step_completed"] == result_tracker["step_completed"]
+    assert result_auto["completed_steps"] == result_tracker["completed_steps"]
+    assert result_auto["next_step"] == result_tracker["next_step"]
+    assert result_auto["plan_complete"] == result_tracker["plan_complete"]
+
+
 if __name__ == "__main__":
     import pytest
     pytest.main([__file__, "-v"])

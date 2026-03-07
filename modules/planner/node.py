@@ -31,6 +31,182 @@ class PlannerExecutor:
         # Lazy import to avoid circular dependencies
         self._reasoning_service = None
     
+    # ========== Helper Methods for auto_track mode ==========
+    
+    def _generate_plan_context(self, plan: list, current_step: int, completed_steps: set) -> str:
+        """Generate plan_context string showing progress (used in auto_track mode)."""
+        if not plan:
+            return ""
+        
+        plan_lines = []
+        for i, p in enumerate(plan):
+            step_num = p.get('step', i + 1)
+            action = p['action']
+            target = p.get('target', '')
+            
+            # Mark completed steps, current step, and pending steps
+            if i in completed_steps:
+                plan_lines.append(f"✓ {step_num}. {action}: {target} (COMPLETED)")
+            elif i == current_step:
+                plan_lines.append(f"→ {step_num}. {action}: {target} (CURRENT)")
+            else:
+                plan_lines.append(f"  {step_num}. {action}: {target}")
+        
+        plan_text = "\n".join(plan_lines)
+        return f"## Execution Plan\nCurrently on step {current_step + 1} of {len(plan)}.\n{plan_text}"
+    
+    def _build_dependency_graph(self, plan: list) -> tuple:
+        """Build adjacency list and in-degree count for topological sort."""
+        n = len(plan)
+        adj = {i: [] for i in range(n)}  # step_index -> [dependent_step_indices]
+        in_degree = {i: 0 for i in range(n)}  # step_index -> number of dependencies
+        
+        # Map step numbers to indices for dependency resolution
+        step_num_to_idx = {}
+        for i, step in enumerate(plan):
+            step_num = step.get('step', i + 1)
+            step_num_to_idx[step_num] = i
+        
+        for i, step in enumerate(plan):
+            depends_on = step.get('depends_on')
+            if depends_on is not None:
+                # Handle single dependency or list of dependencies
+                if isinstance(depends_on, int):
+                    deps = [depends_on]
+                elif isinstance(depends_on, list):
+                    deps = depends_on
+                else:
+                    deps = []
+                
+                for dep_step_num in deps:
+                    # Find the index of the dependency step
+                    dep_idx = step_num_to_idx.get(dep_step_num)
+                    if dep_idx is not None and dep_idx < len(plan):
+                        # Add edge: dep_idx -> i (i depends on dep_idx)
+                        adj[dep_idx].append(i)
+                        in_degree[i] += 1
+        
+        return adj, in_degree
+    
+    def _detect_circular_dependencies(self, plan: list) -> tuple:
+        """Detect circular dependencies using Kahn's algorithm."""
+        if not plan:
+            return False, None
+        
+        adj, in_degree = self._build_dependency_graph(plan)
+        n = len(plan)
+        
+        # Find all steps with no dependencies
+        queue = deque([i for i in range(n) if in_degree[i] == 0])
+        visited_count = 0
+        visited_order = []
+        
+        while queue:
+            u = queue.popleft()
+            visited_order.append(u)
+            visited_count += 1
+            
+            for v in adj[u]:
+                in_degree[v] -= 1
+                if in_degree[v] == 0:
+                    queue.append(v)
+        
+        if visited_count != n:
+            # Circular dependency detected
+            unvisited = [i for i in range(n) if i not in visited_order]
+            return True, unvisited
+        
+        return False, None
+    
+    def _get_executable_steps(self, plan: list, completed_steps: set) -> list:
+        """Get list of step indices that can be executed (all dependencies satisfied)."""
+        if not plan:
+            return []
+        
+        n = len(plan)
+        
+        # Calculate which steps have all dependencies completed
+        executable = []
+        for i in range(n):
+            if i in completed_steps:
+                continue  # Already done
+            
+            # Check if all dependencies are completed
+            deps_satisfied = True
+            step = plan[i]
+            depends_on = step.get('depends_on')
+            
+            if depends_on is not None:
+                if isinstance(depends_on, int):
+                    deps = [depends_on]
+                elif isinstance(depends_on, list):
+                    deps = depends_on
+                else:
+                    deps = []
+                
+                # Map step numbers to indices
+                step_num_to_idx = {plan[j].get('step', j + 1): j for j in range(n)}
+                
+                for dep_step_num in deps:
+                    dep_idx = step_num_to_idx.get(dep_step_num)
+                    if dep_idx is not None and dep_idx not in completed_steps:
+                        deps_satisfied = False
+                        break
+            
+            if deps_satisfied:
+                executable.append(i)
+        
+        return executable
+    
+    def _run_auto_track(self, data: dict) -> dict:
+        """
+        Run one progression tick (tracker behavior) when auto_track is enabled.
+        This performs: complete current step, compute next step, update context.
+        """
+        plan = data.get("plan", [])
+        current = data.get("current_step", 0)
+        completed_steps = set(data.get("completed_steps", []))
+        
+        # If no plan, nothing to track
+        if not plan:
+            return data
+        
+        result = data.copy()
+        
+        # Check for circular dependencies
+        has_cycle, cycle_steps = self._detect_circular_dependencies(plan)
+        if has_cycle:
+            result["dependency_error"] = f"Circular dependency detected in steps: {[plan[i].get('step', i+1) for i in cycle_steps]}"
+            result["plan_complete"] = True  # Stop execution
+            return result
+        
+        # Mark current step as completed (if valid)
+        if 0 <= current < len(plan):
+            completed_steps.add(current)
+            result["step_completed"] = plan[current]
+            result["completed_steps"] = list(completed_steps)
+        
+        # Find next executable step (respecting dependencies)
+        executable = self._get_executable_steps(plan, completed_steps)
+        
+        if executable:
+            # Pick the first executable step (lowest index)
+            next_idx = min(executable)
+            result["current_step"] = next_idx
+            result["next_step"] = plan[next_idx]
+        else:
+            # No more executable steps - plan is complete
+            result["current_step"] = len(plan)
+            result["next_step"] = None
+        
+        # Check if plan is complete
+        result["plan_complete"] = len(completed_steps) >= len(plan)
+        
+        # Update plan_context to reflect progress (shows completed, current, and pending steps)
+        result["plan_context"] = self._generate_plan_context(plan, result["current_step"], completed_steps)
+        
+        return result
+    
     def _get_reasoning_service(self):
         """Lazy load ReasoningBookService to avoid circular imports."""
         if self._reasoning_service is None:
@@ -85,6 +261,13 @@ class PlannerExecutor:
         
         if not config.get("enabled", True):
             return input_data
+        
+        # Check for auto_track mode - if enabled and plan already exists, run tracker progression
+        if config.get("auto_track", False):
+            existing_plan = data.get("plan", [])
+            if existing_plan:
+                # Plan exists and auto_track is enabled - run progression tick
+                return self._run_auto_track(data)
         
         user_request = self._extract_user_message(data)
         
