@@ -68,7 +68,7 @@ class ReasoningBookService:
                 self.thoughts = self.thoughts[:MAX_THOUGHTS]
             
             # Prune by age (older than MAX_DAYS_OLD days)
-            cutoff = datetime.now() - timedelta(days=MAX_DAYS_OLD)
+            cutoff = datetime.utcnow() - timedelta(days=MAX_DAYS_OLD)
             self.thoughts = [
                 t for t in self.thoughts 
                 if datetime.fromisoformat(t['timestamp']) > cutoff

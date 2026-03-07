@@ -216,7 +216,10 @@ async def get_recent_sessions(request: Request):
             try:
                 dt = datetime.fromisoformat(updated.replace('Z', '+00:00'))
                 time_ago = dt.strftime('%b %d, %H:%M')
-            except:
+            except (ValueError, TypeError, AttributeError):
+                # ValueError: Invalid date format in updated string
+                # TypeError: updated is not a string
+                # AttributeError: replace/strftime called on wrong type
                 time_ago = updated[:10] if len(updated) >= 10 else 'Unknown'
             
             # Escape user-supplied session name to prevent XSS

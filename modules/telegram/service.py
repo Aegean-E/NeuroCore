@@ -4,11 +4,14 @@ import asyncio
 import threading
 import base64
 import time
+import logging
 from .bridge import TelegramBridge
 from .node import ConfigLoader
 from modules.chat.sessions import session_manager
 from core.flow_runner import FlowRunner
 from core.settings import settings
+
+logger = logging.getLogger(__name__)
 
 SESSION_MAPPING_FILE = os.path.join(os.path.dirname(__file__), "telegram_sessions.json")
 
@@ -37,12 +40,26 @@ class TelegramService:
             try:
                 with open(SESSION_MAPPING_FILE, 'r') as f:
                     return json.load(f)
-            except: return {}
+            except (json.JSONDecodeError, OSError, IOError):
+                return {}
         return {}
 
     def _save_session_map(self):
-        with open(SESSION_MAPPING_FILE, 'w') as f:
-            json.dump(self.session_map, f)
+        """Atomically save session map using temp file + rename."""
+        temp_file = SESSION_MAPPING_FILE + ".tmp"
+        try:
+            with open(temp_file, 'w') as f:
+                json.dump(self.session_map, f)
+            # Atomic rename on POSIX, more atomic on Windows than direct write
+            os.replace(temp_file, SESSION_MAPPING_FILE)
+        except (OSError, IOError) as e:
+            # Clean up temp file on error
+            if os.path.exists(temp_file):
+                try:
+                    os.remove(temp_file)
+                except OSError:
+                    pass
+            raise
 
     def start(self):
         if self.running: return
@@ -51,7 +68,7 @@ class TelegramService:
         token = config.get("bot_token")
         
         if not token:
-            print("Telegram Bridge Token not set. Service paused.")
+            logger.warning("Telegram Bridge Token not set. Service paused.")
             return
 
         # Initialize bridge with dummy chat_id for listening; send_message will override it
@@ -62,7 +79,7 @@ class TelegramService:
         self.thread = threading.Thread(target=self._run_async_listen)
         self.thread.daemon = True
         self.thread.start()
-        print("Telegram Bridge Service Started")
+        logger.info("Telegram Bridge Service Started")
 
     def _run_async_listen(self):
         """Run the async listen method in a new event loop."""
@@ -85,7 +102,7 @@ class TelegramService:
             loop = self._get_or_create_loop()
             loop.run_until_complete(self.process_message(msg))
         except Exception as e:
-            print(f"Error processing Telegram message: {e}")
+            logger.error(f"Error processing Telegram message: {e}")
 
     async def process_message(self, msg):
         chat_id = msg.get("chat_id")
@@ -173,7 +190,8 @@ class TelegramService:
                         # Cleanup
                         try:
                             os.remove(local_path)
-                        except: pass
+                        except OSError:
+                            pass
                         
                         # Construct Multimodal Message
                         user_content = []
@@ -198,7 +216,7 @@ class TelegramService:
                     await self.bridge.send_message("⚠️ Could not retrieve file info.", chat_id)
                     return
             except Exception as e:
-                print(f"Telegram image error: {e}")
+                logger.error(f"Telegram image error: {e}")
                 await self.bridge.send_message("⚠️ Error processing image.", chat_id)
                 return
 
@@ -232,7 +250,8 @@ class TelegramService:
             elif "choices" in result: 
                  try:
                     response_text = result["choices"][0]["message"]["content"]
-                 except: response_text = "Empty response."
+                 except (KeyError, IndexError, TypeError):
+                    response_text = "Empty response."
             else:
                  response_text = "Flow finished with no output."
 
@@ -245,7 +264,7 @@ class TelegramService:
             await self.bridge.send_message(response_text, chat_id)
 
         except Exception as e:
-            print(f"Flow execution error: {e}")
+            logger.error(f"Flow execution error: {e}")
             await self.bridge.send_message(f"❌ Internal Error: {e}", chat_id)
 
 telegram_service = TelegramService()

@@ -10,6 +10,9 @@ from fastapi.templating import Jinja2Templates
 from core.flow_runner import FlowRunner
 from core.flow_manager import flow_manager
 import json
+import logging
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 templates = Jinja2Templates(directory="web/templates")
@@ -169,7 +172,7 @@ async def send_message(
             compacted, _ = await session_manager.compact_session(session_id, llm, keep_last=compact_keep_last)
             if compacted:
                 active_session = session_manager.get_session(session_id)
-                print(f"[Chat] Auto-compacted session {session_id} (was ~{estimated:,} tokens)")
+                logger.info(f"[Chat] Auto-compacted session {session_id} (was ~{estimated:,} tokens)")
 
     active_flow_ids = settings.get("active_ai_flows", [])
     active_flow = flow_manager.get_flow(active_flow_ids[0]) if active_flow_ids else None
@@ -261,7 +264,7 @@ async def send_message(
                 if new_title and len(new_title) < 50:
                     session_manager.rename_session(session_id, new_title)
         except Exception as e:
-            print(f"Auto-rename failed: {e}")
+            logger.warning(f"Auto-rename failed: {e}")
 
     return templates.TemplateResponse(
         request, 

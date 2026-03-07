@@ -2,11 +2,14 @@ from fastapi import APIRouter, Request, Query
 from fastapi.responses import HTMLResponse, Response
 from fastapi.templating import Jinja2Templates
 import json
+import logging
 from modules.memory.backend import memory_store
 from datetime import datetime
 import asyncio
 from functools import partial
 from core.settings import settings
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 templates = Jinja2Templates(directory="web/templates")
@@ -83,7 +86,7 @@ async def boost_memory(request: Request, memory_id: int, boost: int = 1):
         await loop.run_in_executor(memory_store.executor, partial(memory_store.boost_importance, memory_id, boost))
         return Response(status_code=200, headers={"HX-Trigger": json.dumps({"showMessage": {"level": "success", "message": "Memory boosted"}, "memoryRefresh": None})})
     except Exception as e:
-        print(f"[Boost Error] {e}")
+        logger.error(f"[Boost Error] {e}")
         return Response(status_code=200, headers={"HX-Trigger": json.dumps({"showMessage": {"level": "error", "message": "Boost failed"}})})
 
 @router.post("/unboost/{memory_id}")

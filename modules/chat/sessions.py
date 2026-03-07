@@ -184,7 +184,7 @@ class SessionManager:
             )
             summary_text = result["choices"][0]["message"]["content"].strip()
         except Exception as e:
-            print(f"[Compact] LLM summarization failed: {e}")
+            logger.warning(f"[Compact] LLM summarization failed: {e}")
             return False, tokens_before
 
         # Replace history: one summary system message + the most recent messages verbatim

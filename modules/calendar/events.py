@@ -89,7 +89,7 @@ class EventManager:
 
     def get_upcoming(self, limit=10):
         events = self._load_events()
-        now = datetime.now().replace(second=0, microsecond=0)
+        now = datetime.utcnow().replace(second=0, microsecond=0)
 
         def _parse_dt(e):
             try:

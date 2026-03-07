@@ -628,7 +628,10 @@ class FlowRunner:
                         import json
                         try:
                             bridge_msg_preview = json.dumps(bridge_outputs[0].get("messages", [])[:2])
-                        except:
+                        except (json.JSONDecodeError, TypeError, KeyError):
+                            # json.JSONDecodeError: Failed to serialize messages
+                            # TypeError: messages is not JSON serializable
+                            # KeyError: messages key missing
                             bridge_msg_preview = str(bridge_outputs[0].get("messages", "N/A"))[:200]
                         debug_logger.log(self.flow_id, node_id, node_meta['name'], "bridge_merge", {
                             "bridge_count": len(bridge_outputs),

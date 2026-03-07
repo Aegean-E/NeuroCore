@@ -16,6 +16,9 @@ import time as import_time
 import threading
 from datetime import datetime
 import numpy as np
+import logging
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 templates = Jinja2Templates(directory="web/templates")
@@ -140,14 +143,16 @@ async def process_and_save_document(tracking_id: str, file_path: str, original_f
             if str(e) == "ABORTED" or upload_progress.get(tracking_id, {}).get("status") == "aborted":
                 upload_progress[tracking_id]["status"] = "aborted"
             else:
-                print(f"Error processing document {original_filename}: {e}")
+                logger.error(f"Error processing document {original_filename}: {e}")
                 upload_progress[tracking_id]["status"] = "error"
                 upload_progress[tracking_id]["message"] = str(e)
             
         # Cleanup file
         if os.path.exists(file_path):
-            try: os.remove(file_path)
-            except: pass
+            try: 
+                os.remove(file_path)
+            except OSError:
+                pass
 
 @router.get("", response_class=HTMLResponse)
 async def knowledge_base_page(request: Request):
@@ -320,14 +325,16 @@ async def delete_doc(request: Request, doc_id: int):
         if os.path.exists(file_path):
             try:
                 os.remove(file_path)
-            except Exception as e:
-                print(f"Error deleting file {file_path}: {e}")
+            except OSError as e:
+                logger.warning(f"Error deleting file {file_path}: {e}")
 
     # Remove processed chunks file
     chunks_path = os.path.join(PROCESSED_DIR, f"{doc_id}.json")
     if os.path.exists(chunks_path):
-        try: os.remove(chunks_path)
-        except: pass
+        try: 
+            os.remove(chunks_path)
+        except OSError:
+            pass
     
     document_store.delete_document(doc_id)
     return await list_docs(request)
@@ -340,12 +347,14 @@ async def delete_all_docs(request: Request):
     for f in os.listdir(UPLOAD_DIR):
         try:
             os.remove(os.path.join(UPLOAD_DIR, f))
-        except: pass
+        except OSError:
+            pass
     
     for f in os.listdir(PROCESSED_DIR):
         try:
             os.remove(os.path.join(PROCESSED_DIR, f))
-        except: pass
+        except OSError:
+            pass
         
     return await list_docs(request)
 

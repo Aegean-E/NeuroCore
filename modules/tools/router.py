@@ -57,7 +57,7 @@ def load_tools():
         if os.path.exists(TOOLS_FILE):
             with open(TOOLS_FILE, "r") as f:
                 try: return json.load(f)
-                except: return {}
+                except (json.JSONDecodeError, OSError): return {}
         return {}
 
 def save_tools(tools):
