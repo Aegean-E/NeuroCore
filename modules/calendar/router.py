@@ -103,6 +103,10 @@ async def calendar_gui(request: Request, year: int = None, month: int = None):
 
 @router.post("/events/save", response_class=HTMLResponse)
 async def save_event(request: Request, title: str = Form(...), date: str = Form(...), time: str = Form(...)):
+    # Validate title - minimum length check
+    if not title.strip():
+        return HTMLResponse(content="<div class='alert alert-danger'>Title is required</div>", status_code=400)
+    
     # Validate date and time format before saving
     try:
         datetime.strptime(f"{date} {time}", "%Y-%m-%d %H:%M")
@@ -126,9 +130,11 @@ async def delete_event_route(request: Request, event_id: str):
     if event is None:
         return HTMLResponse(content="<div class='alert alert-danger'>Event not found</div>", status_code=404)
     
+    # At this point, event is guaranteed to be not None
     event_manager.delete_event(event_id)
     
-    if event and event.get("start_time"):
+    # Extract date from event for rendering the calendar
+    if event.get("start_time"):
         try:
             dt_str = event.get("start_time", "").split(" ")[0]
             dt = datetime.strptime(dt_str, "%Y-%m-%d")

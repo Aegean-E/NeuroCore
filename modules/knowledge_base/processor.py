@@ -13,6 +13,9 @@ class DocumentProcessor:
     Adapted for NeuroCore to use LLMBridge and async processing.
     """
 
+    # Maximum file size for TXT processing (100 MB)
+    MAX_TXT_FILE_SIZE = 100 * 1024 * 1024
+
     def __init__(self, llm_bridge: LLMBridge, chunk_size: int = 1000, chunk_overlap: int = 100):
         self.llm = llm_bridge
         self.chunk_size = chunk_size
@@ -113,6 +116,14 @@ class DocumentProcessor:
         return chunks, None
 
     async def process_txt(self, file_path: str, progress_callback=None) -> Tuple[List[Dict], None]:
+        # Check file size before opening to prevent memory exhaustion
+        file_size = os.path.getsize(file_path)
+        if file_size > self.MAX_TXT_FILE_SIZE:
+            raise ValueError(
+                f"File too large: {file_size / (1024*1024):.1f} MB. "
+                f"Maximum allowed size is {self.MAX_TXT_FILE_SIZE / (1024*1024):.0f} MB."
+            )
+        
         with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
             text = f.read()
         chunks = self._chunk_text(self.clean_text(text))

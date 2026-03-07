@@ -476,6 +476,16 @@ class FaissDocumentStore(QueryExpansionMixin):
         expected_dim = self.faiss_index.d if self.faiss_index else None
         
         for emb, cid in zip(embeddings, chunk_ids):
+            # Check dimension mismatch for EVERY add, not just when index is empty
+            if expected_dim is not None and len(emb) != expected_dim:
+                # If index is not empty and there's a dimension mismatch, log error and refuse
+                if self.faiss_index and self.faiss_index.ntotal > 0:
+                    logging.error(
+                        f"❌ FAISS dimension mismatch: Cannot add embedding of dimension {len(emb)} "
+                        f"to index with dimension {expected_dim}. The embedding model may have changed. "
+                        f"Refusing to add to prevent index corruption."
+                    )
+                    continue  # Skip this embedding
             if expected_dim is None or len(emb) == expected_dim:
                 # Ensure embedding is finite to prevent index corruption
                 if np.all(np.isfinite(emb)) and not np.all(emb == 0):
@@ -512,7 +522,10 @@ class FaissDocumentStore(QueryExpansionMixin):
             self._save_faiss_index()
 
     def _sync_faiss_index(self):
-        """Ensure FAISS index is in sync with SQLite chunks."""
+        """Ensure FAISS index is in sync with SQLite chunks.
+        
+        Uses tolerance threshold to avoid full rebuilds for small mismatches.
+        """
         try:
             with self._connect() as con:
                 count = con.execute("SELECT COUNT(*) FROM chunks").fetchone()[0]
@@ -522,9 +535,15 @@ class FaissDocumentStore(QueryExpansionMixin):
                 # Check if faiss_index is None before accessing ntotal
                 index_count = self.faiss_index.ntotal if self.faiss_index is not None else 0
             
-            if count > 0 and (index_count == 0 or index_count != count):
-                logging.warning(f"⚠️ FAISS index out of sync (Index: {index_count}, DB: {count}). Rebuilding...")
-                self._rebuild_index()
+            if count > 0:
+                # Use tolerance threshold to avoid rebuilding for small differences
+                # A single chunk added while server was offline shouldn't trigger full rebuild
+                diff = abs(count - index_count)
+                tolerance = 10  # Rebuild only if difference > 10
+                
+                if index_count == 0 or diff > tolerance:
+                    logging.warning(f"⚠️ FAISS index out of sync (Index: {index_count}, DB: {count}, Diff: {diff}). Rebuilding...")
+                    self._rebuild_index()
         except Exception as e:
             logging.error(f"⚠️ Error syncing FAISS index: {e}")
 

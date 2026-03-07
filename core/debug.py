@@ -6,9 +6,37 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+# Default max logs - can be overridden via settings
+DEFAULT_MAX_LOGS = 500
+
+def get_max_logs():
+    """Get max_logs setting from settings or use default."""
+    try:
+        from core.settings import settings
+        return settings.get("debug_logger_max_logs", DEFAULT_MAX_LOGS)
+    except Exception:
+        return DEFAULT_MAX_LOGS
+
 class DebugLogger:
-    def __init__(self, max_logs=50):
-        self.logs = deque(maxlen=max_logs)
+    """
+    Debug logger for flow execution.
+    
+    Note: This class is NOT thread-safe for compound operations.
+    While individual deque operations are atomic (due to CPython's GIL),
+    the compound operation in log() — appending to deque AND calling 
+    logger.debug() — is not atomic. In multi-threaded contexts, 
+    interleaving is possible. For a debug logger this is typically 
+    acceptable, but if strict atomicity is required, external 
+    synchronization should be used.
+    """
+    
+    def __init__(self, max_logs: int = None):
+        # Use provided value, or get from settings, or use default
+        if max_logs is not None:
+            self.max_logs = max_logs
+        else:
+            self.max_logs = get_max_logs()
+        self.logs = deque(maxlen=self.max_logs)
     
     def log(self, flow_id, node_id, node_name, event_type, details):
         entry = {

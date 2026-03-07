@@ -40,7 +40,11 @@ class MemoryConsolidator:
         return [{"id": r[0], "text": r[1], "created_at": r[2]} for r in rows]
 
     def _find_similar_pairs_faiss(self, threshold: float) -> List[Tuple[int, int, float]]:
-        """Use FAISS to find similar memory pairs above threshold."""
+        """Use FAISS to find similar memory pairs above threshold.
+        
+        Uses FAISS range_search for efficient similarity computation instead of
+        building a full n×n matrix.
+        """
         if not self.store.faiss_index or self.store.faiss_index.ntotal == 0:
             return []
 
@@ -62,17 +66,27 @@ class MemoryConsolidator:
         if len(embeddings) < 2:
             return []
 
-        matrix = np.stack(embeddings).astype(np.float64)
-        norm = np.linalg.norm(matrix, axis=1, keepdims=True)
-        matrix_norm = matrix / (norm + 1e-10)
-        sim_matrix = np.dot(matrix_norm, matrix_norm.T)
-
-        pairs = []
+        # Stack embeddings into matrix and normalize
+        matrix = np.stack(embeddings).astype(np.float32)
+        faiss.normalize_L2(matrix)
+        
         ids = list(id_to_idx.keys())
-        for i in range(len(ids)):
-            for j in range(i + 1, len(ids)):
-                if sim_matrix[i, j] >= threshold:
-                    pairs.append((ids[i], ids[j], float(sim_matrix[i, j])))
+        
+        # Use FAISS range_search to find all pairs above threshold
+        # This is O(n) instead of O(n²)
+        pairs = []
+        
+        # For each query vector, find similar vectors
+        for i in range(len(matrix)):
+            query = matrix[i:i+1]  # Shape: (1, d)
+            distances, indices = self.store.faiss_index.search(query, len(matrix))
+            
+            for j, dist in zip(indices[0], distances[0]):
+                if j == -1:  # No more results
+                    break
+                if j > i:  # Avoid duplicates (only process where j > i)
+                    if dist >= threshold:
+                        pairs.append((ids[i], ids[j], float(dist)))
 
         return pairs
 
