@@ -35,7 +35,7 @@ def run_tests():
             pytest_args.remove("--coverage")
             pytest_args = ["--cov=core", "--cov=modules", "--cov-report=term-missing"] + pytest_args
         elif not pytest_args:
-            pytest_args = ["tests", "-v"]
+            pytest_args = [".", "-v", "--ignore=scripts"]
 
         # pytest.main returns an exit code that we can check
         exit_code = pytest.main(pytest_args)

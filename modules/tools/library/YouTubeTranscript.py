@@ -21,6 +21,12 @@ try:
             try:
                 transcript_list = YouTubeTranscriptApi.get_transcript(video_id)
                 full_text = " ".join([t['text'] for t in transcript_list])
+                
+                # Truncate if too long to prevent context overflow
+                max_length = 8000  # Characters
+                if len(full_text) > max_length:
+                    full_text = full_text[:max_length] + "\n\n[Transcript truncated due to length...]"
+                
                 result = full_text
             except Exception as e:
                 result = f"Error fetching transcript: {str(e)}"

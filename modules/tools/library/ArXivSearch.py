@@ -30,10 +30,22 @@ else:
         else:
             papers = []
             for i, entry in enumerate(entries, 1):
-                title = entry.find('atom:title', ns).text.strip().replace('\n', ' ')
-                summary = entry.find('atom:summary', ns).text.strip().replace('\n', ' ')[:300]
-                authors = [a.find('atom:name', ns).text for a in entry.findall('atom:author', ns)][:3]
-                published = entry.find('atom:published', ns).text[:10]
+                # Safe extraction with None guards
+                title_el = entry.find('atom:title', ns)
+                title = title_el.text.strip().replace('\n', ' ') if title_el is not None else 'Unknown Title'
+                
+                summary_el = entry.find('atom:summary', ns)
+                summary = summary_el.text.strip().replace('\n', ' ')[:300] if summary_el is not None else 'No summary available'
+                
+                authors = []
+                for a in entry.findall('atom:author', ns)[:3]:
+                    name_el = a.find('atom:name', ns)
+                    if name_el is not None and name_el.text:
+                        authors.append(name_el.text)
+                
+                published_el = entry.find('atom:published', ns)
+                published = published_el.text[:10] if published_el is not None and published_el.text else 'N/A'
+                
                 pdf_link = None
                 for link in entry.findall('atom:link', ns):
                     if link.get('title') == 'pdf':
@@ -41,7 +53,7 @@ else:
                         break
                 
                 papers.append(f"**{i}. {title}**")
-                papers.append(f"   Authors: {', '.join(authors)}")
+                papers.append(f"   Authors: {', '.join(authors) if authors else 'Unknown'}")
                 papers.append(f"   Published: {published}")
                 papers.append(f"   Summary: {summary}...")
                 if pdf_link:
@@ -54,3 +66,4 @@ else:
         result = f"HTTP error occurred: {str(e)}"
     except Exception as e:
         result = f"Error searching ArXiv: {str(e)}"
+

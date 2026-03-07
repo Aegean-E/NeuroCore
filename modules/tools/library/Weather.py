@@ -1,3 +1,6 @@
+import httpx
+from urllib.parse import quote
+
 # Get the location from the arguments provided by the LLM
 location = args.get('location')
 
@@ -5,8 +8,11 @@ if not location:
     result = "Please specify a location to get the weather."
 else:
     try:
-        # Use the wttr.in JSON API. httpx is provided in the execution scope.
-        response = httpx.get(f"https://wttr.in/{location}?format=j1", timeout=10)
+        # URL-encode the location to handle spaces, slashes, and special characters
+        encoded_location = quote(location)
+        
+        # Use the wttr.in JSON API
+        response = httpx.get(f"https://wttr.in/{encoded_location}?format=j1", timeout=10)
         response.raise_for_status()  # Raise an exception for bad status codes
         
         weather_data = response.json()

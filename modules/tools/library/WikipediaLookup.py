@@ -16,6 +16,7 @@ else:
         }
         
         resp = httpx.get(base_url, params=search_params, timeout=10.0)
+        resp.raise_for_status()  # Raise exception for HTTP errors
         search_data = resp.json()
         
         search_results = search_data.get("query", {}).get("search", [])
@@ -38,6 +39,7 @@ else:
                 content_params["exintro"] = 1
             
             resp = httpx.get(base_url, params=content_params, timeout=10.0)
+            resp.raise_for_status()  # Raise exception for HTTP errors
             data = resp.json()
             
             pages = data["query"]["pages"]

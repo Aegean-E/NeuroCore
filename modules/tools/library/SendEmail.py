@@ -1,4 +1,5 @@
 import smtplib
+import ssl
 import os
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
@@ -28,8 +29,11 @@ else:
         msg['Subject'] = subject
         msg.attach(MIMEText(body, 'plain'))
 
+        # Create secure SSL context with certificate verification
+        context = ssl.create_default_context()
+        
         with smtplib.SMTP(SMTP_SERVER, SMTP_PORT) as server:
-            server.starttls()
+            server.starttls(context=context)
             server.login(SENDER_EMAIL, SENDER_PASSWORD)
             server.send_message(msg)
         
