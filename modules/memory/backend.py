@@ -5,6 +5,7 @@ import json
 import threading
 import hashlib
 import logging
+import atexit
 from typing import List, Dict, Optional, Tuple, Any
 from contextlib import contextmanager
 import numpy as np
@@ -982,3 +983,6 @@ REASON: Brief explanation (1-2 sentences)"""
 
 # Global Instance
 memory_store = MemoryStore()
+
+# Register shutdown handler to prevent resource leak
+atexit.register(memory_store.shutdown)

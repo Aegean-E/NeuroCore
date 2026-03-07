@@ -7,17 +7,50 @@
     "is_flow_node": false,
     "order": 1,
     "config": {
-        "max_iterations": 10,
-        "max_tokens": 4000,
-        "temperature": 0.7,
-        "max_llm_retries": 3,
-        "retry_delay": 1.0,
-        "tool_error_strategy": "continue",
-        "timeout": 120,
-        "include_plan_in_context": true,
-        "include_memory_context": true,
-        "include_knowledge_context": true,
-        "include_reasoning_context": true
+        "max_iterations": {
+            "value": 10,
+            "description": "Maximum number of iterations the agent can run before stopping. Prevents infinite loops."
+        },
+        "max_tokens": {
+            "value": 4000,
+            "description": "Maximum number of tokens the LLM can generate in a single response."
+        },
+        "temperature": {
+            "value": 0.7,
+            "description": "Controls randomness in LLM output. Higher values (0.8-1.0) make output more random, lower (0.0-0.3) make it more deterministic."
+        },
+        "max_llm_retries": {
+            "value": 3,
+            "description": "Number of times to retry the LLM call if it fails due to rate limits or transient errors."
+        },
+        "retry_delay": {
+            "value": 1.0,
+            "description": "Delay in seconds between LLM retry attempts."
+        },
+        "tool_error_strategy": {
+            "value": "continue",
+            "description": "How to handle tool errors: 'continue' (skip failed tool and proceed), 'abort' (stop execution on error), or 'retry' (attempt tool call again)."
+        },
+        "timeout": {
+            "value": 120,
+            "description": "Maximum time in seconds for the entire agent loop to complete before timing out."
+        },
+        "include_plan_in_context": {
+            "value": true,
+            "description": "Whether to include the current plan in the LLM context for each iteration."
+        },
+        "include_memory_context": {
+            "value": true,
+            "description": "Whether to include relevant memories in the LLM context to provide past information."
+        },
+        "include_knowledge_context": {
+            "value": true,
+            "description": "Whether to include knowledge base results in the LLM context for RAG."
+        },
+        "include_reasoning_context": {
+            "value": true,
+            "description": "Whether to include reasoning book entries in the LLM context."
+        }
     },
     "provides_nodes": [
         {
@@ -43,3 +76,4 @@
         }
     ]
 }
+
