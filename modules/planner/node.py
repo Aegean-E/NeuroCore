@@ -20,6 +20,7 @@ from core.flow_data import (
     set_planning_error,
     ensure_flow_data,
 )
+from core.session_manager import get_session_manager, EpisodeState
 
 
 class PlannerExecutor:
@@ -262,12 +263,61 @@ class PlannerExecutor:
         if not config.get("enabled", True):
             return input_data
         
+        # --- Episode Persistence Support ---
+        sm = None
+        episode = None
+        episode_id = config.get("episode_id")
+        enable_episode = config.get("enable_episode_persistence", False)
+        
+        if enable_episode:
+            try:
+                sm = get_session_manager()
+                
+                # Check if we should resume an existing episode
+                if episode_id:
+                    # Try to load specific episode by ID
+                    existing = sm.load_episode_by_id(episode_id)
+                    if existing and existing.phase not in [EpisodeState.PHASE_COMPLETED, EpisodeState.PHASE_FAILED]:
+                        episode = existing
+                        # Restore plan state from episode
+                        if existing.plan:
+                            data["plan"] = existing.plan
+                        if existing.current_step is not None:
+                            data["current_step"] = existing.current_step
+                        if existing.completed_steps:
+                            data["completed_steps"] = existing.completed_steps
+                else:
+                    # Try to load current episode
+                    existing = sm.load_episode_state()
+                    if existing and existing.phase not in [EpisodeState.PHASE_COMPLETED, EpisodeState.PHASE_FAILED]:
+                        episode = existing
+                        # Restore plan state from episode
+                        if existing.plan:
+                            data["plan"] = existing.plan
+                        if existing.current_step is not None:
+                            data["current_step"] = existing.current_step
+                        if existing.completed_steps:
+                            data["completed_steps"] = existing.completed_steps
+            except Exception:
+                pass  # Don't fail if episode loading fails
+        
         # Check for auto_track mode - if enabled and plan already exists, run tracker progression
         if config.get("auto_track", False):
             existing_plan = data.get("plan", [])
             if existing_plan:
                 # Plan exists and auto_track is enabled - run progression tick
-                return self._run_auto_track(data)
+                result = self._run_auto_track(data)
+                
+                # Save episode state if tracking
+                if sm and episode:
+                    sm.save_episode_state(
+                        phase=EpisodeState.PHASE_PLANNING,
+                        plan=result.get("plan", []),
+                        current_step=result.get("current_step", 0),
+                        completed_steps=result.get("completed_steps", []),
+                    )
+                
+                return result
         
         user_request = self._extract_user_message(data)
         
@@ -390,6 +440,37 @@ class PlannerExecutor:
                         if len(plan) > 3:
                             plan_summary += f" and {len(plan) - 3} more"
                     await reasoning_service.log_thought(plan_summary, source="Planner")
+            
+            # Save episode state if tracking
+            if sm:
+                if episode:
+                    # Update existing episode
+                    sm.save_episode_state(
+                        phase=EpisodeState.PHASE_PLANNING if result.get("plan_needed") else EpisodeState.PHASE_COMPLETED,
+                        plan=result.get("plan", []),
+                        current_step=result.get("current_step", 0),
+                        completed_steps=result.get("completed_steps", []),
+                    )
+                elif enable_episode and result.get("plan_needed"):
+                    # Create new episode if plan was created
+                    try:
+                        budgets = {
+                            "max_steps": max_steps,
+                        }
+                        new_episode = sm.create_episode(
+                            input_data={"user_request": user_request},
+                            budgets=budgets,
+                            metadata={"episode_id": episode_id} if episode_id else {}
+                        )
+                        sm.save_episode_state(
+                            phase=EpisodeState.PHASE_PLANNING,
+                            plan=result.get("plan", []),
+                            current_step=0,
+                            completed_steps=[],
+                        )
+                        result["episode_id"] = new_episode.episode_id
+                    except Exception:
+                        pass  # Don't fail if episode saving fails
             
             return result
             

@@ -6,7 +6,7 @@ import time
 from core.llm import LLMBridge
 from core.settings import settings
 from modules.tools.sandbox import ToolSandbox
-from core.session_manager import session_manager, get_session_manager
+from core.session_manager import session_manager, get_session_manager, EpisodeState
 
 
 logger = logging.getLogger(__name__)
@@ -493,6 +493,67 @@ class AgentLoopExecutor:
         # --- Re-planning depth tracking ---
         replan_count = int(input_data.get("replan_count", 0))
         
+        # --- Episode Persistence Support ---
+        # Check if episode persistence is enabled
+        enable_episode = config.get("enable_episode_persistence", False)
+        episode_id = config.get("episode_id")  # Optional custom episode ID
+        checkpoint_interval = config.get("checkpoint_interval", 1)  # Save checkpoint every N iterations
+        episode = None
+        iteration_count = 0  # Track iterations for checkpoint saving
+        
+        if enable_episode and sm:
+            try:
+                # Try to load existing episode state for resume
+                existing_episode = sm.load_episode_state()
+                
+                # Check if we should resume or create new episode
+                should_resume = (
+                    existing_episode and 
+                    existing_episode.phase not in [
+                        EpisodeState.PHASE_COMPLETED, 
+                        EpisodeState.PHASE_FAILED
+                    ] and
+                    # Only resume if episode_id matches or no episode_id specified
+                    (episode_id is None or existing_episode.episode_id == episode_id)
+                )
+                
+                if should_resume:
+                    # Resume from existing episode
+                    episode = existing_episode
+                    # Restore state from episode
+                    replan_count = episode.replan_count
+                    input_data.setdefault("plan", episode.plan)
+                    input_data.setdefault("completed_steps", episode.completed_steps)
+                    input_data.setdefault("current_step", episode.current_step)
+                    # Restore iteration count for checkpoint tracking
+                    iteration_count = len(episode.checkpoints)
+                    # Optionally restore messages for resume
+                    if episode.messages and config.get("resume_from_episode_messages", True):
+                        input_data.setdefault("messages", episode.messages)
+                    
+                    # Update phase to executing
+                    episode.update_phase(EpisodeState.PHASE_EXECUTING)
+                    
+                    logger.info(f"Resuming episode {episode.episode_id} from phase {episode.phase}")
+                elif episode_id or config.get("auto_create_episode", True):
+                    # Create new episode
+                    budgets = {
+                        "max_iterations": max_iterations,
+                        "max_replan_depth": max_replan_depth,
+                        "timeout": timeout,
+                        "max_context_tokens": max_context_tokens,
+                    }
+                    episode = sm.create_episode(
+                        input_data={"initial_input": list(input_data.keys())},
+                        budgets=budgets,
+                        metadata={"episode_id": episode_id} if episode_id else {}
+                    )
+                    if episode_id:
+                        episode.episode_id = episode_id
+                    logger.info(f"Created new episode {episode.episode_id}")
+            except Exception as e:
+                logger.warning(f"Failed to load episode state: {e}")
+        
         # Check if we've exceeded max re-planning depth (only if max_replan_depth > 0)
         if max_replan_depth > 0 and replan_count >= max_replan_depth:
             result = input_data.copy()
@@ -572,6 +633,25 @@ class AgentLoopExecutor:
                 trace=agent_loop_trace
             )
 
+            # --- Episode Checkpoint Saving ---
+            # Save checkpoint after each iteration if enabled
+            if episode is not None and sm is not None:
+                iteration_count += iterations
+                # Save checkpoint at configured intervals or on completion
+                if iteration_count % checkpoint_interval == 0 or iterations == 0:
+                    try:
+                        sm.save_episode_state(
+                            phase=EpisodeState.PHASE_EXECUTING,
+                            replan_count=result.get("replan_count", replan_count),
+                            completed_steps=result.get("completed_steps", []),
+                            current_step=result.get("current_step", 0),
+                            plan=result.get("plan", []),
+                            messages=llm_messages if config.get("save_messages_in_episode", False) else None,
+                            add_checkpoint=True,
+                        )
+                    except Exception as e:
+                        logger.warning(f"Failed to save episode checkpoint: {e}")
+
             result = input_data.copy()
             result["messages"] = llm_messages
             result["response"] = final_response
@@ -620,6 +700,32 @@ class AgentLoopExecutor:
                 # Reset replan count on successful execution
                 result["replan_count"] = 0
 
+            # --- Episode Finalization ---
+            # Save final episode state after execution completes
+            if episode is not None and sm is not None:
+                try:
+                    # Determine final phase based on execution result
+                    if result.get("agent_loop_error"):
+                        final_phase = EpisodeState.PHASE_FAILED
+                    elif result.get("replan_needed"):
+                        final_phase = EpisodeState.PHASE_REPLANNING
+                    else:
+                        final_phase = EpisodeState.PHASE_COMPLETED
+                    
+                    sm.save_episode_state(
+                        phase=final_phase,
+                        replan_count=result.get("replan_count", 0),
+                        completed_steps=result.get("completed_steps", []),
+                        current_step=result.get("current_step", 0),
+                        plan=result.get("plan", []),
+                        messages=llm_messages if config.get("save_messages_in_episode", False) else None,
+                        add_checkpoint=True,
+                    )
+                    # Add episode info to result for reference
+                    result["episode_id"] = episode.episode_id
+                except Exception as e:
+                    logger.warning(f"Failed to save final episode state: {e}")
+
             return result
 
         # --- Execute with optional timeout ---
@@ -664,6 +770,32 @@ class AgentLoopExecutor:
             result["suggested_approach"] = "Review plan and try alternative approach."
             
             return result
+
+        # --- Episode Finalization ---
+        # Save final episode state after execution completes
+        if episode is not None and sm is not None:
+            try:
+                # Determine final phase based on execution result
+                if result.get("agent_loop_error"):
+                    final_phase = EpisodeState.PHASE_FAILED
+                elif result.get("replan_needed"):
+                    final_phase = EpisodeState.PHASE_REPLANNING
+                else:
+                    final_phase = EpisodeState.PHASE_COMPLETED
+                
+                sm.save_episode_state(
+                    phase=final_phase,
+                    replan_count=result.get("replan_count", 0),
+                    completed_steps=result.get("completed_steps", []),
+                    current_step=result.get("current_step", 0),
+                    plan=result.get("plan", []),
+                    messages=llm_messages if config.get("save_messages_in_episode", False) else None,
+                    add_checkpoint=True,
+                )
+                # Add episode info to result for reference
+                result["episode_id"] = episode.episode_id
+            except Exception as e:
+                logger.warning(f"Failed to save final episode state: {e}")
 
         # Attach trace to final result
         result["agent_loop_trace"] = agent_loop_trace

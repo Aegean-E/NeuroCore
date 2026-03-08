@@ -427,7 +427,7 @@ class FlowRunner:
             'warnings': warnings
         }
 
-    async def run(self, initial_input: dict, start_node_id: str = None, timeout: float = None, raise_errors: bool = False):
+    async def run(self, initial_input: dict, start_node_id: str = None, timeout: float = None, raise_errors: bool = False, episode_id: str = None):
         """
         Executes the flow in order, passing data between nodes.
         
@@ -436,7 +436,31 @@ class FlowRunner:
             start_node_id: Optional specific node to start from
             timeout: Optional timeout in seconds for the entire flow execution
             raise_errors: If True, raise exceptions instead of returning error dicts
+            episode_id: Optional episode ID for episode persistence support
         """
+        # --- Episode Persistence Support ---
+        sm = None
+        episode = None
+        enable_episode = episode_id is not None
+        
+        if enable_episode:
+            try:
+                from core.session_manager import get_session_manager, EpisodeState
+                sm = get_session_manager()
+                # Try to load the episode
+                episode = sm.load_episode_by_id(episode_id)
+                if episode:
+                    # Restore state from episode to input
+                    if episode.plan:
+                        initial_input.setdefault("plan", episode.plan)
+                    if episode.current_step is not None:
+                        initial_input.setdefault("current_step", episode.current_step)
+                    if episode.completed_steps:
+                        initial_input.setdefault("completed_steps", episode.completed_steps)
+                    # Update phase to executing
+                    sm.save_episode_by_id(episode_id, phase=EpisodeState.PHASE_EXECUTING)
+            except Exception:
+                pass  # Don't fail if episode loading fails
         if settings.get("debug_mode"):
             debug_logger.log(self.flow_id, "SYSTEM", "FlowRunner", "flow_start", {"start_node": start_node_id, "input_source": initial_input.get("_input_source") if isinstance(initial_input, dict) else None, "timeout": timeout})
         
@@ -739,8 +763,37 @@ class FlowRunner:
             for node_id in reversed(self.execution_order):
                 out = node_outputs.get(node_id)
                 if out is not None:
+                    # Save episode state if tracking
+                    if sm and episode_id:
+                        try:
+                            from core.session_manager import EpisodeState
+                            # Determine final phase based on result
+                            final_phase = EpisodeState.PHASE_COMPLETED
+                            if isinstance(out, dict) and out.get("error"):
+                                final_phase = EpisodeState.PHASE_FAILED
+                            
+                            sm.save_episode_by_id(
+                                episode_id,
+                                phase=final_phase,
+                                plan=out.get("plan", []),
+                                current_step=out.get("current_step", 0),
+                                completed_steps=out.get("completed_steps", []),
+                            )
+                        except Exception:
+                            pass
                     return out
-                    
+            
+            # Save episode state if tracking (no successful output)
+            if sm and episode_id:
+                try:
+                    from core.session_manager import EpisodeState
+                    sm.save_episode_by_id(
+                        episode_id,
+                        phase=EpisodeState.PHASE_COMPLETED,
+                    )
+                except Exception:
+                    pass
+            
             return {}
         
         # Execute with optional timeout
