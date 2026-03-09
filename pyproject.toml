@@ -48,6 +48,9 @@ python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
 pythonpath = ["."]
+markers = [
+    "e2e: end-to-end tests that require a running NeuroCore server",
+]
 
 [tool.ruff]
 line-length = 100

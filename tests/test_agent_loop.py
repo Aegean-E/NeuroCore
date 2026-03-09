@@ -410,11 +410,11 @@ class TestToolErrorStrategy:
 
         executor = make_executor(library={"Calculator": "result = '2'"})
         executor.llm.chat_completion = AsyncMock(side_effect=responses)
-
-        result = await executor.receive(
-            {"messages": [{"role": "user", "content": "Calculate"}]},
-            config={"timeout": 0},
-        )
+        with patch.object(executor._sandbox, "execute", return_value={"result": "2"}):
+            result = await executor.receive(
+                {"messages": [{"role": "user", "content": "Calculate"}]},
+                config={"timeout": 0},
+            )
 
         assert result["agent_loop_trace"][0]["errors"] == []
 

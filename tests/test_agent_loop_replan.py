@@ -77,7 +77,7 @@ async def test_no_replan_when_max_iterations_reached_successfully():
     
     with patch.object(executor, '_load_tool_library', return_value={
         "TestTool": "result = 'Success'"
-    }):
+    }), patch.object(executor._sandbox, 'execute', return_value={"result": "Success"}):
         result = await executor.receive(input_data, config={"max_iterations": 2})
     
     # Should NOT trigger replan since we got valid content
