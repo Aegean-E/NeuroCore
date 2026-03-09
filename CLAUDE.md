@@ -14,6 +14,14 @@ Every code change — no matter how small — must follow this sequence:
 4. **Test File Creation** — Write or update tests that cover the new/changed behaviour. Tests live in `tests/test_<area>.py`.
 5. **Test File Running** — Execute the tests and confirm they pass before committing.
 
+### Execution Cadence (Important)
+
+Do **not** attempt to complete large or multi-step tasks all at once. Work in clear, incremental chunks:
+
+- Break work into small, logically grouped steps.
+- Update todo/progress tracking regularly as each chunk is finished (not only at the very end).
+- Commit regularly in a proper manner: each commit should be focused, meaningful, and include a clear message describing that specific increment.
+
 > This workflow applies to all changes: new features, bug fixes, refactors, and configuration changes. The only exception is pure documentation edits (e.g., updating this file) where no executable logic is involved.
 
 ### Todo Tracking
