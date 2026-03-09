@@ -12,6 +12,11 @@ logger = logging.getLogger(__name__)
 
 MODULES_DIR = "modules"
 
+# Issue 10: Module allowlist for hot-loading
+# Only modules in this list can be loaded at runtime
+# Empty list means all modules are allowed (default for backwards compatibility)
+MODULE_ALLOWLIST = []  # Set to ["chat", "memory", "knowledge_base"] to restrict
+
 class ModuleManager:
     def __init__(self, app: FastAPI, modules_dir=MODULES_DIR):
         self.modules_dir = modules_dir
@@ -56,6 +61,11 @@ class ModuleManager:
 
     def _load_module_router(self, module_id: str):
         """Imports a module and adds its router to the app."""
+        # Issue 10: Check module allowlist before loading
+        if MODULE_ALLOWLIST and module_id not in MODULE_ALLOWLIST:
+            logger.warning(f"[ModuleManager] Module '{module_id}' not in allowlist, skipping load. Allowed: {MODULE_ALLOWLIST}")
+            return False
+        
         # Use lock to prevent concurrent loading of the same module
         with self.lock:
             # Double-check after acquiring lock to prevent double registration

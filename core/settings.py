@@ -113,6 +113,22 @@ class SettingsManager:
             if str_field in new_settings:
                 validated[str_field] = str(new_settings[str_field])
         
+        # Issue 9: URL validation for LLM/embedding settings
+        for url_field in ["llm_api_url", "embedding_api_url"]:
+            if url_field in validated and validated[url_field]:
+                # Only validate if not empty
+                url_value = validated[url_field].strip()
+                if url_value:
+                    # Must start with http:// or https://
+                    if not url_value.lower().startswith(("http://", "https://")):
+                        raise ValueError(f"{url_field} must start with http:// or https://")
+                    
+                    # Basic URL structure check - must have a valid hostname
+                    from urllib.parse import urlparse
+                    parsed = urlparse(url_value)
+                    if not parsed.netloc:
+                        raise ValueError(f"{url_field} must be a valid URL with a hostname")
+        
         # active_ai_flows: list of strings
         if "active_ai_flows" in new_settings:
             if not isinstance(new_settings["active_ai_flows"], list):

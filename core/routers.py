@@ -11,7 +11,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
 from core.settings import SettingsManager, settings
-from core.dependencies import get_settings_manager, get_module_manager, get_llm_bridge
+from core.dependencies import get_settings_manager, get_module_manager, get_llm_bridge, require_debug_mode
 from core.module_manager import ModuleManager
 from core.flow_manager import flow_manager
 from core.llm import LLMBridge
@@ -841,15 +841,15 @@ async def debug_page(request: Request, settings_man: SettingsManager = Depends(g
     return templates.TemplateResponse(request, "debug.html", {"settings": settings_man.settings, "modules": module_manager.get_all_modules()})
 
 @router.get("/debug/logs", response_class=HTMLResponse)
-async def get_debug_logs(request: Request):
+async def get_debug_logs(request: Request, _: bool = Depends(require_debug_mode)):
     return templates.TemplateResponse(request, "debug_logs.html", {"logs": debug_logger.get_logs()})
 
 @router.get("/debug/events", response_class=JSONResponse)
-async def get_debug_events(request: Request, since: float = 0):
+async def get_debug_events(request: Request, since: float = 0, _: bool = Depends(require_debug_mode)):
     return debug_logger.get_recent_logs(since)
 
 @router.get("/debug/agent-summary", response_class=JSONResponse)
-async def get_agent_summary(request: Request, since: float = None, limit: int = 5):
+async def get_agent_summary(request: Request, since: float = None, limit: int = 5, _: bool = Depends(require_debug_mode)):
     """Get a summary of the last agent session trace events.
     
     Query params:
@@ -867,7 +867,7 @@ async def get_agent_summary(request: Request, since: float = None, limit: int = 
     return JSONResponse(content=summary)
 
 @router.get("/debug/summary", response_class=HTMLResponse)
-async def get_debug_summary(request: Request, since: float = None, limit: int = 5):
+async def get_debug_summary(request: Request, since: float = None, limit: int = 5, _: bool = Depends(require_debug_mode)):
     """Get the agent summary panel for the debug page.
     
     Query params:
@@ -885,7 +885,7 @@ async def get_debug_summary(request: Request, since: float = None, limit: int = 
     return templates.TemplateResponse(request, "debug_summary.html", {"summary": summary})
 
 @router.post("/debug/clear")
-async def clear_debug_logs(request: Request):
+async def clear_debug_logs(request: Request, _: bool = Depends(require_debug_mode)):
     debug_logger.clear()
     return templates.TemplateResponse(request, "debug_logs.html", {"logs": []})
 

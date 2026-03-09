@@ -130,9 +130,24 @@ async def process_and_save_document(tracking_id: str, file_path: str, original_f
         file_hash = document_store.compute_file_hash(file_path)
         file_size = os.path.getsize(file_path)
         
-        if not document_store.document_exists(file_hash):
-            # Use the original filename for storage, not the UUID-prefixed one
-            document_store.add_document(file_hash, original_filename, file_type, file_size, page_count, chunks)
+        # Check if document already exists (duplicate)
+        if document_store.document_exists(file_hash):
+            # Clean up the uploaded file since it's a duplicate
+            if os.path.exists(file_path):
+                try:
+                    os.remove(file_path)
+                    logger.info(f"Removed duplicate file: {stored_filename}")
+                except OSError as e:
+                    logger.warning(f"Failed to remove duplicate file {stored_filename}: {e}")
+            # Mark as done without adding to store
+            with upload_progress_lock:
+                upload_progress[tracking_id]["status"] = "done"
+                upload_progress[tracking_id]["progress"] = 100
+                upload_progress[tracking_id]["message"] = "Document already exists (duplicate)"
+            return
+        
+        # Document is new, add it to the store
+        document_store.add_document(file_hash, original_filename, file_type, file_size, page_count, chunks)
 
         with upload_progress_lock:
             upload_progress[tracking_id]["status"] = "done"

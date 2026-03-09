@@ -86,25 +86,37 @@ class ToolDispatcherExecutor:
             if allowed_tools and func_name not in allowed_tools:
                 output = f"Error: Tool {func_name} is not enabled for this dispatcher."
             elif func_name in library:
-                # Load code from the library directory
-                code_path = os.path.join(os.path.dirname(__file__), "library", f"{func_name}.py")
-                code = ""
-                if os.path.exists(code_path):
-                    with open(code_path, "r") as f:
-                        code = f.read()
-                
-                # Execute tool code in sandboxed environment for security
-                try:
-                    result = self.sandbox.execute(code, {"args": args})
-                    output = result.get("result", "Success (no result returned)")
-                except SecurityError as e:
-                    output = f"Security Error: Tool '{func_name}' violated security policy: {str(e)}"
-                except ResourceLimitError as e:
-                    output = f"Resource Limit Error: Tool '{func_name}' exceeded resource limits: {str(e)}"
-                except TimeoutError as e:
-                    output = f"Timeout Error: Tool '{func_name}' took too long to execute: {str(e)}"
-                except Exception as e:
-                    output = f"Error executing tool {func_name}: {str(e)}"
+                # Check if tool is enabled in tools.json
+                tool_config = library.get(func_name, {})
+                if isinstance(tool_config, dict) and not tool_config.get("enabled", True):
+                    output = f"Error: Tool {func_name} is disabled."
+                else:
+                    # Load code from the library directory
+                    code_path = os.path.join(os.path.dirname(__file__), "library", f"{func_name}.py")
+                    code = ""
+                    if os.path.exists(code_path):
+                        with open(code_path, "r") as f:
+                            code = f.read()
+                    
+                    # Execute tool code in sandboxed environment for security
+                    # Use run_in_executor to avoid blocking the event loop
+                    try:
+                        loop = asyncio.get_running_loop()
+                        result = await loop.run_in_executor(
+                            None,
+                            self.sandbox.execute,
+                            code,
+                            {"args": args}
+                        )
+                        output = result.get("result", "Success (no result returned)")
+                    except SecurityError as e:
+                        output = f"Security Error: Tool '{func_name}' violated security policy: {str(e)}"
+                    except ResourceLimitError as e:
+                        output = f"Resource Limit Error: Tool '{func_name}' exceeded resource limits: {str(e)}"
+                    except TimeoutError as e:
+                        output = f"Timeout Error: Tool '{func_name}' took too long to execute: {str(e)}"
+                    except Exception as e:
+                        output = f"Error executing tool {func_name}: {str(e)}"
             else:
                 output = f"Error: Tool {func_name} not found in library."
 

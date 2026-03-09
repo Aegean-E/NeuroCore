@@ -36,6 +36,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, Any, Optional, List
 from contextlib import contextmanager
+import logging
+
+logger = logging.getLogger(__name__)
 
 # Configuration
 SESSION_FILE = "data/session.json"
@@ -624,9 +627,15 @@ class SessionManager:
                 json.dump(episode_data, f, indent=2)
             os.replace(temp_file, self.episode_file)
         except Exception as e:
+            # Issue 11: Log structured warning for persistence failure
+            logger.warning(f"[SessionManager] Failed to save episode to {self.episode_file}: {e}")
             temp_file = self.episode_file + ".tmp"
             if os.path.exists(temp_file):
-                os.remove(temp_file)
+                try:
+                    os.remove(temp_file)
+                except OSError:
+                    pass
+            # Re-raise to let caller handle the error
             raise e
     
     def create_episode(

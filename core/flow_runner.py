@@ -288,7 +288,8 @@ class FlowRunner:
             
             while len(sorted_order) < len(self.nodes):
                 # Pick the first remaining node to break the deadlock
-                candidates = [n for n in self.nodes if n not in sorted_order]
+                # Sort candidates for deterministic order (alphabetically by node ID)
+                candidates = sorted([n for n in self.nodes if n not in sorted_order])
                 if not candidates:
                     break
                 

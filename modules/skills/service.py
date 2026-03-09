@@ -111,17 +111,31 @@ class SkillService:
             except socket.gaierror:
                 raise ValueError(f"Could not resolve hostname '{hostname}'")
             
+            # Issue 7: Additional DNS rebinding protection
+            # Check the hostname itself for suspicious patterns before relying on DNS resolution
+            # DNS rebinding can exploit the time between hostname resolution and actual connection
+            hostname_lower = hostname.lower()
+            
+            # Block common internal hostnames
+            blocked_hostnames = ['localhost', 'localhost.localdomain', 'metadata', 'metadata.google.internal']
+            if hostname_lower in blocked_hostnames:
+                raise ValueError(f"Hostname '{hostname}' is not allowed")
+            
+            # Additional check: block hostnames that are pure IP addresses (could be used for rebinding)
+            import re
+            ip_pattern = re.compile(r'^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$')
+            if ip_pattern.match(hostname):
+                raise ValueError(f"Direct IP address '{hostname}' is not allowed. Use a hostname instead.")
+            
+            # Block IPv6 addresses directly
+            if ':' in hostname:  # Contains colons, likely IPv6
+                raise ValueError(f"IPv6 address '{hostname}' is not allowed. Use a hostname instead.")
+            
             # Check if resolved IP matches blocked patterns
             blocked_patterns_compiled = [re.compile(p) for p in blocked_ip_patterns]
             for pattern in blocked_patterns_compiled:
                 if pattern.match(ip):
                     raise ValueError(f"URL resolves to blocked IP address '{ip}' - internal/network addresses are not allowed")
-            
-            # Additional check: block common internal hostnames
-            hostname_lower = hostname.lower()
-            blocked_hostnames = ['localhost', 'localhost.localdomain', 'metadata', 'metadata.google.internal']
-            if hostname_lower in blocked_hostnames:
-                raise ValueError(f"Hostname '{hostname}' is not allowed")
             
             # Make the HTTP request
             response = httpx.get(url, timeout=30.0)

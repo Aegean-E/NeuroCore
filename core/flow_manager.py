@@ -78,11 +78,14 @@ class FlowManager:
                 errors.append(f"Flow '{flow_id}' missing required keys: {missing_keys}")
                 continue
             
+            # Initialize node_ids to empty set - this ensures it's always defined
+            # even if nodes validation fails
+            node_ids = set()
+            
             # Validate nodes
             if not isinstance(flow.get("nodes"), list):
                 errors.append(f"Flow '{flow_id}' nodes must be a list")
             else:
-                node_ids = set()
                 for node in flow["nodes"]:
                     if not isinstance(node, dict):
                         errors.append(f"Flow '{flow_id}' node must be a dictionary")
@@ -104,12 +107,11 @@ class FlowManager:
                     if "from" not in conn or "to" not in conn:
                         errors.append(f"Flow '{flow_id}' connection missing 'from' or 'to'")
                     else:
-                        # Validate node references
-                        if node_ids:
-                            if conn["from"] not in node_ids:
-                                errors.append(f"Flow '{flow_id}' connection references non-existent node: {conn['from']}")
-                            if conn["to"] not in node_ids:
-                                errors.append(f"Flow '{flow_id}' connection references non-existent node: {conn['to']}")
+                        # Validate node references - node_ids is now always defined
+                        if conn["from"] not in node_ids:
+                            errors.append(f"Flow '{flow_id}' connection references non-existent node: {conn['from']}")
+                        if conn["to"] not in node_ids:
+                            errors.append(f"Flow '{flow_id}' connection references non-existent node: {conn['to']}")
         
         return {"valid": len(errors) == 0, "errors": errors}
 

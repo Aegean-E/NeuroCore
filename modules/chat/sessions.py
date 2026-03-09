@@ -1,10 +1,13 @@
 import asyncio
 import copy
 import json
+import logging
 import os
 import uuid
 from datetime import datetime
 import threading
+
+logger = logging.getLogger(__name__)
 
 SESSIONS_FILE = "chat_sessions.json"
 
