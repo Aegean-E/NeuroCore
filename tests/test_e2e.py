@@ -74,8 +74,9 @@ def test_load_default_prompt_button(base_url):
     r = requests.get(f'{base_url}/modules/planner/default-prompt')
     default_prompt = r.text
     print(f'   Default prompt ready for textarea: {len(default_prompt)} chars')
-    # Fixed: check for newline in a valid way instead of using f-string with backslash
-    print(f'   Has proper newlines: {"\\n" in str(default_prompt)}')
+    # Fixed: check for newline in a valid way - assign to variable before f-string
+    has_newlines = "\n" in str(default_prompt)
+    print(f'   Has proper newlines: {has_newlines}')
     assert len(default_prompt) > 0
 
 

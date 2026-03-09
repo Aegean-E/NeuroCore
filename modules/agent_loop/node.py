@@ -525,6 +525,12 @@ class AgentLoopExecutor:
         enable_episode = config.get("enable_episode_persistence", False)
         episode_id = config.get("episode_id")  # Optional custom episode ID
         checkpoint_interval = config.get("checkpoint_interval", 1)  # Save checkpoint every N iterations
+        
+        # Issue 6: Guard against checkpoint_interval = 0 crash (division by zero)
+        if checkpoint_interval <= 0:
+            logger.warning("checkpoint_interval must be >= 1, defaulting to 1")
+            checkpoint_interval = 1
+        
         episode = None
         iteration_count = 0  # Track iterations for checkpoint saving
         
@@ -688,12 +694,20 @@ class AgentLoopExecutor:
             if final_response and "choices" in final_response:
                 result["content"] = final_response["choices"][0]["message"].get("content", "")
 
-            # --- Re-planning detection ---
+            # Issue 5: Re-planning detection - use structured error flags instead of naive text matching
             # Check if the agent actually failed to produce a useful response
             # Don't trigger re-planning just because max_iterations was reached
             content = result.get("content", "")
             response_text = str(final_response) if final_response else ""
-            actually_failed = had_tool_error or not content or "error" in response_text.lower()
+            
+            # Use structured error detection instead of naive substring matching
+            # This prevents false-positive replanning on benign text like "error handling best practices"
+            has_error_flag = final_response.get("error") is not None if final_response else False
+            has_tool_failure = had_tool_error
+            has_no_content = not content
+            
+            # Only trigger replan if there's a structured error, tool failure, or no content
+            actually_failed = has_tool_failure or has_no_content or has_error_flag
             
             plan = input_data.get("plan", [])
             current_step = input_data.get("current_step", 0)

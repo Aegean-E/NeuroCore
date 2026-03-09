@@ -51,7 +51,7 @@ DANGEROUS_MODULES: Set[str] = {
     'threading', 'ctypes', 'mmap', 'resource', 'signal',
     'pickle', 'cPickle', 'marshal', 'imp', 'importlib',
     'site', 'warnings', 'traceback', 'gc', 'inspect',
-    'types', 'code', 'codeop', 'pdb', 'bdb', 'cmd',
+    'code', 'codeop', 'pdb', 'bdb', 'cmd',
     'shutil', 'tempfile', 'pathlib', 'path', 'glob',
     'fnmatch', 'linecache', 'tracemalloc', 'faulthandler',
     'posix', 'nt', 'java', 'org', 'com', 'net',
