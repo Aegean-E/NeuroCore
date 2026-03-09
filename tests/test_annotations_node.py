@@ -10,14 +10,14 @@ async def test_get_executor_class():
     assert executor_class is None
 
 @pytest.mark.asyncio
-async def test_comment_executor_passthrough():
+async def test_comment_executor_stops_propagation():
     executor = CommentExecutor()
     input_data = {"some": "data"}
     
     # Test receive
     received = await executor.receive(input_data)
-    assert received == input_data
+    assert received is None
     
     # Test send
     sent = await executor.send(received)
-    assert sent == input_data
+    assert sent is None

@@ -1,105 +1,99 @@
-"""
-End-to-End Tests for NeuroCore
+"""End-to-end tests for NeuroCore module configuration workflows.
 
-Tests the prompt editing workflow and module configurations.
+These tests require a running NeuroCore server and are intentionally skipped in
+normal unit-test runs unless explicitly enabled.
 """
+
+from __future__ import annotations
+
+import json
+import os
 
 import pytest
-import requests
-import json
 
+requests = pytest.importorskip("requests", reason="E2E tests require optional 'requests' dependency")
 
-BASE_URL = "http://localhost:8000"
+BASE_URL = os.getenv("NEUROCORE_E2E_BASE_URL", "http://localhost:8000")
+ENABLE_E2E = os.getenv("NEUROCORE_RUN_E2E") == "1"
+
+pytestmark = pytest.mark.e2e
 
 
 @pytest.fixture(scope="module")
-def base_url():
+def base_url() -> str:
+    """Return base URL for E2E server after validating availability."""
+    if not ENABLE_E2E:
+        pytest.skip("Set NEUROCORE_RUN_E2E=1 to run E2E tests")
+
+    try:
+        response = requests.get(f"{BASE_URL}/", timeout=2)
+        if response.status_code >= 500:
+            pytest.skip(f"E2E server unhealthy at {BASE_URL} (status {response.status_code})")
+    except requests.RequestException as exc:
+        pytest.skip(f"E2E server not reachable at {BASE_URL}: {exc}")
+
     return BASE_URL
 
 
-def test_planner_module_details(base_url):
-    """Test 1: Get planner module details (simulates loading the page)."""
-    r = requests.get(f'{base_url}/modules/planner/details')
-    assert r.status_code == 200, f"Expected 200, got {r.status_code}"
-    print(f'   Status: {r.status_code}')
-    print(f'   Page loaded successfully: {r.status_code == 200}')
+def test_planner_module_details(base_url: str) -> None:
+    response = requests.get(f"{base_url}/modules/planner/details", timeout=5)
+    assert response.status_code == 200
 
 
-def test_planner_default_prompt(base_url):
-    """Test 2: Get default prompt (simulates clicking Load Default Prompt)."""
-    r = requests.get(f'{base_url}/modules/planner/default-prompt')
-    assert r.status_code == 200, f"Expected 200, got {r.status_code}"
-    default_prompt = r.text
-    print(f'   Status: {r.status_code}')
-    print(f'   Contains {{max_steps}} placeholder: {"{max_steps}" in default_prompt}')
-    print(f'   First 100 chars: {default_prompt[:100]}')
-    return default_prompt
+def test_planner_default_prompt(base_url: str) -> None:
+    response = requests.get(f"{base_url}/modules/planner/default-prompt", timeout=5)
+    assert response.status_code == 200
+    assert "{max_steps}" in response.text
 
 
-def test_save_custom_prompt(base_url):
-    """Test 3: Save a custom prompt."""
-    custom_prompt = 'Custom planner prompt with {request} and max {max_steps} steps'
-    data = {'planner_prompt': custom_prompt, 'max_steps': '20', 'enabled': 'true'}
-    r = requests.post(f'{base_url}/modules/planner/config', data=data)
-    assert r.status_code == 200, f"Expected 200, got {r.status_code}"
-    print(f'   Status: {r.status_code}')
-    print(f'   Saved successfully: {r.status_code == 200}')
+def test_save_custom_prompt(base_url: str) -> None:
+    custom_prompt = "Custom planner prompt with {request} and max {max_steps} steps"
+    response = requests.post(
+        f"{base_url}/modules/planner/config",
+        data={"planner_prompt": custom_prompt, "max_steps": "20", "enabled": "true"},
+        timeout=5,
+    )
+    assert response.status_code == 200
 
 
-def test_verify_custom_prompt_saved(base_url):
-    """Test 4: Verify custom prompt was saved."""
-    with open('modules/planner/module.json', 'r') as f:
-        config = json.load(f)
-    saved_custom = config.get('config', {}).get('planner_prompt', '')
-    saved_max_steps = config.get('config', {}).get('max_steps', 0)
-    print(f'   Custom prompt saved: {saved_custom == "Custom planner prompt with {request} and max {max_steps} steps"}')
-    print(f'   Max steps saved: {saved_max_steps == 20}')
-    print(f'   Default preserved: {"default_planner_prompt" in config.get("config", {})}')
-    assert saved_custom == 'Custom planner prompt with {request} and max {max_steps} steps'
+def test_verify_custom_prompt_saved() -> None:
+    with open("modules/planner/module.json", "r", encoding="utf-8") as file:
+        config = json.load(file)
+
+    saved_custom = config.get("config", {}).get("planner_prompt", "")
+    saved_max_steps = config.get("config", {}).get("max_steps", 0)
+
+    assert saved_custom == "Custom planner prompt with {request} and max {max_steps} steps"
     assert saved_max_steps == 20
 
 
-def test_get_default_prompt_again(base_url):
-    """Test 5: Get default prompt again (should still return original default)."""
-    r = requests.get(f'{base_url}/modules/planner/default-prompt')
-    assert r.status_code == 200, f"Expected 200, got {r.status_code}"
-    default_prompt_again = r.text
-    print(f'   Status: {r.status_code}')
-    print(f'   Still contains {{max_steps}}: {"{max_steps}" in default_prompt_again}')
-    return default_prompt_again
+def test_get_default_prompt_again(base_url: str) -> None:
+    response = requests.get(f"{base_url}/modules/planner/default-prompt", timeout=5)
+    assert response.status_code == 200
+    assert "{max_steps}" in response.text
 
 
-def test_load_default_prompt_button(base_url):
-    """Test 6: Simulate loading default prompt into textarea."""
-    r = requests.get(f'{base_url}/modules/planner/default-prompt')
-    default_prompt = r.text
-    print(f'   Default prompt ready for textarea: {len(default_prompt)} chars')
-    # Fixed: check for newline in a valid way - assign to variable before f-string
-    has_newlines = "\n" in str(default_prompt)
-    print(f'   Has proper newlines: {has_newlines}')
-    assert len(default_prompt) > 0
+def test_load_default_prompt_button(base_url: str) -> None:
+    response = requests.get(f"{base_url}/modules/planner/default-prompt", timeout=5)
+    assert response.status_code == 200
+    assert len(response.text) > 0
+    assert "\n" in response.text
 
 
-def test_reflection_module_workflow(base_url):
-    """Test 7: Test Reflection module workflow."""
-    r = requests.get(f'{base_url}/modules/reflection/default-prompt')
-    assert r.status_code == 200
-    reflection_default = r.text
-    print(f'   Default prompt retrieved: {len(reflection_default)} chars')
+def test_reflection_module_workflow(base_url: str) -> None:
+    response = requests.get(f"{base_url}/modules/reflection/default-prompt", timeout=5)
+    assert response.status_code == 200
 
-    custom_reflection = 'Custom reflection prompt for testing'
-    r = requests.post(f'{base_url}/modules/reflection/config', 
-                      data={'reflection_prompt': custom_reflection, 'inject_improvement': 'true'})
-    assert r.status_code == 200
-    print(f'   Custom prompt saved: {r.status_code == 200}')
+    custom_reflection = "Custom reflection prompt for testing"
+    response = requests.post(
+        f"{base_url}/modules/reflection/config",
+        data={"reflection_prompt": custom_reflection, "inject_improvement": "true"},
+        timeout=5,
+    )
+    assert response.status_code == 200
 
-    with open('modules/reflection/module.json', 'r') as f:
-        ref_config = json.load(f)
-    print(f'   Default preserved: {"default_reflection_prompt" in ref_config.get("config", {})}')
-    print(f'   Custom saved: {ref_config.get("config", {}).get("reflection_prompt") == custom_reflection}')
-    assert "default_reflection_prompt" in ref_config.get("config", {})
-    assert ref_config.get("config", {}).get("reflection_prompt") == custom_reflection
+    with open("modules/reflection/module.json", "r", encoding="utf-8") as file:
+        reflection_config = json.load(file)
 
-
-print('=== All End-to-End Tests Passed ===')
-
+    assert "default_reflection_prompt" in reflection_config.get("config", {})
+    assert reflection_config.get("config", {}).get("reflection_prompt") == custom_reflection
