@@ -18,7 +18,8 @@ DEFAULT_SETTINGS = {
     "ui_wide_mode": False,
     "ui_show_footer": True,
     "request_timeout": 60.0,
-    "max_node_loops": 100
+    "max_node_loops": 100,
+    "module_allowlist": [],  # Issue 9: Module allowlist for hot-loading security
 }
 
 class SettingsManager:
@@ -137,6 +138,15 @@ class SettingsManager:
                 if not isinstance(item, str):
                     raise ValueError(f"active_ai_flows items must be strings, got {type(item).__name__}")
             validated["active_ai_flows"] = new_settings["active_ai_flows"]
+        
+        # Issue 9: Module allowlist - list of module IDs for hot-loading security
+        if "module_allowlist" in new_settings:
+            if not isinstance(new_settings["module_allowlist"], list):
+                raise ValueError("module_allowlist must be a list")
+            for item in new_settings["module_allowlist"]:
+                if not isinstance(item, str):
+                    raise ValueError(f"module_allowlist items must be strings, got {type(item).__name__}")
+            validated["module_allowlist"] = new_settings["module_allowlist"]
         
         return validated
     

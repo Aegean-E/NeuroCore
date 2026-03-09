@@ -8,14 +8,16 @@ from starlette.routing import Mount
 import logging
 
 from core.flow_runner import FlowRunner
+from core.settings import settings
 logger = logging.getLogger(__name__)
 
 MODULES_DIR = "modules"
 
-# Issue 10: Module allowlist for hot-loading
-# Only modules in this list can be loaded at runtime
-# Empty list means all modules are allowed (default for backwards compatibility)
-MODULE_ALLOWLIST = []  # Set to ["chat", "memory", "knowledge_base"] to restrict
+# Issue 10/9: Module allowlist for hot-loading
+# Note: This constant is kept for backwards compatibility but is now 
+# loaded from settings.json at runtime. The settings value takes precedence.
+# Set to ["chat", "memory", "knowledge_base"] to restrict which modules can be loaded
+MODULE_ALLOWLIST = []  # Default empty = allow all (backwards compatibility)
 
 class ModuleManager:
     def __init__(self, app: FastAPI, modules_dir=MODULES_DIR):
@@ -61,9 +63,11 @@ class ModuleManager:
 
     def _load_module_router(self, module_id: str):
         """Imports a module and adds its router to the app."""
-        # Issue 10: Check module allowlist before loading
-        if MODULE_ALLOWLIST and module_id not in MODULE_ALLOWLIST:
-            logger.warning(f"[ModuleManager] Module '{module_id}' not in allowlist, skipping load. Allowed: {MODULE_ALLOWLIST}")
+        # Issue 9/10: Check module allowlist before loading
+        # Load from settings first, fall back to constant for backwards compatibility
+        runtime_allowlist = settings.get("module_allowlist", MODULE_ALLOWLIST)
+        if runtime_allowlist and module_id not in runtime_allowlist:
+            logger.warning(f"[ModuleManager] Module '{module_id}' not in allowlist, skipping load. Allowed: {runtime_allowlist}")
             return False
         
         # Use lock to prevent concurrent loading of the same module
