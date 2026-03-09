@@ -264,9 +264,19 @@ class FlowRunner:
         
         # Step 4: Handle cycles - if not all nodes were sorted, we have a cycle
         if len(sorted_order) != len(self.nodes):
-            # Cycle detected. Break it by arbitrarily adding remaining nodes.
-            # This is a heuristic to allow execution even with malformed flows.
+            # Cycle detected. Check if strict mode is enabled
+            strict_cycle_mode = self.flow.get('strict_cycle_mode', False)
+            
             remaining_nodes = list(set(self.nodes.keys()) - set(sorted_order))
+            
+            if strict_cycle_mode:
+                # In strict mode, raise an error for cycles
+                cycle_nodes = self._identify_cycle_nodes(adj, sorted_order, remaining_nodes)
+                raise ValueError(
+                    f"[FlowRunner] Cycle detected in flow '{self.flow_id}'. "
+                    f"Cyclic nodes: {cycle_nodes}. "
+                    f"Enable non-strict mode or fix the flow graph to remove cycles."
+                )
             
             # Log warning about cycle detection - always log in production
             logger.warning(f"[FlowRunner] Cycle detected in flow. Breaking by adding remaining nodes: {remaining_nodes}")
@@ -302,6 +312,42 @@ class FlowRunner:
                                 queue.append(v)
 
         return sorted_order
+
+
+    def _identify_cycle_nodes(self, adj: dict, sorted_order: list, remaining_nodes: list) -> list:
+        """
+        Identify the nodes that form the cycle in the flow graph.
+        
+        Uses DFS to find nodes that are part of cycles.
+        
+        Args:
+            adj: Adjacency list representing the graph
+            sorted_order: Nodes that were successfully topologically sorted
+            remaining_nodes: Nodes that could not be sorted (part of cycle)
+            
+        Returns:
+            list: Node IDs that are part of the cycle
+        """
+        cycle_nodes = []
+        
+        # Build reverse adjacency for cycle detection
+        # For remaining nodes, find which ones reference each other
+        for node in remaining_nodes:
+            # Check if this node has edges to other remaining nodes
+            neighbors = adj.get(node, [])
+            for neighbor in neighbors:
+                if neighbor in remaining_nodes:
+                    # This is a cycle edge
+                    if node not in cycle_nodes:
+                        cycle_nodes.append(node)
+                    if neighbor not in cycle_nodes:
+                        cycle_nodes.append(neighbor)
+        
+        # If we couldn't find cycle nodes via adjacency, return the remaining nodes
+        if not cycle_nodes:
+            cycle_nodes = remaining_nodes[:3]  # Return first few for brevity
+        
+        return cycle_nodes
 
 
     def validate(self, module_manager) -> dict:

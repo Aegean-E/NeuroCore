@@ -115,12 +115,39 @@ class AgentLoopExecutor:
         return {}
 
     def _load_tool_library(self):
-        """Load tool implementations from library directory with mtime-based caching."""
+        """Load tool implementations from library directory with file-level mtime-based caching."""
         try:
             if os.path.exists(LIBRARY_DIR):
-                # Check directory mtime
-                dir_mtime = os.path.getmtime(LIBRARY_DIR)
-                if dir_mtime > self.__class__._library_cache["mtime"]:
+                # Use file-level fingerprints for cache invalidation
+                # This catches file content edits that may not update directory mtime
+                current_files = {}
+                for filename in os.listdir(LIBRARY_DIR):
+                    if filename.endswith(".py"):
+                        tool_name = filename[:-3]
+                        code_path = os.path.join(LIBRARY_DIR, filename)
+                        try:
+                            # Store file mtime for each file as fingerprint
+                            current_files[tool_name] = os.path.getmtime(code_path)
+                        except OSError:
+                            pass
+                
+                # Check if any file has changed by comparing fingerprints
+                cache_data = self.__class__._library_cache.get("data", {})
+                cache_mtimes = self.__class__._library_cache.get("file_mtimes", {})
+                
+                needs_reload = False
+                # Check for new or modified files
+                for tool_name, mtime in current_files.items():
+                    if tool_name not in cache_mtimes or cache_mtimes[tool_name] != mtime:
+                        needs_reload = True
+                        break
+                # Check for deleted files
+                for tool_name in cache_mtimes:
+                    if tool_name not in current_files:
+                        needs_reload = True
+                        break
+                
+                if needs_reload or not cache_data:
                     library = {}
                     for filename in os.listdir(LIBRARY_DIR):
                         if filename.endswith(".py"):
@@ -129,8 +156,8 @@ class AgentLoopExecutor:
                             with open(code_path, "r") as f:
                                 library[tool_name] = f.read()
                     self.__class__._library_cache["data"] = library
-                    self.__class__._library_cache["mtime"] = dir_mtime
-                return self.__class__._library_cache["data"]
+                    self.__class__._library_cache["file_mtimes"] = current_files
+                return self.__class__._library_cache.get("data", {})
         except OSError as e:
             logger.warning(f"Failed to load tool library: {e}")
         return {}
@@ -543,13 +570,12 @@ class AgentLoopExecutor:
                         "timeout": timeout,
                         "max_context_tokens": max_context_tokens,
                     }
+                    # FIX: episode_id already passed in metadata above - no need to overwrite
                     episode = sm.create_episode(
                         input_data={"initial_input": list(input_data.keys())},
                         budgets=budgets,
                         metadata={"episode_id": episode_id} if episode_id else {}
                     )
-                    if episode_id:
-                        episode.episode_id = episode_id
                     logger.info(f"Created new episode {episode.episode_id}")
             except Exception as e:
                 logger.warning(f"Failed to load episode state: {e}")
@@ -635,17 +661,19 @@ class AgentLoopExecutor:
 
             # --- Episode Checkpoint Saving ---
             # Save checkpoint after each iteration if enabled
+            # FIX: Use local variables instead of result (which isn't defined yet)
             if episode is not None and sm is not None:
                 iteration_count += iterations
                 # Save checkpoint at configured intervals or on completion
                 if iteration_count % checkpoint_interval == 0 or iterations == 0:
                     try:
+                        # Use local variables since result isn't defined yet
                         sm.save_episode_state(
                             phase=EpisodeState.PHASE_EXECUTING,
-                            replan_count=result.get("replan_count", replan_count),
-                            completed_steps=result.get("completed_steps", []),
-                            current_step=result.get("current_step", 0),
-                            plan=result.get("plan", []),
+                            replan_count=replan_count,
+                            completed_steps=input_data.get("completed_steps", []),
+                            current_step=input_data.get("current_step", 0),
+                            plan=input_data.get("plan", []),
                             messages=llm_messages if config.get("save_messages_in_episode", False) else None,
                             add_checkpoint=True,
                         )
