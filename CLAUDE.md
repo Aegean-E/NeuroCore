@@ -16,6 +16,19 @@ Every code change — no matter how small — must follow this sequence:
 
 > This workflow applies to all changes: new features, bug fixes, refactors, and configuration changes. The only exception is pure documentation edits (e.g., updating this file) where no executable logic is involved.
 
+### Todo Tracking
+
+Use the `TodoWrite` tool to track progress for **every non-trivial task** — bugs, fixes, new features, refactors, and investigations. Create todos at the start of the task, mark each item `in_progress` before working on it, and mark it `completed` immediately when done. Never batch completions.
+
+**Always use todos for:**
+- Bug investigations and fixes
+- New feature implementations
+- Refactoring existing code
+- Running and interpreting test results
+- Multi-step investigations (e.g., tracing an error across files)
+
+**Skip todos only for:** single-step trivial edits (e.g., fixing a typo, adding one import).
+
 ---
 
 ## Project Overview
