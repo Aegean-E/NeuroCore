@@ -4,6 +4,20 @@
 
 ---
 
+## Required Workflow for All Code Tasks
+
+Every code change — no matter how small — must follow this sequence:
+
+1. **Proposed Solution** — Describe the approach before writing any code. Identify affected files, design decisions, and trade-offs.
+2. **Implementation** — Write the code changes.
+3. **Implementation Review** — Re-read every changed file. Check for correctness, security issues, thread safety, adherence to conventions in this document, and unintended side effects.
+4. **Test File Creation** — Write or update tests that cover the new/changed behaviour. Tests live in `tests/test_<area>.py`.
+5. **Test File Running** — Execute the tests and confirm they pass before committing.
+
+> This workflow applies to all changes: new features, bug fixes, refactors, and configuration changes. The only exception is pure documentation edits (e.g., updating this file) where no executable logic is involved.
+
+---
+
 ## Project Overview
 
 **NeuroCore** is a production-quality, modular AI orchestration framework built in Python. It provides a visual flow-based execution engine for chaining AI nodes (LLM calls, memory retrieval, tool execution, etc.) into complex autonomous workflows. The system exposes a web UI (HTMX + TailwindCSS), a REST API (FastAPI), and integrations with Telegram, calendar scheduling, and long-term memory.
