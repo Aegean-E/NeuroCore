@@ -102,7 +102,9 @@ class TestAsyncConcurrency:
     @pytest.mark.asyncio
     async def test_asyncio_lock_concurrent_access(self):
         """Test asyncio.Lock allows concurrent coroutines."""
-        from core.llm import _client_lock
+        from core.llm import get_client_lock
+        
+        _client_lock = get_client_lock()
         
         counter = {'value': 0}
         

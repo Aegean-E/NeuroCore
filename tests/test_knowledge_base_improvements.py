@@ -18,10 +18,15 @@ async def test_processor_parallel_embeddings():
     mock_bridge.embedding_model = "model"
     
     # We need to mock the internal batch_bridge created inside _generate_embeddings
+    # Use AsyncMock for AsyncClient to properly mock async context manager
     with patch("modules.knowledge_base.processor.httpx.AsyncClient") as MockClient, \
          patch("modules.knowledge_base.processor.LLMBridge") as MockBridgeClass:
         
-        mock_client_instance = MockClient.return_value.__aenter__.return_value
+        # Create async mock for AsyncClient that properly handles async context manager
+        mock_client_instance = AsyncMock()
+        MockClient.return_value.__aenter__ = AsyncMock(return_value=mock_client_instance)
+        MockClient.return_value.__aexit__ = AsyncMock(return_value=None)
+        
         mock_batch_bridge = MockBridgeClass.return_value
         mock_batch_bridge.get_embedding = AsyncMock(side_effect=lambda text: [0.1] * 10)
         

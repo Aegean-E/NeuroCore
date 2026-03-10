@@ -73,7 +73,20 @@ class ModuleManager:
         # Use lock to prevent concurrent loading of the same module
         with self.lock:
             # Double-check after acquiring lock to prevent double registration
-            if any(isinstance(r, Mount) and r.path == f"/{module_id}" for r in self.app.router.routes):
+            # Check both Mount objects by path AND regular routes by tags
+            module_prefix = f"/{module_id}"
+            
+            def is_module_loaded(route):
+                # Check Mount objects by exact path match OR startswith with slash boundary
+                if isinstance(route, Mount):
+                    if route.path == module_prefix or route.path.startswith(module_prefix + "/"):
+                        return True
+                # Check regular routes by tags
+                if hasattr(route, "tags") and module_id in route.tags:
+                    return True
+                return False
+            
+            if any(is_module_loaded(r) for r in self.app.router.routes):
                 return True
 
             # Note: sys.modules modification under lock can theoretically interact with 

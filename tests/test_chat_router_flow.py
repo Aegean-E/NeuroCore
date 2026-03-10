@@ -7,7 +7,15 @@ from main import app
 
 
 @pytest.fixture
-def mock_chat_sessions():
+def client(mock_chat_sessions):
+    """Create test client with chat module enabled."""
+    with TestClient(app) as c:
+        c.app.state.module_manager.enable_module('chat')
+        yield c
+
+
+@pytest.fixture
+def mock_chat_sessions(client):
     """Mocks the session manager to use an in-memory dict.
     
     This fixture must run AFTER the client fixture to ensure the router module
@@ -34,14 +42,6 @@ def mock_chat_sessions():
     target_session_manager._save_sessions = lambda: None
     mock_sessions_dict.clear()
     return target_session_manager
-
-
-@pytest.fixture
-def client(mock_chat_sessions):
-    """Create test client with chat module enabled."""
-    with TestClient(app) as c:
-        c.app.state.module_manager.enable_module('chat')
-        yield c
 
 
 def test_send_message_no_active_flow(client, mock_chat_sessions):

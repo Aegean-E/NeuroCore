@@ -55,6 +55,8 @@ async def test_kb_node_execution():
         # Mock LLM embedding
         executor.llm.get_embedding = AsyncMock(return_value=[0.1, 0.2])
 
+        # Mock get_total_documents to return non-zero so the query proceeds
+        mock_store.get_total_documents.return_value = 5
         mock_store.search.return_value = [
             {"content": "Relevant info", "source": "doc.pdf", "page": 1}
         ]

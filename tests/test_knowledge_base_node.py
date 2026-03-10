@@ -2,17 +2,22 @@
 Tests for modules/knowledge_base/node.py — KnowledgeQueryExecutor
 """
 import pytest
+import sys
 from unittest.mock import AsyncMock, MagicMock, patch
-from modules.knowledge_base.node import KnowledgeQueryExecutor, get_executor_class
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
-def make_executor() -> KnowledgeQueryExecutor:
-    """Create a KnowledgeQueryExecutor with LLMBridge patched out."""
+def make_executor():
+    """Create a KnowledgeQueryExecutor with fresh import to avoid stale class refs."""
+    # Import fresh to avoid stale class references from previous test runs
+    if "modules.knowledge_base.node" in sys.modules:
+        del sys.modules["modules.knowledge_base.node"]
+    
     with patch("modules.knowledge_base.node.LLMBridge"):
+        from modules.knowledge_base.node import KnowledgeQueryExecutor
         executor = KnowledgeQueryExecutor()
     executor.llm = MagicMock()
     executor.llm.get_embedding = AsyncMock(return_value=[0.1, 0.2, 0.3])
@@ -138,6 +143,11 @@ async def test_content_field_used_as_query():
 @pytest.mark.asyncio
 async def test_get_executor_class_dispatcher():
     """get_executor_class('query_knowledge') should return KnowledgeQueryExecutor."""
+    # Import fresh to avoid stale class references
+    if "modules.knowledge_base.node" in sys.modules:
+        del sys.modules["modules.knowledge_base.node"]
+    
+    from modules.knowledge_base.node import get_executor_class, KnowledgeQueryExecutor
     cls = await get_executor_class("query_knowledge")
     assert cls is KnowledgeQueryExecutor
 
@@ -145,5 +155,10 @@ async def test_get_executor_class_dispatcher():
 @pytest.mark.asyncio
 async def test_get_executor_class_unknown():
     """get_executor_class with unknown id should return None."""
+    # Import fresh to avoid stale class references
+    if "modules.knowledge_base.node" in sys.modules:
+        del sys.modules["modules.knowledge_base.node"]
+    
+    from modules.knowledge_base.node import get_executor_class
     cls = await get_executor_class("unknown")
     assert cls is None
