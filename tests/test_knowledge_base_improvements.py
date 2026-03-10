@@ -18,24 +18,33 @@ async def test_processor_parallel_embeddings():
     mock_bridge.embedding_model = "model"
     
     # We need to mock the internal batch_bridge created inside _generate_embeddings
-    # Use AsyncMock for AsyncClient to properly mock async context manager
+    # The code creates httpx.AsyncClient(timeout=60.0) directly, not as a context manager,
+    # so we need to mock the class such that instances have an aclose method
     with patch("modules.knowledge_base.processor.httpx.AsyncClient") as MockClient, \
          patch("modules.knowledge_base.processor.LLMBridge") as MockBridgeClass:
         
-        # Create async mock for AsyncClient that properly handles async context manager
-        mock_client_instance = AsyncMock()
-        MockClient.return_value.__aenter__ = AsyncMock(return_value=mock_client_instance)
-        MockClient.return_value.__aexit__ = AsyncMock(return_value=None)
+        # Create a mock client instance that has an awaitable aclose method
+        mock_client_instance = MagicMock()
+        # Set up aclose as an AsyncMock so it can be awaited
+        mock_client_instance.aclose = AsyncMock()
         
-        mock_batch_bridge = MockBridgeClass.return_value
+        # Configure the class to return our mock instance when called
+        MockClient.return_value = mock_client_instance
+        
+        # Create mock batch_bridge that returns async embeddings
+        mock_batch_bridge = MagicMock()
+        # Make get_embedding an AsyncMock that returns a proper list when awaited
         mock_batch_bridge.get_embedding = AsyncMock(side_effect=lambda text: [0.1] * 10)
+        
+        # Configure the mock BridgeClass to return our mock_batch_bridge
+        MockBridgeClass.return_value = mock_batch_bridge
         
         processor = DocumentProcessor(mock_bridge)
         chunks = [{"text": f"chunk {i}"} for i in range(10)]
         
         await processor._generate_embeddings(chunks)
         
-        # Verify client was created (context manager used)
+        # Verify client was created
         MockClient.assert_called_once()
         
         # Verify embeddings were populated
@@ -44,6 +53,9 @@ async def test_processor_parallel_embeddings():
         
         # Verify calls were made
         assert mock_batch_bridge.get_embedding.call_count == 10
+        
+        # Verify aclose was called to clean up
+        mock_client_instance.aclose.assert_called_once()
 
 def test_backend_optimized_search():
     """Test the optimized SQL IN search."""
