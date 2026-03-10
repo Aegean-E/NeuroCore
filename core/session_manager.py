@@ -264,7 +264,7 @@ class SessionManager:
         self.episode_dir = episode_dir
         self.episode_file = os.path.join(episode_dir, "current.json")  # Legacy compatibility
         
-        self._sync_lock = threading.Lock()
+        self._sync_lock = threading.RLock()
         self._session_id: Optional[str] = None
         self._state: Dict[str, Any] = {}
         self._tick: int = 0

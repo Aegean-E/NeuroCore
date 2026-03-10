@@ -91,6 +91,16 @@ class Span:
             "status": self.status,
             "error_message": self.error_message,
         }
+    
+    def __enter__(self):
+        return self
+    
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if exc_type:
+            self.finish(status="error", error=str(exc_val))
+        else:
+            self.finish(status="ok")
+        return False
 
 
 @dataclass 
@@ -137,11 +147,11 @@ class TraceContext:
     def __exit__(self, exc_type, exc_val, exc_tb):
         _trace_ctx.set(None)
         if exc_type:
-            if self.current_span:
+            if self.current_span and self.current_span.end_time is None:
                 self.current_span.finish(status="error", error=str(exc_val))
         else:
             # Finish the current span on normal (non-exception) exit
-            if self.current_span:
+            if self.current_span and self.current_span.end_time is None:
                 self.current_span.finish(status="ok")
         return False
 

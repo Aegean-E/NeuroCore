@@ -56,7 +56,7 @@ def test_save_custom_prompt(base_url: str) -> None:
     assert response.status_code == 200
 
 
-def test_verify_custom_prompt_saved() -> None:
+def test_verify_custom_prompt_saved(base_url: str) -> None:
     with open("modules/planner/module.json", "r", encoding="utf-8") as file:
         config = json.load(file)
 
