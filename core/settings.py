@@ -94,13 +94,15 @@ class SettingsManager:
                 raise ValueError("request_timeout must be positive")
             validated["request_timeout"] = float(timeout)
         
-        # max_node_loops: positive integer
+        # max_node_loops: positive integer, capped at 1000 (see CLAUDE.md)
         if "max_node_loops" in new_settings:
             loops = new_settings["max_node_loops"]
             if not isinstance(loops, (int, float)):
                 raise ValueError("max_node_loops must be an integer")
             if int(loops) <= 0:
                 raise ValueError("max_node_loops must be a positive integer")
+            if int(loops) > 1000:
+                raise ValueError("max_node_loops must not exceed 1000")
             validated["max_node_loops"] = int(loops)
         
         # Issue 2.2: Strict boolean parsing - bool("false") returns True in Python!
@@ -182,8 +184,13 @@ class SettingsManager:
             if lower in ('false', '0', 'no', 'off'):
                 return False
             raise ValueError(f"Invalid boolean value for {field_desc}: {value!r}")
-        
-        # For other types, use bool() but warn
+
+        # Allow integer 0/1 (e.g. from form submissions or programmatic callers)
+        if isinstance(value, int):
+            if value in (0, 1):
+                return bool(value)
+            raise ValueError(f"Integer boolean {field_desc}must be 0 or 1, got {value!r}")
+
         raise ValueError(f"Cannot parse {field_desc}from value {value!r} (type: {type(value).__name__})")
 
     def get(self, key, default=None):

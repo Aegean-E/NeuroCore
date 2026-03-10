@@ -134,5 +134,92 @@ class TestDefaultSettings:
         assert isinstance(DEFAULT_SETTINGS["max_node_loops"], int)
 
 
+class TestParseBool:
+    """Tests for SettingsManager._parse_bool."""
+
+    def setup_method(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            self._sm = SettingsManager(os.path.join(tmpdir, "s.json"))
+        # Keep a stable instance without file I/O side effects for each test
+        import tempfile as _tf, os as _os
+        self._tmpdir = _tf.mkdtemp()
+        self._sm = SettingsManager(os.path.join(self._tmpdir, "s.json"))
+
+    # --- bool pass-through ---
+    def test_true_bool(self):
+        assert self._sm._parse_bool(True) is True
+
+    def test_false_bool(self):
+        assert self._sm._parse_bool(False) is False
+
+    # --- truthy strings ---
+    @pytest.mark.parametrize("val", ["true", "True", "TRUE", "1", "yes", "YES", "on", "ON"])
+    def test_truthy_strings(self, val):
+        assert self._sm._parse_bool(val) is True
+
+    # --- falsy strings ---
+    @pytest.mark.parametrize("val", ["false", "False", "FALSE", "0", "no", "NO", "off", "OFF"])
+    def test_falsy_strings(self, val):
+        assert self._sm._parse_bool(val) is False
+
+    # --- integer 0/1 ---
+    def test_integer_one(self):
+        assert self._sm._parse_bool(1) is True
+
+    def test_integer_zero(self):
+        assert self._sm._parse_bool(0) is False
+
+    # --- invalid integers ---
+    def test_integer_two_raises(self):
+        with pytest.raises(ValueError):
+            self._sm._parse_bool(2)
+
+    def test_integer_negative_raises(self):
+        with pytest.raises(ValueError):
+            self._sm._parse_bool(-1)
+
+    # --- other types ---
+    def test_none_raises(self):
+        with pytest.raises(ValueError):
+            self._sm._parse_bool(None)
+
+    def test_invalid_string_raises(self):
+        with pytest.raises(ValueError):
+            self._sm._parse_bool("maybe")
+
+
+class TestMaxNodeLoopsValidation:
+    """Tests for max_node_loops upper-bound enforcement."""
+
+    def setup_method(self):
+        import tempfile as _tf, os as _os
+        self._tmpdir = _tf.mkdtemp()
+        self._sm = SettingsManager(os.path.join(self._tmpdir, "s.json"))
+
+    def test_valid_loop_count(self):
+        validated = self._sm._validate_settings({"max_node_loops": 100})
+        assert validated["max_node_loops"] == 100
+
+    def test_max_boundary_accepted(self):
+        validated = self._sm._validate_settings({"max_node_loops": 1000})
+        assert validated["max_node_loops"] == 1000
+
+    def test_above_max_raises(self):
+        with pytest.raises(ValueError, match="must not exceed 1000"):
+            self._sm._validate_settings({"max_node_loops": 1001})
+
+    def test_very_large_value_raises(self):
+        with pytest.raises(ValueError):
+            self._sm._validate_settings({"max_node_loops": 999999})
+
+    def test_zero_raises(self):
+        with pytest.raises(ValueError):
+            self._sm._validate_settings({"max_node_loops": 0})
+
+    def test_negative_raises(self):
+        with pytest.raises(ValueError):
+            self._sm._validate_settings({"max_node_loops": -5})
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
