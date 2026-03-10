@@ -328,7 +328,7 @@ Common keys in `input_data`:
 
 ## 7. Core Modules Reference
 
-NeuroCore includes **15 built-in modules**:
+NeuroCore includes **16 built-in modules**:
 
 ### 🧠 Core AI Modules
 
@@ -592,6 +592,22 @@ UI for viewing and managing long-term memories.
 
 ---
 
+#### Skills (`skills`)
+Manage instruction files (SKILL.md) containing best practices, patterns, and guidelines for AI tasks.
+
+| Property | Value |
+|----------|-------|
+| **Type** | Service Module |
+| **Order** | 7 |
+
+**Features:**
+- Import and export skill files
+- Inject skills into system prompts
+- Skill repository management
+- Markdown-based instruction sets
+
+---
+
 ### 🛠️ Tool & Integration Modules
 
 #### Tool Library (`tools`)
@@ -605,7 +621,7 @@ Manages custom Python tools for AI agents.
 **Node:** `tool_dispatcher` - Executes tool calls from LLM.
 
 **Features:**
-- 16 built-in tools
+- 23 built-in tools
 - Custom tool creation
 - JSON Schema parameters
 - Import/export functionality

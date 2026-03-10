@@ -65,7 +65,7 @@ The Tool Library is built on these core components:
 
 ## 3. Built-in Tools Reference
 
-NeuroCore comes with **16 powerful built-in tools** ready to use:
+NeuroCore comes with **23 powerful built-in tools** ready to use:
 
 ### 🌤️ Information & Utilities
 
@@ -107,6 +107,19 @@ NeuroCore comes with **16 powerful built-in tools** ready to use:
 | **SetGoal** | Create new goals for the agent | `description`, `priority`, `deadline` |
 | **MarkGoalComplete** | Mark goals as completed | `goal_id` (number) |
 | **DeleteGoal** | Remove goals from system | `goal_id` (number) |
+
+### 🧠 RLM (Recursive Language Model) Tools
+Used for processing long inputs by breaking them into manageable chunks.
+
+| Tool | Description | Key Parameters |
+|------|-------------|----------------|
+| **Peek** | View a slice of the prompt | `start`, `end` |
+| **Search** | Find regex matches in prompt | `pattern`, `max_results` |
+| **Chunk** | Split prompt into chunks | `size`, `overlap` |
+| **SubCall** | Recursively call an LLM | `prompt`, `model`, `max_tokens` |
+| **SetVariable** | Store intermediate results | `name`, `value` |
+| **GetVariable** | Retrieve stored results | `name` |
+| **SetFinal** | Set final answer and terminate | `value` |
 
 ### Detailed Tool Schemas
 
@@ -356,6 +369,60 @@ NeuroCore comes with **16 powerful built-in tools** ready to use:
     }
   },
   "required": ["goal_id"]
+}
+```
+
+#### Peek (RLM)
+```json
+{
+  "type": "object",
+  "properties": {
+    "start": {
+      "type": "number",
+      "description": "Start character position (inclusive)."
+    },
+    "end": {
+      "type": "number",
+      "description": "End character position (exclusive)."
+    }
+  },
+  "required": ["start", "end"]
+}
+```
+
+#### Search (RLM)
+```json
+{
+  "type": "object",
+  "properties": {
+    "pattern": {
+      "type": "string",
+      "description": "The regex pattern to search for."
+    },
+    "max_results": {
+      "type": "number",
+      "description": "Maximum number of matches to return (default 20)."
+    }
+  },
+  "required": ["pattern"]
+}
+```
+
+#### SubCall (RLM)
+```json
+{
+  "type": "object",
+  "properties": {
+    "prompt": {
+      "type": "string",
+      "description": "The prompt to send to the sub-call LLM."
+    },
+    "model": {
+      "type": "string",
+      "description": "Optional model to use for sub-call."
+    }
+  },
+  "required": ["prompt"]
 }
 ```
 
