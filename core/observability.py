@@ -198,11 +198,6 @@ def trace(span_name: str, kind: SpanKind = SpanKind.INTERNAL,
         ctx.end_span()
 
 
-# Thread-local trace context for async operations
-# FIX: Use single contextvar for both sync and async to ensure proper trace propagation
-_trace_ctx_async: contextvars.ContextVar[Optional['TraceContext']] = contextvars.ContextVar('trace_ctx_async', default=None)
-
-
 @contextlib.contextmanager
 def trace_async(span_name: str, kind: SpanKind = SpanKind.INTERNAL, 
                 attributes: Optional[Dict[str, Any]] = None):
@@ -875,13 +870,6 @@ def enable_trace_file_export(enabled: bool = True) -> None:
     """
     global _trace_file_export_enabled
     _trace_file_export_enabled = enabled
-    
-    # Also update settings if it exists
-    try:
-        from core.settings import settings
-        settings._data["enable_trace_file_export"] = enabled
-    except Exception:
-        pass
 
 
 def is_trace_file_export_enabled() -> bool:

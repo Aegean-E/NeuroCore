@@ -397,6 +397,46 @@ class TestIntegration:
         assert len(ctx.spans) >= 1
 
 
+class TestEnableTraceFileExport:
+    """Tests for enable_trace_file_export and is_trace_file_export_enabled."""
+
+    def test_enable_sets_global_flag(self):
+        from core.observability import enable_trace_file_export, is_trace_file_export_enabled
+        enable_trace_file_export(True)
+        assert is_trace_file_export_enabled() is True
+
+    def test_disable_clears_global_flag(self):
+        from core.observability import enable_trace_file_export, is_trace_file_export_enabled
+        enable_trace_file_export(True)
+        enable_trace_file_export(False)
+        # Also check that settings don't resurrect the flag (settings key absent = False)
+        assert is_trace_file_export_enabled() is False
+
+    def test_does_not_raise_when_settings_unavailable(self):
+        """enable_trace_file_export must not raise regardless of settings state."""
+        from core.observability import enable_trace_file_export
+        # Should complete without exception
+        enable_trace_file_export(True)
+        enable_trace_file_export(False)
+
+
+class TestTraceCtxSharedBetweenSyncAndAsync:
+    """Verify trace_async uses the same ContextVar as the sync trace() context manager."""
+
+    def test_trace_async_reuses_sync_context(self):
+        from core.observability import trace, trace_async, get_trace_context
+        contexts_seen = []
+        with trace("outer_sync") as outer_ctx:
+            outer_id = outer_ctx.trace_id
+            with trace_async("inner_async") as inner_ctx:
+                contexts_seen.append(inner_ctx.trace_id)
+        # trace_async must reuse the existing sync context (same trace_id)
+        assert contexts_seen == [outer_id], (
+            f"trace_async created a new context ({contexts_seen[0]}) instead of "
+            f"reusing the sync context ({outer_id})"
+        )
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
 

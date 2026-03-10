@@ -100,6 +100,10 @@ class TraceWriter:
                         try:
                             events.append(json.loads(line))
                         except json.JSONDecodeError:
+                            logger.warning(
+                                "[TraceWriter] Skipping malformed trace line: %r",
+                                line[:100],
+                            )
                             continue
             return events
     

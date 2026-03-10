@@ -465,16 +465,23 @@ class FaissDocumentStore(QueryExpansionMixin):
             if os.path.exists(temp_path):
                 os.remove(temp_path)
 
-    def _add_embeddings_to_faiss(self, embeddings: List[np.ndarray], chunk_ids: List[int], save_index: bool = True):
-        """Add embeddings to FAISS index"""
+    def _add_embeddings_to_faiss(self, embeddings: List[np.ndarray], chunk_ids: List[int], save_index: bool = True) -> int:
+        """Add embeddings to FAISS index.
+
+        Returns the number of chunk IDs that were skipped due to a dimension
+        mismatch with the existing index.  Callers should warn the user when
+        this value is non-zero, because the corresponding chunks already live
+        in SQLite but will be invisible to vector search.
+        """
         if not embeddings:
-            return
-            
+            return 0
+
         # Defensive check for inhomogeneous shapes
         valid_embeddings = []
         valid_ids = []
+        skipped_count = 0
         expected_dim = self.faiss_index.d if self.faiss_index else None
-        
+
         for emb, cid in zip(embeddings, chunk_ids):
             # Check dimension mismatch for EVERY add, not just when index is empty
             if expected_dim is not None and len(emb) != expected_dim:
@@ -485,6 +492,7 @@ class FaissDocumentStore(QueryExpansionMixin):
                         f"to index with dimension {expected_dim}. The embedding model may have changed. "
                         f"Refusing to add to prevent index corruption."
                     )
+                    skipped_count += 1
                     continue  # Skip this embedding
             if expected_dim is None or len(emb) == expected_dim:
                 # Ensure embedding is finite to prevent index corruption
@@ -492,7 +500,8 @@ class FaissDocumentStore(QueryExpansionMixin):
                     valid_embeddings.append(emb)
                     valid_ids.append(cid)
         
-        if not valid_embeddings: return
+        if not valid_embeddings:
+            return skipped_count
         embeddings_array = np.array(valid_embeddings).astype('float32')
         
         # Normalize for inner product search
@@ -520,6 +529,8 @@ class FaissDocumentStore(QueryExpansionMixin):
         # Save index
         if save_index:
             self._save_faiss_index()
+
+        return skipped_count
 
     def _sync_faiss_index(self):
         """Ensure FAISS index is in sync with SQLite chunks.
@@ -724,8 +735,18 @@ class FaissDocumentStore(QueryExpansionMixin):
         )
 
         # Add embeddings to FAISS
-        self._add_embeddings_to_faiss(chunk_embeddings, chunk_ids, save_index=True)
-        
+        skipped = self._add_embeddings_to_faiss(chunk_embeddings, chunk_ids, save_index=True)
+        if skipped:
+            logging.warning(
+                "⚠️ %d of %d chunks for document %s were committed to SQLite but could not be "
+                "added to the FAISS index due to an embedding dimension mismatch. "
+                "These chunks will be retrievable via keyword search only. "
+                "Consider re-indexing the document after aligning the embedding model.",
+                skipped,
+                len(chunk_ids),
+                document_id,
+            )
+
         return document_id
 
     def list_documents(self, limit: int = 1000) -> List[Dict]:

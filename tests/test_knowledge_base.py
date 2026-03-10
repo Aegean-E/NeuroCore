@@ -157,3 +157,103 @@ def test_kb_router_upload_flow(client):
         
         assert response.status_code == 200
         mock_store.add_document.assert_called()
+
+# ---------------------------------------------------------------------------
+# FAISS / SQLite split-brain regression tests
+# ---------------------------------------------------------------------------
+
+class TestFaissDimensionMismatchWarning:
+    """Regression tests for the FAISS/SQLite dimension-mismatch split-brain bug.
+
+    When an embedding dimension mismatches the existing FAISS index, chunks are
+    already committed to SQLite. _add_embeddings_to_faiss() must return a
+    non-zero skip count, and add_document() must log a WARNING so operators
+    know those chunks are keyword-searchable only.
+    """
+
+    @pytest.fixture
+    def store(self, tmp_path):
+        db_path = str(tmp_path / "kb.sqlite3")
+        s = FaissDocumentStore(db_path=db_path)
+        yield s
+
+    def _make_chunk(self, dim: int, value: float = 1.0):
+        emb = np.zeros(dim, dtype="float32")
+        emb[0] = value
+        return {"text": f"chunk dim={dim}", "embedding": emb, "page_number": 1}
+
+    def test_skip_count_returned_on_dimension_mismatch(self, store):
+        """_add_embeddings_to_faiss() returns the number of skipped embeddings."""
+        import faiss
+
+        # Seed the index with dimension=8
+        dim_a = 8
+        store.faiss_index = faiss.IndexIDMap(faiss.IndexFlatIP(dim_a))
+        emb_a = np.ones((1, dim_a), dtype="float32")
+        store.faiss_index.add_with_ids(emb_a, np.array([1], dtype="int64"))
+        assert store.faiss_index.ntotal == 1
+
+        # Now try to add an embedding with dimension=4 (mismatch)
+        dim_b = 4
+        emb_b = np.ones(dim_b, dtype="float32")
+        skipped = store._add_embeddings_to_faiss([emb_b], [99], save_index=False)
+
+        assert skipped == 1, f"Expected 1 skipped, got {skipped}"
+        assert store.faiss_index.ntotal == 1  # index unchanged
+
+    def test_add_document_logs_warning_on_dimension_mismatch(self, store, caplog):
+        """add_document() logs a WARNING when chunks are skipped by FAISS."""
+        import logging
+        import faiss
+
+        # Pre-populate the FAISS index with dimension=8
+        dim_a = 8
+        store.faiss_index = faiss.IndexIDMap(faiss.IndexFlatIP(dim_a))
+        emb_seed = np.ones((1, dim_a), dtype="float32")
+        store.faiss_index.add_with_ids(emb_seed, np.array([1], dtype="int64"))
+
+        # add_document with wrong-dimension embedding
+        dim_b = 4
+        chunks = [self._make_chunk(dim_b)]
+
+        with caplog.at_level(logging.WARNING):
+            store.add_document(
+                file_hash="aabbcc",
+                filename="test.txt",
+                file_type="txt",
+                file_size=100,
+                page_count=1,
+                chunks=chunks,
+                upload_source="unit-test",
+            )
+
+        assert any(
+            "keyword search only" in record.message or "dimension mismatch" in record.message.lower()
+            for record in caplog.records
+        ), f"Expected a dimension-mismatch warning, got: {[r.message for r in caplog.records]}"
+
+    def test_no_warning_when_all_chunks_indexed(self, store, caplog):
+        """add_document() must NOT warn when all chunks are accepted by FAISS."""
+        import logging
+
+        dim = 8
+        chunks = [self._make_chunk(dim)]
+
+        with caplog.at_level(logging.WARNING):
+            store.add_document(
+                file_hash="ddeeff",
+                filename="ok.txt",
+                file_type="txt",
+                file_size=50,
+                page_count=1,
+                chunks=chunks,
+                upload_source="unit-test",
+            )
+
+        dimension_warnings = [
+            r for r in caplog.records
+            if "keyword search only" in r.message
+        ]
+        assert dimension_warnings == [], (
+            f"Unexpected warnings: {[w.message for w in dimension_warnings]}"
+        )

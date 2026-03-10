@@ -646,6 +646,34 @@ class TestInjectImprovementMessageDirect:
 
         assert result["messages"][-1]["role"] == "system"
 
+    def test_long_improvement_message_is_truncated(self):
+        """A needs_improvement string longer than 2000 chars must be truncated."""
+        executor = ReflectionExecutor.__new__(ReflectionExecutor)
+        input_data = {"messages": []}
+
+        long_feedback = "x" * 5000
+        result = executor._inject_improvement_message(input_data, long_feedback, "Original")
+
+        injected_content = result["messages"][-1]["content"]
+        # The raw 5000-char string must not appear verbatim
+        assert "x" * 5000 not in injected_content
+        # The truncation marker must be present
+        assert "[truncated]" in injected_content
+        # Overall injected text must be bounded (2000 chars + suffix + surrounding template)
+        assert len(injected_content) < 5000
+
+    def test_short_improvement_message_is_not_truncated(self):
+        """A needs_improvement string within the limit must appear verbatim."""
+        executor = ReflectionExecutor.__new__(ReflectionExecutor)
+        input_data = {"messages": []}
+
+        short_feedback = "Please be more concise."
+        result = executor._inject_improvement_message(input_data, short_feedback, "Original")
+
+        injected_content = result["messages"][-1]["content"]
+        assert short_feedback in injected_content
+        assert "[truncated]" not in injected_content
+
 
 # ---------------------------------------------------------------------------
 # send() passthrough
