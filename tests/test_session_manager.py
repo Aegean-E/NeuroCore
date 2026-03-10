@@ -538,6 +538,49 @@ class TestGetSessionManager:
         assert summary["last_events"] == []
 
 
+class TestTraceWriterMalformedLines:
+    """Regression tests for malformed-line handling in TraceWriter.read_all()."""
+
+    def test_valid_lines_returned_when_mixed_with_invalid(self, tmp_path):
+        """read_all() must skip corrupt lines and return only valid events."""
+        from core.session_manager import TraceWriter
+
+        trace_file = str(tmp_path / "trace.jsonl")
+        writer = TraceWriter(trace_file)
+
+        # Write one valid event via the public API
+        writer.append({"type": "ok", "value": 42})
+
+        # Inject a malformed line directly
+        with open(trace_file, "a") as f:
+            f.write("NOT_JSON{{{\n")
+
+        # Write a second valid event
+        writer.append({"type": "also_ok", "value": 99})
+
+        events = writer.read_all()
+        assert len(events) == 2
+        assert events[0]["type"] == "ok"
+        assert events[1]["type"] == "also_ok"
+
+    def test_malformed_line_triggers_warning(self, tmp_path, caplog):
+        """read_all() must log a warning for each malformed line."""
+        import logging
+        from core.session_manager import TraceWriter
+
+        trace_file = str(tmp_path / "trace.jsonl")
+        with open(trace_file, "w") as f:
+            f.write("GARBAGE\n")
+            f.write('{"valid": true}\n')
+
+        writer = TraceWriter(trace_file)
+        with caplog.at_level(logging.WARNING):
+            events = writer.read_all()
+
+        assert len(events) == 1
+        assert any("malformed" in record.message.lower() for record in caplog.records)
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
 
