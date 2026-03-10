@@ -40,9 +40,13 @@ async def test_delay_executor_max_delay_warning():
     """Test that DelayExecutor logs warning when delay exceeds MAX_DELAY."""
     executor = DelayExecutor()
     
-    with patch("modules.logic.node.logger") as mock_logger:
+    with patch("modules.logic.node.asyncio.sleep", new_callable=AsyncMock) as mock_sleep, \
+         patch("modules.logic.node.logger") as mock_logger:
         # Request a delay larger than MAX_DELAY
         await executor.receive({"data": "test"}, config={"seconds": 7200})
+        
+        # Verify sleep was called with capped value
+        mock_sleep.assert_called_once_with(3600)
         
         # Verify warning was logged
         mock_logger.warning.assert_called_once()
