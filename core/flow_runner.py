@@ -1,4 +1,5 @@
 import asyncio
+import copy
 import importlib
 import json
 import logging
@@ -694,7 +695,12 @@ class FlowRunner:
                     for po in reversed(bridge_outputs):
                         if isinstance(po, dict):
                             node_input.update(po)  # Bridge outputs take precedence
-                    
+
+                    # Deep-copy the messages list so that in-place mutations by any node
+                    # executor do not corrupt the shared parent output stored in node_outputs.
+                    if "messages" in node_input and isinstance(node_input["messages"], list):
+                        node_input["messages"] = copy.deepcopy(node_input["messages"])
+
                     if settings.get("debug_mode") and bridge_outputs:
                         import json
                         try:

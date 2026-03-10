@@ -101,3 +101,85 @@ async def test_flow_run_node_execution_error(mock_flow):
 
         assert "error" in result
         assert "Execution failed at node 'Middle': Something went wrong" in result["error"]
+
+
+@pytest.mark.asyncio
+async def test_messages_list_not_shared_between_branches():
+    """
+    Regression test for the shared-messages-list bug.
+
+    Flow topology:
+        source → branch_a
+        source → branch_b
+
+    branch_a's executor appends a message in-place to node_input["messages"].
+    branch_b must still receive the original messages list, unmodified.
+    """
+    FlowRunner.clear_cache()
+
+    flow = {
+        "id": "branch-flow",
+        "nodes": [
+            {"id": "source",   "moduleId": "m", "nodeTypeId": "t_source",   "name": "Source"},
+            {"id": "branch_a", "moduleId": "m", "nodeTypeId": "t_branch_a", "name": "BranchA"},
+            {"id": "branch_b", "moduleId": "m", "nodeTypeId": "t_branch_b", "name": "BranchB"},
+        ],
+        "connections": [
+            {"from": "source",   "to": "branch_a"},
+            {"from": "source",   "to": "branch_b"},
+        ],
+    }
+
+    received_by_branch_b = {}
+
+    # Executor for Source: returns a fresh messages list.
+    source_inst = MagicMock()
+    source_inst.receive = AsyncMock(
+        return_value={"messages": [{"role": "user", "content": "hello"}]}
+    )
+    source_inst.send = AsyncMock(side_effect=lambda d, config=None: d)
+
+    # Executor for BranchA: mutates messages in-place.
+    async def branch_a_receive(data, config=None):
+        data["messages"].append({"role": "assistant", "content": "mutated"})
+        return data
+
+    branch_a_inst = MagicMock()
+    branch_a_inst.receive = AsyncMock(side_effect=branch_a_receive)
+    branch_a_inst.send = AsyncMock(side_effect=lambda d, config=None: d)
+
+    # Executor for BranchB: records its input messages.
+    async def branch_b_receive(data, config=None):
+        received_by_branch_b["messages"] = list(data.get("messages", []))
+        return data
+
+    branch_b_inst = MagicMock()
+    branch_b_inst.receive = AsyncMock(side_effect=branch_b_receive)
+    branch_b_inst.send = AsyncMock(side_effect=lambda d, config=None: d)
+
+    # Map nodeTypeId → (executor_class_mock, instance)
+    executor_map = {
+        "t_source":   MagicMock(return_value=source_inst),
+        "t_branch_a": MagicMock(return_value=branch_a_inst),
+        "t_branch_b": MagicMock(return_value=branch_b_inst),
+    }
+
+    async def get_executor_class(node_type_id):
+        return executor_map[node_type_id]
+
+    mock_dispatcher = MagicMock()
+    mock_dispatcher.get_executor_class = AsyncMock(side_effect=get_executor_class)
+
+    with patch("core.flow_runner.flow_manager") as mock_fm, \
+         patch("importlib.import_module", return_value=mock_dispatcher), \
+         patch("importlib.reload"):
+
+        mock_fm.get_flow.return_value = flow
+        runner = FlowRunner(flow_id="branch-flow")
+        await runner.run({"messages": []})
+
+    # branch_b must see exactly the original single message, not the one
+    # appended by branch_a.
+    assert received_by_branch_b.get("messages") == [
+        {"role": "user", "content": "hello"}
+    ], f"branch_b received mutated messages: {received_by_branch_b.get('messages')}"
