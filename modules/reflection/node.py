@@ -60,6 +60,12 @@ class ReflectionExecutor:
         """
         result = input_data.copy()
         messages = list(result.get("messages", []))
+
+        # Guard against a verbose LLM critique ballooning the context window.
+        _MAX_IMPROVEMENT_LEN = 2000
+        if len(needs_improvement) > _MAX_IMPROVEMENT_LEN:
+            needs_improvement = needs_improvement[:_MAX_IMPROVEMENT_LEN] + "... [truncated]"
+
         messages.append({
             "role": "system",
             "content": (
