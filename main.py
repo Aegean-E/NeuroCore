@@ -31,7 +31,7 @@ def _fire_repeater_nodes(app, flow_id: str, flow: dict, is_auto_start: bool = Fa
     Fire all repeater nodes in a flow.
     
     Args:
-        app: FastAPI app instance
+        app: FastAPI app instancef
         flow_id: The flow ID
         flow: The flow data dictionary
         is_auto_start: If True, this is an auto-start from lifespan (don't await)
@@ -57,12 +57,12 @@ def _fire_repeater_nodes(app, flow_id: str, flow: dict, is_auto_start: bool = Fa
                 
                 if hasattr(app.state, "background_tasks"):
                     app.state.background_tasks.add(task)
-                    task.add_done_callback(lambda t, fid=flow_id, nid=node['id']: background_task_callback(t, fid, nid))
+                    task.add_done_callback(lambda t, fid=flow_id, nid=node['id'], _app=app: background_task_callback(t, fid, nid, _app))
                 created_tasks.append(task)
     
     return created_tasks
 
-def background_task_callback(task, flow_id, node_id):
+def background_task_callback(task, flow_id, node_id, app):
     try:
         app.state.background_tasks.discard(task)
         task.result() # This will raise exception if task failed

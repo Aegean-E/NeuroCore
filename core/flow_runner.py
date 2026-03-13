@@ -24,10 +24,28 @@ class FlowRunner:
     
     @classmethod
     def _get_cache_lock(cls):
-        """Lazy-initialize the lock to avoid attaching to wrong event loop."""
-        if cls._cache_lock is None:
-            cls._cache_lock = asyncio.Lock()
-        return cls._cache_lock
+        """Return an asyncio.Lock scoped to the currently running event loop.
+
+        Storing a single lock at the class level is unsafe when the event loop
+        changes between test runs or server reloads (Python 3.10+ silently uses
+        the wrong loop scheduler). Instead we key by loop identity so each loop
+        gets its own lock while still sharing the executor cache dict.
+        """
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            # No running loop — fall back to a fresh lock (import-time access).
+            if cls._cache_lock is None:
+                cls._cache_lock = asyncio.Lock()
+            return cls._cache_lock
+
+        loop_id = id(loop)
+        # _cache_lock doubles as a per-loop dict when inside an event loop.
+        if not isinstance(cls._cache_lock, dict):
+            cls._cache_lock = {}
+        if loop_id not in cls._cache_lock:
+            cls._cache_lock[loop_id] = asyncio.Lock()
+        return cls._cache_lock[loop_id]
     
     @classmethod
     async def _get_executor_class(cls, module_id: str, node_type_id: str):
@@ -507,8 +525,11 @@ class FlowRunner:
                         initial_input.setdefault("completed_steps", episode.completed_steps)
                     # Update phase to executing
                     sm.save_episode_by_id(episode_id, phase=EpisodeState.PHASE_EXECUTING)
-            except Exception:
-                pass  # Don't fail if episode loading fails
+            except Exception as exc:
+                logger.warning(
+                    f"[FlowRunner] Failed to load/restore episode '{episode_id}': {exc}. "
+                    "Continuing without episode state."
+                )
         if settings.get("debug_mode"):
             debug_logger.log(self.flow_id, "SYSTEM", "FlowRunner", "flow_start", {"start_node": start_node_id, "input_source": initial_input.get("_input_source") if isinstance(initial_input, dict) else None, "timeout": timeout})
         
@@ -615,11 +636,11 @@ class FlowRunner:
                                     if isinstance(bridge_output, dict):
                                         bridge_input = bridge_input.copy()
                                         bridge_input.update(bridge_output)
-                                except (ImportError, AttributeError, RuntimeError) as bridge_err:
-                                    # Specific exception types for better error categorization:
-                                    # - ImportError: Module not found or import failed
-                                    # - AttributeError: Executor class or method missing
-                                    # - RuntimeError: Node execution failed at runtime
+                                except Exception as bridge_err:
+                                    # Catch all non-cancellation exceptions so a single failing
+                                    # bridge node cannot silently kill the whole flow.
+                                    # asyncio.CancelledError (a BaseException) is intentionally
+                                    # NOT caught here and will propagate normally.
                                     import traceback
                                     logger.error(f"[Bridge Error] Node {bridge_node_id} failed: {bridge_err}")
                                     logger.error(f"[Bridge Error] Traceback: {traceback.format_exc()}")

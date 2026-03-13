@@ -6,7 +6,7 @@ from core.settings import settings
 logger = logging.getLogger(__name__)
 
 # Default values for LLM parameters (used as explicit fallbacks)
-DEFAULT_MODEL = "gpt-4o"
+DEFAULT_MODEL = "local-model"
 DEFAULT_TEMPERATURE = 0.7
 DEFAULT_MAX_TOKENS = 4096
 DEFAULT_TIMEOUT = 120.0  # seconds
@@ -45,14 +45,12 @@ class LLMExecutor:
         max_retries = int(config.get("max_retries", DEFAULT_MAX_RETRIES))
         retry_delay = float(config.get("retry_delay", DEFAULT_RETRY_DELAY))
 
-        # FIX: Directly access settings instead of using ConfigLoader abstraction
-        module_defaults = settings.settings
-
-        # 1. Start with Module Defaults (with explicit fallbacks to hardcoded defaults)
+        # 1. Start with Module Defaults (with explicit fallbacks to hardcoded defaults).
+        # Use the thread-safe settings.get() API — never access settings.settings directly.
         final_params = {
-            "model": module_defaults.get("default_model", DEFAULT_MODEL),
-            "temperature": module_defaults.get("temperature", DEFAULT_TEMPERATURE),
-            "max_tokens": module_defaults.get("max_tokens", DEFAULT_MAX_TOKENS)
+            "model": settings.get("default_model", DEFAULT_MODEL),
+            "temperature": settings.get("temperature", DEFAULT_TEMPERATURE),
+            "max_tokens": settings.get("max_tokens", DEFAULT_MAX_TOKENS),
         }
 
         # 2. Override with Input Data (only specific keys)

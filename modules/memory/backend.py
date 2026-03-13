@@ -551,8 +551,10 @@ class MemoryStore:
         with self.write_lock:
             with self._connect() as con:
                 con.execute("DELETE FROM memories")
-                try: con.execute("DELETE FROM sqlite_sequence WHERE name='memories'")
-                except Exception: pass
+                try:
+                    con.execute("DELETE FROM sqlite_sequence WHERE name='memories'")
+                except sqlite3.OperationalError:
+                    pass  # sqlite_sequence absent when autoincrement has never fired
             
             if FAISS_AVAILABLE and self.faiss_index:
                 with self.faiss_lock:
