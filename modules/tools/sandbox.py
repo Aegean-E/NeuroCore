@@ -618,9 +618,16 @@ class ToolSandbox:
         # call set_start_method() here.  Calling it inside execute() would reset
         # the multiprocessing context mid-run, breaking concurrent callers (and
         # pytest's own process infrastructure).
+        # Always look up _execute_in_process from the live module reference so
+        # that multiprocessing.Process can pickle it correctly.  If the module
+        # manager hot-reloads this module (by removing it from sys.modules and
+        # reimporting), a stale local reference would cause PicklingError because
+        # pickle resolves the target by module+qualname and the identity check
+        # would fail against the freshly-imported version in sys.modules.
+        _target = sys.modules[__name__]._execute_in_process
         result_queue = Queue()
         p = Process(
-            target=_execute_in_process,
+            target=_target,
             args=(code, local_vars or {}, result_queue,
                   self.allowed_file_dirs, self.read_only_files,
                   self.allowed_domains, self.timeout,

@@ -22,33 +22,57 @@ def reset_shared_async_state():
     httpx.AsyncClient and asyncio.Lock are bound to the event loop that
     created them.  With asyncio_mode='auto', each test gets its own loop,
     so a client created in test N is invalid in test N+1.  Resetting the
-    globals before each test forces lazy re-creation in the correct loop.
+    globals before (and after) each test forces lazy re-creation in the
+    correct loop without touching the old loop's handles.
+
+    We intentionally do NOT call client.aclose() here — doing so via
+    loop.run_until_complete() during test teardown invalidates Win32 pipe
+    handles that multiprocessing tests created later rely on.  The client
+    reference is simply dropped; httpx will issue a ResourceWarning on GC
+    but that is harmless in test runs.
     """
     import core.llm as llm_module
     from core.flow_runner import FlowRunner
 
-    # Reset the shared HTTP client so the next test creates it in its own loop.
     llm_module._shared_client = None
     llm_module._client_lock = None
-
-    # Reset the per-loop cache lock dict so each test starts fresh.
     FlowRunner._cache_lock = None
 
     yield
 
-    # Tear-down: close any client the test may have opened.
-    # We do this synchronously because the event loop is already closing.
-    client = llm_module._shared_client
-    if client is not None:
-        try:
-            import asyncio
-            loop = asyncio.get_event_loop()
-            if not loop.is_closed():
-                loop.run_until_complete(client.aclose())
-        except Exception:
-            pass
-        llm_module._shared_client = None
-        llm_module._client_lock = None
+    llm_module._shared_client = None
+    llm_module._client_lock = None
+
+
+@pytest.fixture(autouse=True)
+def disable_debug_mode_for_tests():
+    """
+    Force debug_mode=False during every test.
+
+    When debug_mode=True, FlowRunner._get_executor_class calls
+    importlib.reload(node_dispatcher).  If that dispatcher imports from
+    modules.tools.sandbox, Python creates a new function object for
+    _execute_in_process that differs from the one already recorded in
+    sys.modules['modules.tools.sandbox'].  multiprocessing.Process uses
+    pickle to send the target function to the spawned worker; pickle
+    resolves the function by module+qualname and raises PicklingError when
+    the object identity doesn't match the live module attribute.
+
+    Forcing debug_mode=False for the duration of each test prevents the
+    reload entirely.  We also clear the executor class cache so the next
+    test starts with a clean slate (no stale class from a previous reload).
+    """
+    from core.settings import settings
+    from core.flow_runner import FlowRunner
+
+    original_debug = settings.settings.get('debug_mode', False)
+    settings.settings['debug_mode'] = False
+    FlowRunner._executor_cache.clear()
+
+    yield
+
+    settings.settings['debug_mode'] = original_debug
+    FlowRunner._executor_cache.clear()
 
 
 # Files that need backup/restore during tests
