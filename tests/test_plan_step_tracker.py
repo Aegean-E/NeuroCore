@@ -66,7 +66,8 @@ async def test_resumes_from_middle_of_plan(executor):
             {"step": 2, "action": "B"},
             {"step": 3, "action": "C"}
         ],
-        "current_step": 1  # Already completed step 1
+        "current_step": 1  # Ready to complete step 2
+        ,"completed_steps": [0]
     }
     
     result = await executor.receive(data)

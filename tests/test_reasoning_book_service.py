@@ -20,9 +20,8 @@ def temp_data_file():
 
 
 @pytest.fixture
-def service(temp_data_file, monkeypatch):
-    monkeypatch.setattr("modules.reasoning_book.service.DATA_FILE", temp_data_file)
-    return ReasoningBookService()
+def service(temp_data_file):
+    return ReasoningBookService(data_file=temp_data_file)
 
 
 @pytest.mark.asyncio
@@ -168,20 +167,14 @@ async def test_reload(service, temp_data_file):
     await service.log_thought("Original thought")
     
     # Create a new service instance pointing to the same file
-    new_service = ReasoningBookService()
-    # Temporarily patch the data file for the new instance
-    import modules.reasoning_book.service as service_module
-    original_data_file = service_module.DATA_FILE
-    service_module.DATA_FILE = temp_data_file
+    new_service = ReasoningBookService(data_file=temp_data_file)
     
-    try:
-        # Reload should pick up the thought from disk
-        await new_service.reload()
-        thoughts = new_service.get_thoughts()
-        assert len(thoughts) == 1
-        assert thoughts[0]["content"] == "Original thought"
-    finally:
-        service_module.DATA_FILE = original_data_file
+    # Reload should pick up the thought from disk
+    await new_service.reload()
+    thoughts = new_service.get_thoughts()
+    assert len(thoughts) == 1
+    assert thoughts[0]["content"] == "Original thought"
+
 
 
 @pytest.mark.asyncio

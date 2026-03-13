@@ -3,7 +3,7 @@ import json
 import logging
 import asyncio
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 DATA_FILE = "data/reasoning_book.json"
 MAX_THOUGHTS = 100
@@ -12,15 +12,16 @@ MAX_DAYS_OLD = 7  # Prune thoughts older than 7 days
 logger = logging.getLogger(__name__)
 
 class ReasoningBookService:
-    def __init__(self):
+    def __init__(self, data_file=None):
+        self.data_file = data_file or DATA_FILE
         self.thoughts = []
         self._lock = asyncio.Lock()
         self._load()
 
     def _load(self):
-        if os.path.exists(DATA_FILE):
+        if os.path.exists(self.data_file):
             try:
-                with open(DATA_FILE, "r") as f:
+                with open(self.data_file, "r") as f:
                     self.thoughts = json.load(f)
             except (json.JSONDecodeError, OSError) as e:
                 # JSONDecodeError: Corrupted JSON file
@@ -29,9 +30,9 @@ class ReasoningBookService:
                 self.thoughts = []
 
     def _save(self):
-        os.makedirs(os.path.dirname(DATA_FILE) or "data", exist_ok=True)
+        os.makedirs(os.path.dirname(self.data_file) or ".", exist_ok=True)
         try:
-            with open(DATA_FILE, "w") as f:
+            with open(self.data_file, "w") as f:
                 json.dump(self.thoughts, f)
         except (OSError, TypeError) as e:
             # OSError: File write permissions or I/O issues
@@ -51,7 +52,7 @@ class ReasoningBookService:
         """
         entry = {
             "thought_id": str(uuid.uuid4()),
-            "timestamp": datetime.utcnow().isoformat() + 'Z',
+            "timestamp": datetime.now(timezone.utc).isoformat(timespec="milliseconds"),
             "content": content,
             "source": source,
             "step_id": step_id,
@@ -68,7 +69,7 @@ class ReasoningBookService:
                 self.thoughts = self.thoughts[:MAX_THOUGHTS]
             
             # Prune by age (older than MAX_DAYS_OLD days)
-            cutoff = datetime.utcnow() - timedelta(days=MAX_DAYS_OLD)
+            cutoff = datetime.now(timezone.utc) - timedelta(days=MAX_DAYS_OLD)
             self.thoughts = [
                 t for t in self.thoughts 
                 if datetime.fromisoformat(t['timestamp']) > cutoff

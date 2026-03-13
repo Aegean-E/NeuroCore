@@ -181,10 +181,21 @@ class PlannerExecutor:
             result["plan_complete"] = True  # Stop execution
             return result
         
+        # Resume logic: if current_step > 0, assume prior steps completed
+        if current > 0:
+            for i in range(current):
+                if i < len(plan):
+                    completed_steps.add(i)
+        
         # Mark current step as completed (if valid)
+        step_completed_now = False
         if 0 <= current < len(plan):
-            completed_steps.add(current)
-            result["step_completed"] = plan[current]
+            if current not in completed_steps:
+                completed_steps.add(current)
+                result["step_completed"] = plan[current]
+                step_completed_now = True
+            result["completed_steps"] = list(completed_steps)
+        else:
             result["completed_steps"] = list(completed_steps)
         
         # Find next executable step (respecting dependencies)
@@ -657,11 +668,19 @@ class PlanStepTracker:
             result["plan_complete"] = True  # Stop execution
             return result
         
-        # Mark current step as completed (if valid)
-        if 0 <= current < len(plan):
-            completed_steps.add(current)
-            result["step_completed"] = plan[current]
+        # Resume mode: if 'completed_steps' provided, assume current already completed
+        if "completed_steps" in data and current < len(plan):
+            # Don't auto-complete current if resume from completed state
+            if current not in completed_steps:
+                completed_steps.add(current)
+                result["step_completed"] = plan[current]
             result["completed_steps"] = list(completed_steps)
+        else:
+            # Normal mode: always complete current
+            if 0 <= current < len(plan):
+                completed_steps.add(current)
+                result["step_completed"] = plan[current]
+                result["completed_steps"] = list(completed_steps)
         
         # Find next executable step (respecting dependencies)
         executable = self._get_executable_steps(plan, completed_steps)
