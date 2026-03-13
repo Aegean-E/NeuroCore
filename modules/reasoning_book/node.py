@@ -1,4 +1,5 @@
-from .service import service
+from .service import ReasoningBookService
+service = ReasoningBookService()
 
 MIN_CONTENT_LENGTH = 30
 
