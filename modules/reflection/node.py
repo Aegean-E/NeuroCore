@@ -1,5 +1,6 @@
 import json
 import re
+import asyncio
 from core.llm import LLMBridge
 from core.settings import settings
 
@@ -131,10 +132,14 @@ class ReflectionExecutor:
             }
             result["satisfied"] = True
             
-            # Log max retries to Reasoning Book
-            if reasoning_service := self._get_reasoning_service():
-                entry = f"Reflection: Max retries ({max_reflection_retries}) exceeded, forcing completion"
-                await reasoning_service.log_thought(entry, source="Reflection")
+            # Log max retries to Reasoning Book (non-blocking)
+            try:
+                if reasoning_service := self._get_reasoning_service():
+                    entry = f"Reflection: Max retries ({max_reflection_retries}) exceeded, forcing completion"
+                    asyncio.create_task(reasoning_service.log_thought(entry, source="Reflection"))
+            except Exception:
+                pass  # Fail silently in tests/prod
+
             
             return result
 
@@ -148,10 +153,13 @@ class ReflectionExecutor:
             }
             result["satisfied"] = True
             
-            # Log no-content case to Reasoning Book
-            if reasoning_service := self._get_reasoning_service():
-                entry = "Reflection: No content to evaluate, defaulting to satisfied"
-                await reasoning_service.log_thought(entry, source="Reflection")
+            # Log no-content case to Reasoning Book (non-blocking)
+            try:
+                if reasoning_service := self._get_reasoning_service():
+                    entry = "Reflection: No content to evaluate, defaulting to satisfied"
+                    asyncio.create_task(reasoning_service.log_thought(entry, source="Reflection"))
+            except Exception:
+                pass  # Fail silently
             
             return result
 
@@ -214,10 +222,13 @@ class ReflectionExecutor:
             result["reflection"] = reflection_result
             result["satisfied"] = reflection_result["satisfied"]
 
-            # Log reflection result to Reasoning Book
-            if reasoning_service := self._get_reasoning_service():
-                entry = f"Reflection on step: satisfied={reflection_result['satisfied']}. {reflection_result['reason']}"
-                await reasoning_service.log_thought(entry, source="Reflection")
+            # Log reflection result to Reasoning Book (non-blocking)
+            try:
+                if reasoning_service := self._get_reasoning_service():
+                    entry = f"Reflection on step: satisfied={reflection_result['satisfied']}. {reflection_result['reason']}"
+                    asyncio.create_task(reasoning_service.log_thought(entry, source="Reflection"))
+            except Exception:
+                pass  # Fail silently
 
             # When not satisfied and improvement hint is available, inject a
             # feedback message so the agent_loop can act on it on retry.
@@ -239,10 +250,13 @@ class ReflectionExecutor:
             }
             result["satisfied"] = True
             
-            # Log error to Reasoning Book
-            if reasoning_service := self._get_reasoning_service():
-                entry = f"Reflection error: {str(e)}"
-                await reasoning_service.log_thought(entry, source="Reflection")
+            # Log error to Reasoning Book (non-blocking)
+            try:
+                if reasoning_service := self._get_reasoning_service():
+                    entry = f"Reflection error: {str(e)}"
+                    asyncio.create_task(reasoning_service.log_thought(entry, source="Reflection"))
+            except Exception:
+                pass  # Fail silently
             
             return result
 

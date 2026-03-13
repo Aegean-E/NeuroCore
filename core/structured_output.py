@@ -183,7 +183,14 @@ async def structured_completion(
                 # Attempt to parse the content as the schema
                 try:
                     # First try parsing directly
-                    parsed = schema.model_validate_json(content) if hasattr(schema, 'model_validate_json') else schema.parse_raw(content)
+                    try:
+                        parsed = schema.model_validate_json(content)
+                    except AttributeError:
+                        parsed = schema.parse_raw(content)
+                    except ValidationError:
+                        raise
+                    logger.debug(f"Successfully parsed structured output on attempt {attempt + 1}")
+                    return parsed
                     logger.debug(f"Successfully parsed structured output on attempt {attempt + 1}")
                     return parsed
                 except ValidationError as e:

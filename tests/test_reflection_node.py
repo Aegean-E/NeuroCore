@@ -43,7 +43,8 @@ def make_reflection_llm_response(
     return {"choices": [{"message": {"role": "assistant", "content": json.dumps(payload)}}]}
 
 
-def make_executor() -> ReflectionExecutor:
+@patch('core.llm.LLMBridge')
+def make_executor(mock_bridge) -> ReflectionExecutor:
     """Create a ReflectionExecutor with a mocked LLMBridge."""
     executor = ReflectionExecutor()
     executor.llm = MagicMock()

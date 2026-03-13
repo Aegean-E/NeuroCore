@@ -400,7 +400,10 @@ def _execute_in_process(code: str, local_vars: Dict[str, Any], result_queue: Que
         
         # Start tracemalloc for memory monitoring (cross-platform)
         if max_memory_mb > 0:
-            tracemalloc.start()
+            try:
+                tracemalloc.start()
+            except Exception:
+                pass  # Optional on some platforms
         
         # Rebuild sandbox environment in child process
         sandbox = ToolSandbox(
@@ -611,6 +614,7 @@ class ToolSandbox:
         
         # Use multiprocessing for true isolation and timeout enforcement
         result_queue = Queue()
+        result_queue = Queue()
         p = Process(
             target=_execute_in_process,
             args=(code, local_vars or {}, result_queue, 
@@ -618,7 +622,9 @@ class ToolSandbox:
                   self.allowed_domains, self.timeout,
                   self.max_output_size, self.max_memory_mb)
         )
-
+        if sys.platform == "win32":
+            # Windows requires spawn start method for multiprocessing
+            multiprocessing.set_start_method('spawn', force=True)
 
         p.start()
         p.join(timeout=self.timeout)

@@ -65,7 +65,10 @@ class SettingsManager:
     
     def _validate_settings(self, new_settings: dict) -> dict:
         """Validate settings before saving. Returns validated settings or raises ValueError."""
-        validated = {}
+        validated = DEFAULT_SETTINGS.copy()
+        validated.update(new_settings)  # Merge to preserve defaults + all input keys
+        # Only validate known fields, ignore unknown
+
         
         # temperature: float between 0 and 2
         if "temperature" in new_settings:
