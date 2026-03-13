@@ -42,29 +42,31 @@ class TestFaissIndexValidation:
                 store.faiss_lock = MagicMock()
                 
                 result = store._load_faiss_index()
-                
-                # Should return False for invalid dimension
+
+                # Should return False for invalid dimension.
+                # _load_faiss_index only returns False; _build_faiss_index is
+                # called by __init__ when _load_faiss_index returns False, not
+                # by _load_faiss_index itself.
                 assert result == False
-                # Should have called build to rebuild
-                mock_build.assert_called()
+                mock_build.assert_not_called()
 
     def test_load_faiss_index_handles_corrupted_file(self):
         """_load_faiss_index should handle corrupted files gracefully."""
         from modules.memory.backend import MemoryStore
-        
+
         mock_faiss.read_index.side_effect = Exception("Corrupted file")
-        
+
         with patch('os.path.exists', return_value=True):
             with patch('modules.memory.backend.MemoryStore._build_faiss_index') as mock_build:
                 store = MemoryStore.__new__(MemoryStore)
                 store.db_path = "data/memory.sqlite3"
                 store.faiss_lock = MagicMock()
-                
+
                 result = store._load_faiss_index()
-                
-                # Should return False and trigger rebuild
+
+                # Should return False; rebuild is the caller's responsibility.
                 assert result == False
-                mock_build.assert_called()
+                mock_build.assert_not_called()
 
 
 class TestFaissIndexSync:
@@ -199,28 +201,35 @@ class TestBuildFaissIndex:
 
     def test_build_faiss_index_with_memories(self):
         """_build_faiss_index should build index from existing memories."""
+        from contextlib import contextmanager
         from modules.memory.backend import MemoryStore
-        
+
         store = MemoryStore.__new__(MemoryStore)
         store.faiss_lock = MagicMock()
-        
+
         # Create mock embedding data
         embedding = np.array([0.1] * 384, dtype='float32')
-        
-        mock_con = MagicMock()
-        mock_con.execute.return_value.fetchall.return_value = [
+
+        # _connect is a contextmanager; the code does `with self._connect() as con`.
+        # We must yield a mock con object so that con.execute(...) is reachable.
+        con_mock = MagicMock()
+        con_mock.execute.return_value.fetchall.return_value = [
             (1, embedding.tobytes())
         ]
-        
+
+        @contextmanager
+        def fake_connect():
+            yield con_mock
+
         # Create mock index
         mock_index_instance = MagicMock()
         mock_faiss.IndexIDMap.return_value = mock_index_instance
         mock_faiss.IndexFlatIP.return_value = MagicMock()
-        
-        with patch.object(store, '_connect', return_value=mock_con):
-            with patch.object(store, '_save_faiss_index') as mock_save:
+
+        with patch.object(store, '_connect', fake_connect):
+            with patch.object(store, '_save_faiss_index'):
                 store._build_faiss_index()
-                
+
                 # Should have added to index
                 mock_index_instance.add_with_ids.assert_called()
 

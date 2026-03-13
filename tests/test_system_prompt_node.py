@@ -313,14 +313,20 @@ async def test_token_budget_priority_ordering():
 
 @pytest.mark.asyncio
 async def test_token_estimation():
-    """Test the token estimation helper."""
-    executor = SystemPromptExecutor()
-    
-    # ~4 chars per token
-    assert executor._estimate_tokens("") == 0
-    assert executor._estimate_tokens("abcd") == 1
-    assert executor._estimate_tokens("abcdefgh") == 2
-    assert executor._estimate_tokens("x" * 400) == 100
+    """Test the character-based token estimation fallback (tiktoken not available)."""
+    import sys
+    import unittest.mock
+
+    # Force the character-based fallback by hiding tiktoken from the import system.
+    with unittest.mock.patch.dict(sys.modules, {"tiktoken": None}):
+        # Re-instantiate so _estimate_tokens uses the fallback path.
+        executor = SystemPromptExecutor()
+
+        # ~4 chars per token (ASCII fallback: len(text) // 4)
+        assert executor._estimate_tokens("") == 0
+        assert executor._estimate_tokens("abcd") == 1
+        assert executor._estimate_tokens("abcdefgh") == 2
+        assert executor._estimate_tokens("x" * 400) == 100
 
 
 @pytest.mark.asyncio

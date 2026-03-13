@@ -14,6 +14,43 @@ from typing import Dict, Any, Optional, List
 import pytest
 
 
+@pytest.fixture(autouse=True)
+def reset_shared_async_state():
+    """
+    Reset module-level async singletons between tests.
+
+    httpx.AsyncClient and asyncio.Lock are bound to the event loop that
+    created them.  With asyncio_mode='auto', each test gets its own loop,
+    so a client created in test N is invalid in test N+1.  Resetting the
+    globals before each test forces lazy re-creation in the correct loop.
+    """
+    import core.llm as llm_module
+    from core.flow_runner import FlowRunner
+
+    # Reset the shared HTTP client so the next test creates it in its own loop.
+    llm_module._shared_client = None
+    llm_module._client_lock = None
+
+    # Reset the per-loop cache lock dict so each test starts fresh.
+    FlowRunner._cache_lock = None
+
+    yield
+
+    # Tear-down: close any client the test may have opened.
+    # We do this synchronously because the event loop is already closing.
+    client = llm_module._shared_client
+    if client is not None:
+        try:
+            import asyncio
+            loop = asyncio.get_event_loop()
+            if not loop.is_closed():
+                loop.run_until_complete(client.aclose())
+        except Exception:
+            pass
+        llm_module._shared_client = None
+        llm_module._client_lock = None
+
+
 # Files that need backup/restore during tests
 PROTECTED_MODULE_FILES = [
     "modules/planner/module.json",

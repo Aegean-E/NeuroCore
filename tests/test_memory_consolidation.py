@@ -19,38 +19,38 @@ def mock_llm():
 @pytest.mark.asyncio
 async def test_consolidation_logic(mock_store, mock_llm):
     """Test that high similarity + entailment triggers consolidation."""
-    
-    # Setup data: Mem 1 and Mem 2 are similar. Mem 3 is different.
+
+    # Setup: mem 1 (older) and mem 2 (newer) are similar; mem 3 is unrelated.
+    # created_at uses Unix timestamps; lower value = older.
     memories = [
-        {"id": 1, "text": "Apple is red"},
-        {"id": 2, "text": "Apples are red"},
-        {"id": 3, "text": "Sky is blue"}
+        {"id": 1, "text": "Apple is red",   "created_at": 1000},
+        {"id": 2, "text": "Apples are red", "created_at": 2000},
+        {"id": 3, "text": "Sky is blue",    "created_at": 3000},
     ]
-    
-    # Mock Similarity matrix (3x3)
-    # 1-2: High (0.95)
-    # 1-3: Low (0.0)
-    sim_matrix = np.array([
-        [1.0, 0.95, 0.0],
-        [0.95, 1.0, 0.0],
-        [0.0, 0.0, 1.0]
-    ])
-    
-    # Patch the blocking method that fetches data
-    with patch.object(MemoryConsolidator, '_fetch_and_process_candidates', return_value=(memories, sim_matrix)):
-        consolidator = MemoryConsolidator()
-        consolidator.llm = mock_llm
-        
-        # Mock LLM entailment check to return YES
-        mock_llm.chat_completion = AsyncMock(return_value={
-            "choices": [{"message": {"content": "YES"}}]
-        })
-        
+
+    # _find_similar_pairs_faiss returns (id_a, id_b, similarity) tuples.
+    similar_pairs = [(1, 2, 0.95)]
+
+    consolidator = MemoryConsolidator()
+    consolidator.llm = mock_llm
+
+    # Mock LLM entailment check to return YES
+    mock_llm.chat_completion = AsyncMock(return_value={
+        "choices": [{"message": {"content": "YES"}}]
+    })
+
+    with patch.object(MemoryConsolidator, '_fetch_candidates_with_timestamps',
+                      return_value=memories), \
+         patch.object(MemoryConsolidator, '_find_similar_pairs_faiss',
+                      return_value=similar_pairs), \
+         patch.object(MemoryConsolidator, '_get_processed_pairs', return_value=set()), \
+         patch.object(MemoryConsolidator, '_log_consolidation'):
+
         count = await consolidator.run()
-        
-        assert count == 1
-        # Should consolidate 1 into 2 (since 1 comes first in loop, it finds 2, and sets 1 as child of 2)
-        mock_store.set_parent.assert_called_with(child_id=1, parent_id=2)
+
+    assert count == 1
+    # mem 1 is older (created_at=1000 < 2000), so it becomes the child of mem 2.
+    mock_store.set_parent.assert_called_with(child_id=1, parent_id=2)
 
 @pytest.mark.asyncio
 async def test_consolidation_entailment_check(mock_llm):

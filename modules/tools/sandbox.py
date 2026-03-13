@@ -18,6 +18,7 @@ import functools
 from typing import Any, Dict, Set, Optional, List
 from contextlib import contextmanager
 import json
+import multiprocessing
 from multiprocessing import Process, Queue
 import logging
 import tracemalloc
@@ -612,19 +613,19 @@ class ToolSandbox:
         # Pre-execution safety checks (in parent process)
         self._check_code_safety(code)
         
-        # Use multiprocessing for true isolation and timeout enforcement
-        result_queue = Queue()
+        # Use multiprocessing for true isolation and timeout enforcement.
+        # 'spawn' is the default start method on Windows and macOS; no need to
+        # call set_start_method() here.  Calling it inside execute() would reset
+        # the multiprocessing context mid-run, breaking concurrent callers (and
+        # pytest's own process infrastructure).
         result_queue = Queue()
         p = Process(
             target=_execute_in_process,
-            args=(code, local_vars or {}, result_queue, 
+            args=(code, local_vars or {}, result_queue,
                   self.allowed_file_dirs, self.read_only_files,
                   self.allowed_domains, self.timeout,
                   self.max_output_size, self.max_memory_mb)
         )
-        if sys.platform == "win32":
-            # Windows requires spawn start method for multiprocessing
-            multiprocessing.set_start_method('spawn', force=True)
 
         p.start()
         p.join(timeout=self.timeout)

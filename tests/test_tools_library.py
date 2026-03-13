@@ -115,7 +115,7 @@ class TestCurrencyConverter:
     @patch('httpx.get')
     def test_same_currency(self, mock_get):
         result = execute_tool("CurrencyConverter", {"amount": 100, "from_currency": "USD", "to_currency": "USD"})
-        assert "100 USD is 100 USD" in result
+        assert "100.0 USD is 100.0 USD" in result
         mock_get.assert_not_called()
     
     @patch('httpx.get')

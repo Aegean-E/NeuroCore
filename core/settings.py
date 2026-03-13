@@ -64,9 +64,13 @@ class SettingsManager:
             os.replace(tmp_path, self.file_path)  # Atomic on POSIX, works on Windows too
     
     def _validate_settings(self, new_settings: dict) -> dict:
-        """Validate settings before saving. Returns validated settings or raises ValueError."""
-        validated = DEFAULT_SETTINGS.copy()
-        validated.update(new_settings)  # Merge to preserve defaults + all input keys
+        """Validate settings before saving. Returns only the validated new settings.
+
+        Only the keys present in new_settings are returned so that callers
+        can do self.settings.update(validated) without resetting unrelated
+        keys back to their defaults.
+        """
+        validated = dict(new_settings)  # Only the keys being updated
         # Only validate known fields, ignore unknown
 
         

@@ -7,6 +7,7 @@ async def test_process_photo_message():
     """Test that photo messages are downloaded and converted to multimodal input."""
     service = TelegramService()
     service.bridge = MagicMock()
+    service.bridge.send_message = AsyncMock()
     service.session_map = {"123": "sess-1"}
     
     # Mock dependencies
@@ -23,9 +24,9 @@ async def test_process_photo_message():
         mock_session = {"history": [{"role": "user", "content": [{"type": "text", "text": "Look at this"}, {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,ZmFrZV9pbWFnZV9kYXRh"}}]}]}
         mock_sm.get_session.return_value = mock_session
         
-        # Mock Bridge File Info & Download
-        service.bridge.get_file_info.return_value = {"file_path": "photos/image.jpg"}
-        service.bridge.download_file = MagicMock(return_value=True)
+        # Mock Bridge File Info & Download (get_file_info is awaited)
+        service.bridge.get_file_info = AsyncMock(return_value={"file_path": "photos/image.jpg"})
+        service.bridge.download_file = AsyncMock(return_value=True)
         
         # Mock Flow Runner
         runner_instance = MockRunner.return_value
@@ -58,9 +59,10 @@ async def test_process_photo_download_fail():
     """Test handling of failed image downloads."""
     service = TelegramService()
     service.bridge = MagicMock()
-    service.bridge.get_file_info.return_value = {"file_path": "path"}
-    service.bridge.download_file = MagicMock(return_value=False) # Fail download
-    
+    service.bridge.get_file_info = AsyncMock(return_value={"file_path": "path"})
+    service.bridge.download_file = AsyncMock(return_value=False)  # Fail download
+    service.bridge.send_message = AsyncMock()
+
     await service.process_message({"chat_id": 123, "type": "photo", "photo": {"file_id": "f"}})
-    
+
     service.bridge.send_message.assert_called_with("⚠️ Failed to download image.", 123)

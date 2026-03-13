@@ -271,9 +271,10 @@ class TestStructuredCompletionWithFallback:
             messages=[{"role": "user", "content": "Test"}],
             schema=Person,
             max_retries=1,
-            fallback_value=None
+            fallback_value=None,
+            llm_bridge=mock_bridge,  # inject mock so no real HTTP call is made
         )
-        
+
         assert result is not None
         assert result.name == "Success"
         assert result.age == 50

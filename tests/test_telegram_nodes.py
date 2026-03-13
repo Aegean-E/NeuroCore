@@ -2,7 +2,7 @@
 Tests for modules/telegram/node.py — TelegramInputExecutor, TelegramOutputExecutor
 """
 import pytest
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, AsyncMock, patch
 from modules.telegram.node import TelegramInputExecutor, TelegramOutputExecutor, get_executor_class
 
 
@@ -97,6 +97,7 @@ class TestTelegramOutput:
 
         mock_config = {"bot_token": "test_token", "chat_id": "12345"}
         mock_bridge = MagicMock()
+        mock_bridge.send_message = AsyncMock()
 
         with patch("modules.telegram.node.ConfigLoader.get_config", return_value=mock_config), \
              patch("modules.telegram.node.TelegramBridge", return_value=mock_bridge):
