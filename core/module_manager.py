@@ -28,6 +28,10 @@ class ModuleManager:
         self.modules = self._discover_modules()
         # Runtime-only tracking for load errors (not persisted)
         self._load_errors = {}
+        # Track which module IDs have been imported by this manager at least once.
+        # Used to distinguish an initial load (don't clear sys.modules) from a
+        # hot-reload after unload (clear sys.modules to pick up code changes).
+        self._loaded_once: set = set()
 
     def _discover_modules(self):
         """Finds all potential modules in the modules directory."""
@@ -89,22 +93,25 @@ class ModuleManager:
             if any(is_module_loaded(r) for r in self.app.router.routes):
                 return True
 
-            # Note: sys.modules modification under lock can theoretically interact with 
-            # Python's import lock in edge cases. However, this is a hot-reload scenario
-            # and the trade-off of holding the lock during sys.modules cleanup is 
-            # necessary to prevent race conditions when multiple threads try to 
-            # load/reload the same module simultaneously.
-            # Properly reload all submodules by removing them from sys.modules first
-            # This ensures hot-reload actually picks up changes in node.py, router.py, service.py, etc.
-            modules_to_remove = [
-                key for key in list(sys.modules.keys())
-                if key.startswith(f"modules.{module_id}")
-            ]
-            for key in modules_to_remove:
-                del sys.modules[key]
+            # Only flush sys.modules on a *re-load* — i.e. when this manager has
+            # already imported the module once before (after a prior _unload_module_router
+            # call).  On the very first load we must NOT clear existing sys.modules
+            # entries: test collection may have already imported submodules such as
+            # modules.tools.sandbox, and evicting them creates new module objects whose
+            # top-level function definitions differ from previously-captured references
+            # (causing PicklingError in multiprocessing, stale patch() targets, etc.).
+            if module_id in self._loaded_once:
+                # Hot-reload path: flush stale bytecode so code changes are picked up.
+                modules_to_remove = [
+                    key for key in list(sys.modules.keys())
+                    if key.startswith(f"modules.{module_id}")
+                ]
+                for key in modules_to_remove:
+                    del sys.modules[key]
 
             try:
                 module = importlib.import_module(f"modules.{module_id}")
+                self._loaded_once.add(module_id)
                 if hasattr(module, "router"):
                     self.app.include_router(module.router, prefix=f"/{module_id}", tags=[module_id])
                     logger.info(f"Hot-loaded module router: {module_id}")
