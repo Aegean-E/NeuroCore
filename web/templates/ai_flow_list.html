@@ -4,6 +4,7 @@
 <div class="space-y-2">
     {% set active_flow_ids = active_flow_ids if active_flow_ids is defined else [] %}
     {% for flow in flows %}
+    <div>
     <div class="group px-4 py-2 bg-slate-800 border border-slate-700 rounded-xl text-sm flex justify-between items-center">
         <div class="flex-grow truncate mr-2">
             <button onclick="loadFlowById('{{ flow.id }}')" 
@@ -43,6 +44,15 @@
                 <button onclick="openDeleteModal('{{ flow.id }}', '{{ flow.name }}')" class="text-slate-500 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity" title="Delete Flow">
                     <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
                 </button>
+
+                <button hx-get="/ai-flow/{{ flow.id }}/versions/partial"
+                        hx-target="#versions-container-{{ flow.id }}"
+                        hx-swap="innerHTML"
+                        class="text-slate-500 hover:text-amber-400 opacity-0 group-hover:opacity-100 transition-opacity"
+                        title="Version History"
+                        onclick="toggleVersionsPanel('{{ flow.id }}')">
+                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                </button>
             </div>
 
             <div class="hidden rename-confirm-{{ flow.id }} flex items-center space-x-1">
@@ -54,6 +64,8 @@
                 </button>
             </div>
         </div>
+    </div>
+    <div id="versions-container-{{ flow.id }}"></div>
     </div>
     {% else %}
     <p class="text-slate-600 text-sm italic">No flows saved yet.</p>

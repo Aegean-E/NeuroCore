@@ -2285,6 +2285,21 @@
             htmx.trigger(`.rename-form-${id}`, 'submit');
         }
 
+        window._versionsOpen = {};
+        window.toggleVersionsPanel = function(id) {
+            if (window._versionsOpen[id]) {
+                closeVersionsPanel(id);
+            } else {
+                window._versionsOpen[id] = true;
+                // HTMX will handle the load; just track state
+            }
+        }
+        window.closeVersionsPanel = function(id) {
+            const container = document.getElementById(`versions-container-${id}`);
+            if (container) container.innerHTML = '';
+            window._versionsOpen[id] = false;
+        }
+
         function createConnection(start, end) {
             if (start.node.id === end.node.id) return;
             const newConnection = { from: start.node.id, to: end.node.id };

@@ -2,23 +2,26 @@ import os
 import json
 import time
 import pytest
-from core.flow_manager import FlowManager
+from core.flow_manager import FlowManager, MAX_VERSIONS_PER_FLOW
 
 TEST_FLOWS_FILE = "test_flows.json"
+TEST_VERSIONS_FILE = "test_flows_versions.json"
 
 @pytest.fixture
 def flow_manager():
     """Provides a FlowManager instance using a temporary file, ensuring test isolation."""
     # Setup
-    if os.path.exists(TEST_FLOWS_FILE):
-        os.remove(TEST_FLOWS_FILE)
-    
+    for f in (TEST_FLOWS_FILE, TEST_VERSIONS_FILE):
+        if os.path.exists(f):
+            os.remove(f)
+
     manager = FlowManager(storage_file=TEST_FLOWS_FILE)
     yield manager
-    
+
     # Teardown
-    if os.path.exists(TEST_FLOWS_FILE):
-        os.remove(TEST_FLOWS_FILE)
+    for f in (TEST_FLOWS_FILE, TEST_VERSIONS_FILE):
+        if os.path.exists(f):
+            os.remove(f)
 
 def test_initialization_creates_file(flow_manager):
     """Tests that a new, empty flow file is created on first run."""
@@ -75,9 +78,128 @@ def test_rename_flow(flow_manager):
     """Tests renaming a flow."""
     flow_data = flow_manager.save_flow("Old Name", [], [])
     flow_id = flow_data["id"]
-    
+
     result = flow_manager.rename_flow(flow_id, "New Name")
     assert result is True
-    
+
     flow = flow_manager.get_flow(flow_id)
     assert flow["name"] == "New Name"
+
+
+# ---------------------------------------------------------------------------
+# Version history
+# ---------------------------------------------------------------------------
+
+class TestFlowVersioning:
+    def _make_flow(self, fm, name="Flow", nodes=None, connections=None, flow_id=None):
+        return fm.save_flow(name, nodes or [], connections or [], flow_id=flow_id)
+
+    def test_new_flow_has_no_versions(self, flow_manager):
+        """First save of a brand-new flow produces no version entry (nothing to snapshot)."""
+        flow = self._make_flow(flow_manager, "Brand New")
+        assert flow_manager.get_versions(flow["id"]) == []
+
+    def test_second_save_creates_version(self, flow_manager):
+        """Re-saving an existing flow creates exactly one version."""
+        flow = self._make_flow(flow_manager, "V1", nodes=[{"id": "n1"}])
+        flow_id = flow["id"]
+        # Second save (update)
+        flow_manager.save_flow("V2", [{"id": "n2"}], [], flow_id=flow_id)
+        versions = flow_manager.get_versions(flow_id)
+        assert len(versions) == 1
+        assert versions[0]["name"] == "V1"
+        assert versions[0]["version"] == 1
+
+    def test_versions_returned_newest_first(self, flow_manager):
+        """get_versions() returns versions with highest version number first."""
+        flow = self._make_flow(flow_manager, "A", nodes=[{"id": "n1"}])
+        flow_id = flow["id"]
+        flow_manager.save_flow("B", [{"id": "n2"}], [], flow_id=flow_id)
+        flow_manager.save_flow("C", [{"id": "n3"}], [], flow_id=flow_id)
+        versions = flow_manager.get_versions(flow_id)
+        assert len(versions) == 2
+        assert versions[0]["version"] > versions[1]["version"]
+
+    def test_versions_include_metadata(self, flow_manager):
+        """Version entries include name, saved_at, node_count, connection_count."""
+        flow = self._make_flow(flow_manager, "Meta", nodes=[{"id": "n1"}, {"id": "n2"}],
+                               connections=[{"from": "n1", "to": "n2"}])
+        flow_id = flow["id"]
+        flow_manager.save_flow("Meta v2", [], [], flow_id=flow_id)
+        versions = flow_manager.get_versions(flow_id)
+        v = versions[0]
+        assert v["name"] == "Meta"
+        assert v["node_count"] == 2
+        assert v["connection_count"] == 1
+        assert "saved_at" in v
+
+    def test_max_versions_pruned(self, flow_manager):
+        """Versions exceeding MAX_VERSIONS_PER_FLOW are pruned (oldest removed)."""
+        flow = self._make_flow(flow_manager, "Prune", nodes=[{"id": "n0"}])
+        flow_id = flow["id"]
+        # Save MAX_VERSIONS_PER_FLOW + 5 more times to exceed the limit
+        for i in range(MAX_VERSIONS_PER_FLOW + 5):
+            flow_manager.save_flow(f"Prune-{i}", [{"id": f"n{i}"}], [], flow_id=flow_id)
+        versions = flow_manager.get_versions(flow_id)
+        assert len(versions) == MAX_VERSIONS_PER_FLOW
+        # Newest versions should be retained (highest version numbers)
+        version_nums = [v["version"] for v in versions]
+        assert max(version_nums) - min(version_nums) == MAX_VERSIONS_PER_FLOW - 1
+
+    def test_rollback_restores_snapshot(self, flow_manager):
+        """rollback_version() restores the flow to the snapshotted state."""
+        nodes_v1 = [{"id": "original-node"}]
+        flow = self._make_flow(flow_manager, "Original", nodes=nodes_v1)
+        flow_id = flow["id"]
+        # Overwrite with different data
+        flow_manager.save_flow("Modified", [{"id": "different-node"}], [], flow_id=flow_id)
+        # Roll back to version 1
+        restored = flow_manager.rollback_version(flow_id, 1)
+        assert restored is not None
+        assert restored["name"] == "Original"
+        assert restored["nodes"] == nodes_v1
+
+    def test_rollback_creates_version_of_current_state(self, flow_manager):
+        """Rollback snapshots the current state before restoring so it is reversible."""
+        flow = self._make_flow(flow_manager, "V1", nodes=[{"id": "n1"}])
+        flow_id = flow["id"]
+        flow_manager.save_flow("V2", [{"id": "n2"}], [], flow_id=flow_id)
+        before_rollback_count = len(flow_manager.get_versions(flow_id))
+        flow_manager.rollback_version(flow_id, 1)
+        after_rollback_count = len(flow_manager.get_versions(flow_id))
+        assert after_rollback_count == before_rollback_count + 1
+
+    def test_rollback_nonexistent_version_returns_none(self, flow_manager):
+        """rollback_version() with an unknown version number returns None."""
+        flow = self._make_flow(flow_manager, "Flow")
+        assert flow_manager.rollback_version(flow["id"], 9999) is None
+
+    def test_rollback_nonexistent_flow_returns_none(self, flow_manager):
+        """rollback_version() with an unknown flow_id returns None."""
+        assert flow_manager.rollback_version("no-such-flow", 1) is None
+
+    def test_versions_persisted_to_disk(self, flow_manager):
+        """Version data is written to the versions file on disk."""
+        flow = self._make_flow(flow_manager, "Disk", nodes=[{"id": "n1"}])
+        flow_id = flow["id"]
+        flow_manager.save_flow("Disk v2", [], [], flow_id=flow_id)
+        assert os.path.exists(TEST_VERSIONS_FILE)
+        with open(TEST_VERSIONS_FILE) as f:
+            data = json.load(f)
+        assert flow_id in data
+        assert len(data[flow_id]) == 1
+
+    def test_versions_loaded_on_init(self, flow_manager):
+        """A freshly constructed FlowManager loads existing versions from disk."""
+        flow = self._make_flow(flow_manager, "Persist", nodes=[{"id": "n1"}])
+        flow_id = flow["id"]
+        flow_manager.save_flow("Persist v2", [], [], flow_id=flow_id)
+        # Create a new manager pointing at the same files
+        fm2 = FlowManager(storage_file=TEST_FLOWS_FILE)
+        versions = fm2.get_versions(flow_id)
+        assert len(versions) == 1
+        assert versions[0]["name"] == "Persist"
+
+    def test_get_versions_unknown_flow_returns_empty_list(self, flow_manager):
+        """get_versions() for a flow that never existed returns []."""
+        assert flow_manager.get_versions("ghost-id") == []

@@ -646,6 +646,40 @@ async def delete_flow(request: Request, flow_id: str, settings_man: SettingsMana
         "active_flow_ids": active_flows
     })
 
+@router.get("/ai-flow/{flow_id}/versions", response_class=JSONResponse)
+async def get_flow_versions(flow_id: str):
+    """Returns the version history for a flow (metadata only, newest first)."""
+    if not flow_manager.get_flow(flow_id):
+        raise HTTPException(status_code=404, detail="Flow not found")
+    return flow_manager.get_versions(flow_id)
+
+
+@router.get("/ai-flow/{flow_id}/versions/partial", response_class=HTMLResponse)
+async def get_flow_versions_partial(request: Request, flow_id: str):
+    """Returns the version history panel HTML for HTMX swap."""
+    flow = flow_manager.get_flow(flow_id)
+    if not flow:
+        raise HTTPException(status_code=404, detail="Flow not found")
+    versions = flow_manager.get_versions(flow_id)
+    return templates.TemplateResponse(request, "ai_flow_versions.html", {
+        "flow_id": flow_id,
+        "flow_name": flow.get("name", ""),
+        "versions": versions,
+    })
+
+
+@router.post("/ai-flow/{flow_id}/rollback/{version}", response_class=HTMLResponse)
+async def rollback_flow_version(request: Request, flow_id: str, version: int, settings_man: SettingsManager = Depends(get_settings_manager)):
+    """Restores a flow to the specified version snapshot."""
+    restored = flow_manager.rollback_version(flow_id, version)
+    if restored is None:
+        return Response(status_code=404, headers={"HX-Trigger": json.dumps({"showMessage": {"level": "error", "message": "Version not found"}})})
+    return templates.TemplateResponse(request, "ai_flow_list.html", {
+        "flows": flow_manager.list_flows(),
+        "active_flow_ids": settings_man.get("active_ai_flows", []),
+    }, headers={"HX-Trigger": json.dumps({"showMessage": {"level": "success", "message": f"Flow restored to version {version}"}})})
+
+
 @router.post("/ai-flow/make-default")
 async def make_active_flow_default(request: Request):
     """Overwrites the default flow with the currently active flow."""

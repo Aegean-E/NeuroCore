@@ -15,14 +15,21 @@ FLOWS_FILE = "ai_flows.json"
 REQUIRED_FLOW_KEYS = {"id", "nodes", "connections"}
 REQUIRED_NODE_KEYS = {"id", "moduleId", "nodeTypeId"}
 MAX_BACKUP_COUNT = 5  # Maximum number of default flow backups to keep
+MAX_VERSIONS_PER_FLOW = 20  # Maximum saved versions per flow
 
 
 class FlowManager:
-    def __init__(self, storage_file=FLOWS_FILE):
+    def __init__(self, storage_file=FLOWS_FILE, versions_file=None):
         # Initialize lock FIRST before any method calls (RLock for reentrant locking)
         self.lock = threading.RLock()
         self.storage_file = storage_file
+        # Derive versions file alongside the storage file (e.g. ai_flows.json → ai_flows_versions.json)
+        if versions_file is None:
+            base, ext = os.path.splitext(storage_file)
+            versions_file = base + "_versions" + (ext if ext else ".json")
+        self.versions_file = versions_file
         self.flows = self._load_flows()
+        self.versions = self._load_versions()
 
     def _load_flows(self):
         # Note: lock is already created in __init__ before this is called
@@ -225,11 +232,118 @@ class FlowManager:
     def _save_flows(self):
         self._save_flows_to_disk(self.flows)
 
+    # ------------------------------------------------------------------
+    # Version history
+    # ------------------------------------------------------------------
+
+    def _load_versions(self) -> dict:
+        """Load the per-flow version store from disk. Returns {} on missing/corrupt file."""
+        if not os.path.exists(self.versions_file):
+            return {}
+        try:
+            with open(self.versions_file, "r") as f:
+                data = json.load(f)
+            return data if isinstance(data, dict) else {}
+        except (json.JSONDecodeError, OSError):
+            return {}
+
+    def _save_versions_to_disk(self):
+        """Persist the versions dict to disk (must be called while holding self.lock)."""
+        try:
+            with open(self.versions_file, "w") as f:
+                json.dump(self.versions, f, indent=2)
+        except OSError as e:
+            logger.error(f"Failed to save flow versions: {e}")
+
+    def _save_version(self, flow_id: str):
+        """Snapshot the current state of *flow_id* before it is overwritten.
+
+        Called from save_flow() only when the flow already exists, so the
+        caller always holds self.lock.
+        """
+        current = self.flows.get(flow_id)
+        if current is None:
+            return
+
+        flow_versions = self.versions.setdefault(flow_id, [])
+        next_version = (max(v["version"] for v in flow_versions) + 1) if flow_versions else 1
+
+        snapshot = {
+            "version": next_version,
+            "saved_at": datetime.utcnow().isoformat() + "Z",
+            "name": current.get("name", ""),
+            "nodes": copy.deepcopy(current.get("nodes", [])),
+            "connections": copy.deepcopy(current.get("connections", [])),
+            "bridges": copy.deepcopy(current.get("bridges", [])),
+        }
+        flow_versions.append(snapshot)
+
+        # Prune oldest entries when over the limit
+        if len(flow_versions) > MAX_VERSIONS_PER_FLOW:
+            flow_versions.sort(key=lambda v: v["version"])
+            self.versions[flow_id] = flow_versions[-MAX_VERSIONS_PER_FLOW:]
+
+        self._save_versions_to_disk()
+
+    def get_versions(self, flow_id: str) -> list:
+        """Return lightweight version metadata for *flow_id*, newest first.
+
+        Each entry: {version, saved_at, name, node_count, connection_count}
+        """
+        with self.lock:
+            flow_versions = self.versions.get(flow_id, [])
+            result = [
+                {
+                    "version": v["version"],
+                    "saved_at": v["saved_at"],
+                    "name": v["name"],
+                    "node_count": len(v.get("nodes", [])),
+                    "connection_count": len(v.get("connections", [])),
+                }
+                for v in flow_versions
+            ]
+            result.sort(key=lambda v: v["version"], reverse=True)
+            return result
+
+    def rollback_version(self, flow_id: str, version_num: int) -> dict | None:
+        """Restore *flow_id* to the snapshot identified by *version_num*.
+
+        The current state is snapshotted first (so the rollback is reversible).
+        Returns the restored flow dict, or None if flow/version not found.
+        """
+        with self.lock:
+            if flow_id not in self.flows:
+                return None
+            flow_versions = self.versions.get(flow_id, [])
+            snapshot = next((v for v in flow_versions if v["version"] == version_num), None)
+            if snapshot is None:
+                return None
+
+            # Snapshot current state before overwriting (makes rollback reversible)
+            self._save_version(flow_id)
+
+            self.flows[flow_id] = {
+                "id": flow_id,
+                "name": snapshot["name"],
+                "nodes": copy.deepcopy(snapshot["nodes"]),
+                "connections": copy.deepcopy(snapshot["connections"]),
+                "bridges": copy.deepcopy(snapshot["bridges"]),
+                "created_at": datetime.utcnow().isoformat() + "Z",
+            }
+            self._save_flows()
+            return self.flows[flow_id]
+
+    # ------------------------------------------------------------------
+
     def save_flow(self, name, nodes, connections, bridges=None, flow_id=None):
         with self.lock:
             if flow_id is None:
                 flow_id = str(uuid.uuid4())
-            
+
+            # Snapshot the existing flow before overwriting (for version history)
+            if flow_id in self.flows:
+                self._save_version(flow_id)
+
             self.flows[flow_id] = {
                 "id": flow_id,
                 "name": name,
