@@ -159,15 +159,14 @@ class TestFlowVersioning:
         assert restored["name"] == "Original"
         assert restored["nodes"] == nodes_v1
 
-    def test_rollback_creates_version_of_current_state(self, flow_manager):
-        """Rollback snapshots the current state before restoring so it is reversible."""
+    def test_rollback_does_not_add_version(self, flow_manager):
+        """Rollback does not create an extra version entry — it just restores silently."""
         flow = self._make_flow(flow_manager, "V1", nodes=[{"id": "n1"}])
         flow_id = flow["id"]
         flow_manager.save_flow("V2", [{"id": "n2"}], [], flow_id=flow_id)
-        before_rollback_count = len(flow_manager.get_versions(flow_id))
+        before_count = len(flow_manager.get_versions(flow_id))
         flow_manager.rollback_version(flow_id, 1)
-        after_rollback_count = len(flow_manager.get_versions(flow_id))
-        assert after_rollback_count == before_rollback_count + 1
+        assert len(flow_manager.get_versions(flow_id)) == before_count
 
     def test_rollback_nonexistent_version_returns_none(self, flow_manager):
         """rollback_version() with an unknown version number returns None."""

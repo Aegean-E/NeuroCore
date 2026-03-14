@@ -319,9 +319,6 @@ class FlowManager:
             if snapshot is None:
                 return None
 
-            # Snapshot current state before overwriting (makes rollback reversible)
-            self._save_version(flow_id)
-
             self.flows[flow_id] = {
                 "id": flow_id,
                 "name": snapshot["name"],
