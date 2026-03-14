@@ -8,10 +8,28 @@ ensuring test isolation and preventing cross-test contamination.
 import json
 import os
 import shutil
+import sys
 import tempfile
 from pathlib import Path
 from typing import Dict, Any, Optional, List
 import pytest
+
+# ---------------------------------------------------------------------------
+# Preserve the real faiss module reference BEFORE any test file is collected.
+#
+# test_memory_backend.py installs a MagicMock as sys.modules['faiss'] at
+# module level (collection time) so that MemoryStore tests don't need a real
+# FAISS installation.  Unfortunately this also poisons sys.modules for every
+# other test that imports faiss later — in particular the
+# TestFaissDimensionMismatchWarning tests in test_knowledge_base.py.
+#
+# By capturing the real module here (conftest.py is imported before any test
+# file) we can restore it for tests that expect real FAISS.
+# ---------------------------------------------------------------------------
+try:
+    import faiss as _real_faiss_module
+except ImportError:
+    _real_faiss_module = None
 
 
 @pytest.fixture(autouse=True)
@@ -73,6 +91,91 @@ def disable_debug_mode_for_tests():
 
     settings.settings['debug_mode'] = original_debug
     FlowRunner._executor_cache.clear()
+
+
+@pytest.fixture(autouse=True)
+def restore_real_faiss_module(request):
+    """
+    Restore sys.modules['faiss'] to the real FAISS library for tests that need it.
+
+    test_memory_backend.py replaces sys.modules['faiss'] with a MagicMock at
+    module-import time (collection phase) so its own tests can run without a
+    real FAISS library.  That replacement persists for the entire session,
+    breaking tests in other files (e.g. TestFaissDimensionMismatchWarning in
+    test_knowledge_base.py) that create real FAISS indexes.
+
+    For every test that is NOT inside test_memory_backend.py we temporarily
+    restore the real faiss module so those tests see genuine FAISS objects.
+    After the test we put back whatever was in sys.modules beforehand so that
+    test_memory_backend.py tests continue to see their mock.
+    """
+    if _real_faiss_module is None:
+        yield
+        return
+
+    is_backend_test = request.fspath.basename == "test_memory_backend.py"
+    if is_backend_test:
+        # This test file installs its own mock — leave sys.modules alone.
+        # BUT: if a previous non-backend test has already loaded modules.memory.backend
+        # or modules.knowledge_base.backend with real faiss, those modules now have
+        # real faiss in their module globals.  We must restore the mock so that
+        # test_memory_backend tests (which use mock_faiss in sys.modules) still
+        # exercise the mock path inside those modules.
+        _MEM_BACKEND = 'modules.memory.backend'
+        previous_mem = sys.modules.get(_MEM_BACKEND)
+        if previous_mem is not None:
+            previous_mem_faiss = getattr(previous_mem, 'faiss', None)
+            # The mock_faiss object is whatever is currently in sys.modules['faiss']
+            # when this fixture runs for a backend test (the module-level mock).
+            current_mock = sys.modules.get('faiss')
+            if current_mock is not None and current_mock is not _real_faiss_module:
+                # Already mock — nothing to do.
+                pass
+            elif current_mock is _real_faiss_module:
+                # sys.modules was already restored — re-set to module-level mock.
+                # We can't easily reach the module-level mock_faiss here, but we
+                # can infer it from test_memory_backend's sys.modules entry after
+                # collection (it is whatever sys.modules['faiss'] was set to).
+                pass
+            # Patch the backend module's faiss attribute to the mock if possible
+            _mock = sys.modules.get('faiss')
+            if previous_mem is not None and _mock is not None:
+                setattr(previous_mem, 'faiss', _mock)
+        yield
+        # Restore the backend module's original faiss reference
+        if previous_mem is not None and 'previous_mem_faiss' in dir():
+            setattr(previous_mem, 'faiss', previous_mem_faiss)
+        return
+
+    previous = sys.modules.get('faiss')
+    sys.modules['faiss'] = _real_faiss_module
+
+    # Also patch any already-imported backend modules so they use real faiss.
+    # Without this, modules imported during mock-faiss mode would keep their
+    # captured mock reference even though sys.modules now points to real faiss.
+    _patched_backends: list = []
+    for mod_name in ('modules.memory.backend', 'modules.knowledge_base.backend'):
+        mod = sys.modules.get(mod_name)
+        if mod is not None:
+            old = getattr(mod, 'faiss', None)
+            setattr(mod, 'faiss', _real_faiss_module)
+            _patched_backends.append((mod, old))
+
+    yield
+
+    # Restore sys.modules entry
+    if previous is None:
+        sys.modules.pop('faiss', None)
+    else:
+        sys.modules['faiss'] = previous
+
+    # Restore backend modules' faiss references
+    for mod, old in _patched_backends:
+        if old is None:
+            if hasattr(mod, 'faiss'):
+                delattr(mod, 'faiss')
+        else:
+            setattr(mod, 'faiss', old)
 
 
 # Files that need backup/restore during tests

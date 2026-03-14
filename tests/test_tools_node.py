@@ -59,11 +59,16 @@ async def test_tool_execution_happy_path():
     tool_call = make_tool_call("Calculator", '{"expression": "2+2"}')
     input_data = make_input([tool_call])
 
-    with patch("os.path.exists", return_value=True), \
-         patch("builtins.open", MagicMock(return_value=MagicMock(
+    # Patch os.path.exists only for the modules.tools.node module so that the
+    # tool code file is found, and mock sandbox.execute directly to avoid
+    # spawning a real subprocess (which would be broken by a builtins.open
+    # patch and doesn't belong in a unit test).
+    with patch("modules.tools.node.os.path.exists", return_value=True), \
+         patch("modules.tools.node.open", MagicMock(return_value=MagicMock(
              __enter__=MagicMock(return_value=MagicMock(read=MagicMock(return_value="result = '4'"))),
              __exit__=MagicMock(return_value=False)
-         ))):
+         ))), \
+         patch.object(executor.sandbox, "execute", return_value={"result": "4"}):
         result = await executor.receive(input_data)
 
     assert "tool_results" in result

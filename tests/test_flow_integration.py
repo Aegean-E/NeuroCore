@@ -31,16 +31,23 @@ async def test_memory_flow_integration(temp_memory_store):
          patch("modules.memory.backend.memory_store", temp_memory_store), \
          patch("modules.memory.consolidation.memory_store", temp_memory_store):
         
-        # Mock LLMBridge globally to avoid real API calls from any module
-        with patch("core.llm.LLMBridge") as MockBridge:
-            
-            # Setup LLM Mock
-            bridge_instance = MockBridge.return_value
-            # Return a constant embedding so search always matches
-            bridge_instance.get_embedding = AsyncMock(return_value=[0.1, 0.2, 0.3])
-            # Setup chat completion
-            bridge_instance.chat_completion = AsyncMock(return_value={
-                    "choices": [{"message": {"content": '["My secret code is 1234"]'}}]
+        # Mock LLMBridge in all modules that import it directly via 'from core.llm import LLMBridge'.
+        # Patching core.llm.LLMBridge alone does not affect those already-bound references.
+        with patch("modules.memory.node.LLMBridge") as MockMemoryBridge, \
+             patch("modules.llm_module.node.LLMBridge") as MockLLMBridge, \
+             patch("core.llm.LLMBridge"):
+
+            # Memory node bridge: used for fact extraction and embedding
+            mem_bridge_instance = MockMemoryBridge.return_value
+            mem_bridge_instance.get_embedding = AsyncMock(return_value=[0.1, 0.2, 0.3])
+            mem_bridge_instance.chat_completion = AsyncMock(return_value={
+                "choices": [{"message": {"content": '["My secret code is 1234"]'}}]
+            })
+
+            # LLM flow node bridge: used by n3 in the flow
+            llm_bridge_instance = MockLLMBridge.return_value
+            llm_bridge_instance.chat_completion = AsyncMock(return_value={
+                "choices": [{"message": {"content": "Your code is 1234."}}]
             })
 
             # Define a linear flow
@@ -92,19 +99,12 @@ async def test_memory_flow_integration(temp_memory_store):
                 input_data_2 = {"messages": [{"role": "user", "content": "What is my code?"}]}
                 await runner.run(input_data_2)
                 
-                # Verify that the LLM received the memory context
-                # The Recall node returns _memory_context in the output data
-                # Check the input to the LLM node (after Recall)
-                call_kwargs = bridge_instance.chat_completion.call_args.kwargs
-                messages_sent = call_kwargs['messages']
-                
-                # The MemoryRecallExecutor returns _memory_context field, not system message injection
-                # Check that recall added the _memory_context (verified in output above)
-                # The messages just have user message, context is in _memory_context field
+                # Verify that the LLM flow node (n3) received the user message.
+                # n3 uses modules.llm_module.node.LLMBridge (MockLLMBridge).
+                llm_call_kwargs = llm_bridge_instance.chat_completion.call_args.kwargs
+                messages_sent = llm_call_kwargs['messages']
+
                 assert len(messages_sent) >= 1
-                assert messages_sent[0]['role'] == 'user'
-                # Verify messages content
-                assert "What is my code?" in messages_sent[0]['content']
-                
-                # Verify the recall output had _memory_context (from log: "_memory_context": "Relevant memories retrieved...")
-                # This was verified in the debug output above
+                # The final user message should contain the turn-2 query
+                user_msgs = [m for m in messages_sent if m['role'] == 'user']
+                assert any("What is my code?" in m['content'] for m in user_msgs)
