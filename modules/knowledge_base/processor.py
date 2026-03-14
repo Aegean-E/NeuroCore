@@ -2,6 +2,7 @@ import os
 import re
 import logging
 import io
+import hashlib
 from typing import List, Dict, Tuple, Optional
 import asyncio
 import httpx
@@ -204,9 +205,11 @@ class DocumentProcessor:
                     break
 
             if candidate.strip():
+                text = candidate.strip()
                 chunks.append({
-                    'text': candidate.strip(),
-                    'page_number': page_number
+                    'text': text,
+                    'page_number': page_number,
+                    'chunk_hash': hashlib.sha256(text.encode('utf-8')).hexdigest(),
                 })
 
             step = max(1, len(candidate) - self.chunk_overlap)
@@ -223,7 +226,11 @@ class DocumentProcessor:
                 chunk_text = self._break_at_sentence(chunk_text)
 
             if chunk_text.strip():
-                chunks.append({'text': chunk_text.strip()})
+                text = chunk_text.strip()
+                chunks.append({
+                    'text': text,
+                    'chunk_hash': hashlib.sha256(text.encode('utf-8')).hexdigest(),
+                })
 
             current_pos += max(1, len(chunk_text) - self.chunk_overlap)
         return chunks

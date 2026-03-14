@@ -349,6 +349,7 @@ class FaissDocumentStore(QueryExpansionMixin):
                     page_number INTEGER,
                     created_at INTEGER NOT NULL,
                     embedding TEXT,
+                    chunk_hash TEXT,
                     FOREIGN KEY (document_id) REFERENCES documents(id) ON DELETE CASCADE
                 )
             """)
@@ -356,12 +357,19 @@ class FaissDocumentStore(QueryExpansionMixin):
             # Create indexes
             con.execute("CREATE INDEX IF NOT EXISTS idx_file_hash ON documents(file_hash)")
             con.execute("CREATE INDEX IF NOT EXISTS idx_document_id ON chunks(document_id)")
-            
+
             # Migration: Add embedding column if it doesn't exist
             try:
                 con.execute("ALTER TABLE chunks ADD COLUMN embedding TEXT")
             except sqlite3.OperationalError:
                 pass
+
+            # Migration: Add chunk_hash column for incremental re-indexing
+            try:
+                con.execute("ALTER TABLE chunks ADD COLUMN chunk_hash TEXT")
+            except sqlite3.OperationalError:
+                pass
+            con.execute("CREATE INDEX IF NOT EXISTS idx_chunk_hash ON chunks(chunk_hash)")
 
             # 1. Enable FTS5 Virtual Table for Keyword Search
             con.execute("""
@@ -656,6 +664,129 @@ class FaissDocumentStore(QueryExpansionMixin):
             ).fetchone()
         return row is not None
 
+    def get_document_by_filename(self, filename: str) -> Optional[Dict]:
+        """Return document metadata for the first document with the given filename, or None."""
+        with self._connect() as con:
+            row = con.execute(
+                "SELECT id, file_hash, filename, file_type, file_size, page_count, chunk_count, created_at "
+                "FROM documents WHERE filename = ? ORDER BY created_at DESC LIMIT 1",
+                (filename,),
+            ).fetchone()
+        if row:
+            return {
+                "id": row[0], "file_hash": row[1], "filename": row[2],
+                "file_type": row[3], "file_size": row[4], "page_count": row[5],
+                "chunk_count": row[6], "created_at": row[7],
+            }
+        return None
+
+    def reindex_document(
+        self,
+        document_id: int,
+        new_file_hash: str,
+        new_file_size: int,
+        new_page_count: Optional[int],
+        new_chunks: List[Dict],
+    ) -> Dict:
+        """Delta re-index a document: preserve unchanged chunks, remove stale ones, add new ones.
+
+        Each chunk dict must carry a ``chunk_hash`` key (SHA-256 of the chunk text).
+        If missing, the hash is computed on-the-fly.
+
+        Returns a summary dict ``{'added': int, 'removed': int, 'unchanged': int}``.
+        """
+        timestamp = int(time.time())
+
+        # -- 1. Fetch existing chunk hashes for this document -----------------
+        existing: Dict[str, int] = {}  # {chunk_hash: chunk_id}
+        with self._connect() as con:
+            rows = con.execute(
+                "SELECT id, chunk_hash FROM chunks WHERE document_id = ?",
+                (document_id,),
+            ).fetchall()
+        for chunk_id, chunk_hash in rows:
+            if chunk_hash:
+                existing[chunk_hash] = chunk_id
+
+        # -- 2. Ensure every new chunk has a hash ----------------------------
+        for chunk in new_chunks:
+            if not chunk.get('chunk_hash'):
+                chunk['chunk_hash'] = hashlib.sha256(
+                    chunk['text'].encode('utf-8')
+                ).hexdigest()
+
+        new_hash_set = {chunk['chunk_hash'] for chunk in new_chunks}
+
+        # -- 3. Identify stale (to remove) and new (to add) chunks -----------
+        stale_hashes = set(existing.keys()) - new_hash_set
+        stale_chunk_ids = [existing[h] for h in stale_hashes]
+        chunks_to_add = [(idx, c) for idx, c in enumerate(new_chunks)
+                         if c['chunk_hash'] not in existing]
+
+        # -- 4. Remove stale chunks from SQLite + FAISS ----------------------
+        if stale_chunk_ids:
+            with self._connect() as con:
+                placeholders = ','.join('?' for _ in stale_chunk_ids)
+                con.execute(
+                    f"DELETE FROM chunks WHERE id IN ({placeholders})",
+                    stale_chunk_ids,
+                )
+            if self.faiss_index:
+                with self.index_lock:
+                    self.faiss_index.remove_ids(
+                        np.array(stale_chunk_ids).astype('int64')
+                    )
+
+        # -- 5. Insert new/changed chunks ------------------------------------
+        new_chunk_embeddings: List[Optional[np.ndarray]] = []
+        new_chunk_ids: List[int] = []
+
+        if chunks_to_add:
+            with self._connect() as con:
+                for idx, chunk in chunks_to_add:
+                    emb = chunk.get('embedding')
+                    emb_list = emb.tolist() if isinstance(emb, np.ndarray) else emb
+                    cur = con.execute(
+                        """INSERT INTO chunks
+                               (document_id, chunk_index, text, page_number, created_at, embedding, chunk_hash)
+                           VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                        (
+                            document_id,
+                            idx,
+                            chunk['text'],
+                            chunk.get('page_number'),
+                            timestamp,
+                            json.dumps(emb_list) if emb_list is not None else None,
+                            chunk['chunk_hash'],
+                        ),
+                    )
+                    new_chunk_ids.append(cur.lastrowid)
+                    new_chunk_embeddings.append(
+                        np.array(emb_list, dtype='float32') if emb_list else None
+                    )
+
+            valid_embs = [e for e in new_chunk_embeddings if e is not None]
+            valid_ids = [
+                cid for cid, e in zip(new_chunk_ids, new_chunk_embeddings)
+                if e is not None
+            ]
+            if valid_embs:
+                self._add_embeddings_to_faiss(valid_embs, valid_ids, save_index=False)
+
+        # -- 6. Update document metadata ------------------------------------
+        with self._connect() as con:
+            con.execute(
+                """UPDATE documents
+                   SET file_hash = ?, file_size = ?, page_count = ?, chunk_count = ?
+                   WHERE id = ?""",
+                (new_file_hash, new_file_size, new_page_count, len(new_chunks), document_id),
+            )
+
+        self._save_faiss_index()
+
+        unchanged = len(existing) - len(stale_chunk_ids)
+        return {'added': len(chunks_to_add), 'removed': len(stale_chunk_ids), 'unchanged': unchanged}
+
     def add_document(
         self,
         file_hash: str,
@@ -697,20 +828,21 @@ class FaissDocumentStore(QueryExpansionMixin):
             for idx, chunk in enumerate(chunks):
                 # Ensure embedding is a list for JSON serialization
                 emb_list = chunk['embedding'].tolist() if isinstance(chunk['embedding'], np.ndarray) else chunk['embedding']
-                
+
                 con.execute("""
                     INSERT INTO chunks (
                         document_id, chunk_index, text,
-                        page_number, created_at, embedding
+                        page_number, created_at, embedding, chunk_hash
                     )
-                    VALUES (?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
                 """, (
                     document_id,
                     idx,
                     chunk['text'],
                     chunk.get('page_number'),
                     timestamp,
-                    json.dumps(emb_list)
+                    json.dumps(emb_list),
+                    chunk.get('chunk_hash'),
                 ))
                 
                 # Store embedding for FAISS (as numpy array)

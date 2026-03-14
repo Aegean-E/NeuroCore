@@ -152,6 +152,7 @@ def test_kb_router_upload_flow(client):
         
         # Mock Store check
         mock_store.compute_file_hash.return_value = "hash123"
+        mock_store.get_document_by_filename.return_value = None  # no existing doc with this name
         mock_store.document_exists.return_value = False
         
         files = {"files": ("test.pdf", b"content", "application/pdf")}
@@ -259,3 +260,171 @@ class TestFaissDimensionMismatchWarning:
         assert dimension_warnings == [], (
             f"Unexpected warnings: {[w.message for w in dimension_warnings]}"
         )
+
+
+# ---------------------------------------------------------------------------
+# Incremental Re-Indexing tests
+# ---------------------------------------------------------------------------
+
+class TestIncrementalReindex:
+    """Tests for the delta re-indexing feature (idea 3.3)."""
+
+    # Use the default FAISS dimension so embeddings are actually indexed.
+    # FaissDocumentStore defaults to dim=768 for empty indexes.
+    DIM = 768
+
+    @pytest.fixture
+    def store(self, tmp_path):
+        db_path = str(tmp_path / "kb_reindex.sqlite3")
+        s = FaissDocumentStore(db_path=db_path)
+        yield s
+
+    def _chunk(self, text: str, page: int = 1) -> dict:
+        import hashlib
+        emb = np.zeros(self.DIM, dtype="float32")
+        emb[0] = float(abs(hash(text)) % 100 + 1)
+        return {
+            "text": text,
+            "embedding": emb,
+            "page_number": page,
+            "chunk_hash": hashlib.sha256(text.encode()).hexdigest(),
+        }
+
+    def _add_doc(self, store, filename: str, chunks: list, file_hash: str = "h1") -> int:
+        return store.add_document(
+            file_hash=file_hash,
+            filename=filename,
+            file_type="txt",
+            file_size=100,
+            page_count=1,
+            chunks=chunks,
+        )
+
+    # --- get_document_by_filename -------------------------------------------
+
+    def test_get_document_by_filename_returns_none_for_missing(self, store):
+        assert store.get_document_by_filename("nonexistent.txt") is None
+
+    def test_get_document_by_filename_returns_metadata(self, store):
+        chunks = [self._chunk("hello world")]
+        self._add_doc(store, "doc.txt", chunks, file_hash="abc123")
+        doc = store.get_document_by_filename("doc.txt")
+        assert doc is not None
+        assert doc["filename"] == "doc.txt"
+        assert doc["file_hash"] == "abc123"
+
+    # --- chunk_hash storage -------------------------------------------------
+
+    def test_add_document_stores_chunk_hash(self, store):
+        import hashlib
+        text = "unique chunk text for hashing"
+        expected_hash = hashlib.sha256(text.encode()).hexdigest()
+        self._add_doc(store, "h.txt", [self._chunk(text)], "hx1")
+        with store._connect() as con:
+            row = con.execute("SELECT chunk_hash FROM chunks LIMIT 1").fetchone()
+        assert row is not None
+        assert row[0] == expected_hash
+
+    # --- reindex_document: unchanged chunks ---------------------------------
+
+    def test_reindex_preserves_unchanged_chunks(self, store):
+        chunks_v1 = [self._chunk("aaa"), self._chunk("bbb"), self._chunk("ccc")]
+        doc_id = self._add_doc(store, "f.txt", chunks_v1, "h_v1")
+        faiss_count_before = store.faiss_index.ntotal
+
+        # Re-upload identical content
+        result = store.reindex_document(doc_id, "h_v1", 100, 1, chunks_v1)
+
+        assert result["added"] == 0
+        assert result["removed"] == 0
+        assert result["unchanged"] == 3
+        assert store.get_total_chunks() == 3
+        # FAISS count stays the same (no re-adds, no removes)
+        assert store.faiss_index.ntotal == faiss_count_before
+
+    # --- reindex_document: new chunk added ----------------------------------
+
+    def test_reindex_adds_new_chunks(self, store):
+        chunks_v1 = [self._chunk("aaa"), self._chunk("bbb")]
+        doc_id = self._add_doc(store, "f.txt", chunks_v1, "h_v1")
+
+        chunks_v2 = [self._chunk("aaa"), self._chunk("bbb"), self._chunk("ccc_new")]
+        result = store.reindex_document(doc_id, "h_v2", 100, 1, chunks_v2)
+
+        assert result["added"] == 1
+        assert result["removed"] == 0
+        assert result["unchanged"] == 2
+        assert store.get_total_chunks() == 3
+
+    # --- reindex_document: stale chunk removed ------------------------------
+
+    def test_reindex_removes_stale_chunks(self, store):
+        chunks_v1 = [self._chunk("aaa"), self._chunk("bbb"), self._chunk("ccc")]
+        doc_id = self._add_doc(store, "f.txt", chunks_v1, "h_v1")
+        faiss_before = store.faiss_index.ntotal  # should be 3
+
+        # v2 drops "ccc"
+        chunks_v2 = [self._chunk("aaa"), self._chunk("bbb")]
+        result = store.reindex_document(doc_id, "h_v2", 90, 1, chunks_v2)
+
+        assert result["added"] == 0
+        assert result["removed"] == 1
+        assert result["unchanged"] == 2
+        assert store.get_total_chunks() == 2
+        # FAISS vector for removed chunk should be gone
+        assert store.faiss_index.ntotal == faiss_before - 1
+
+    # --- reindex_document: changed chunk ------------------------------------
+
+    def test_reindex_replaces_changed_chunk(self, store):
+        chunks_v1 = [self._chunk("aaa"), self._chunk("bbb")]
+        doc_id = self._add_doc(store, "f.txt", chunks_v1, "h_v1")
+
+        # "bbb" changed to "bbb_updated"
+        chunks_v2 = [self._chunk("aaa"), self._chunk("bbb_updated")]
+        result = store.reindex_document(doc_id, "h_v2", 100, 1, chunks_v2)
+
+        assert result["added"] == 1
+        assert result["removed"] == 1
+        assert result["unchanged"] == 1
+        assert store.get_total_chunks() == 2
+
+    # --- reindex_document: updates document metadata -----------------------
+
+    def test_reindex_updates_document_metadata(self, store):
+        chunks_v1 = [self._chunk("aaa"), self._chunk("bbb")]
+        doc_id = self._add_doc(store, "f.txt", chunks_v1, "h_v1")
+
+        chunks_v2 = [self._chunk("aaa")]
+        store.reindex_document(doc_id, "h_v2", 200, 3, chunks_v2)
+
+        doc = store.get_document(doc_id)
+        assert doc["chunk_count"] == 1
+
+    # --- processor: chunk_hash in output ------------------------------------
+
+    def test_processor_chunk_text_includes_hash(self):
+        import hashlib
+        from modules.knowledge_base.processor import DocumentProcessor
+
+        proc = DocumentProcessor(llm_bridge=MagicMock(), chunk_size=50, chunk_overlap=0)
+        chunks = proc._chunk_text("Hello world. This is a test sentence for chunking.")
+
+        for chunk in chunks:
+            assert "chunk_hash" in chunk
+            expected = hashlib.sha256(chunk["text"].encode()).hexdigest()
+            assert chunk["chunk_hash"] == expected
+
+    def test_processor_chunk_pages_includes_hash(self):
+        import hashlib
+        from modules.knowledge_base.processor import DocumentProcessor
+
+        proc = DocumentProcessor(llm_bridge=MagicMock(), chunk_size=50, chunk_overlap=0)
+        pages = [{"page_number": 1, "text": "First page content with enough words."},
+                 {"page_number": 2, "text": "Second page content with different words."}]
+        chunks = proc._chunk_pages(pages)
+
+        for chunk in chunks:
+            assert "chunk_hash" in chunk
+            expected = hashlib.sha256(chunk["text"].encode()).hexdigest()
+            assert chunk["chunk_hash"] == expected

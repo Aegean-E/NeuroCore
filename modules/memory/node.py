@@ -98,9 +98,26 @@ class MemoryRecallExecutor:
         
         # Filter results by minimum score if configured
         results = [r for r in results if r.get('score', 0) >= min_score]
-        
+
         if not results:
             return input_data
+
+        # Record provenance: which session recalled which memories (fire-and-forget)
+        try:
+            session_id = input_data.get("session_id")
+            if not session_id:
+                from core.session_manager import session_manager as _sm
+                session_id = _sm.get_session_id()
+            if session_id:
+                async def _record_provenance(recalled, sid):
+                    for r in recalled:
+                        await loop.run_in_executor(
+                            memory_store.executor,
+                            partial(memory_store.record_recall, r["id"], sid, r.get("score", 0.0)),
+                        )
+                asyncio.create_task(_record_provenance(results, session_id))
+        except Exception as _prov_err:
+            logger.debug(f"Memory provenance recording skipped: {_prov_err}")
 
         # Format context
         context_str = "\n".join([f"- {r['text']}" for r in results])

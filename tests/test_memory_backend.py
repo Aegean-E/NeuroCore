@@ -234,6 +234,80 @@ class TestBuildFaissIndex:
                 mock_index_instance.add_with_ids.assert_called()
 
 
+class TestSessionProvenance:
+    """Tests for cross-session memory linking (record_recall, get_memory_sessions, get_session_memories)."""
+
+    @pytest.fixture()
+    def store(self, tmp_path):
+        """MemoryStore backed by a real temp SQLite file, FAISS disabled."""
+        from modules.memory.backend import MemoryStore
+        db = str(tmp_path / "test_memory.sqlite3")
+        with patch("modules.memory.backend.FAISS_AVAILABLE", False):
+            s = MemoryStore(db_path=db)
+        return s
+
+    def test_record_recall_inserts_row(self, store):
+        store.record_recall(memory_id=1, session_id="ses-abc", score=0.85)
+        sessions = store.get_memory_sessions(1)
+        assert len(sessions) == 1
+        assert sessions[0]["session_id"] == "ses-abc"
+        assert sessions[0]["recall_count"] == 1
+        assert abs(sessions[0]["avg_score"] - 0.85) < 0.001
+
+    def test_record_recall_accumulates_multiple_sessions(self, store):
+        store.record_recall(1, "ses-A", 0.9)
+        store.record_recall(1, "ses-B", 0.7)
+        store.record_recall(1, "ses-A", 0.8)  # second recall in ses-A
+        sessions = store.get_memory_sessions(1)
+        assert len(sessions) == 2
+        by_sid = {s["session_id"]: s for s in sessions}
+        assert by_sid["ses-A"]["recall_count"] == 2
+        assert by_sid["ses-B"]["recall_count"] == 1
+
+    def test_get_memory_sessions_empty(self, store):
+        assert store.get_memory_sessions(999) == []
+
+    def test_get_session_memories_returns_joined_data(self, store):
+        # Insert a real memory so the JOIN resolves
+        with store._connect() as con:
+            con.execute(
+                "INSERT INTO memories (id, identity, type, subject, text, confidence, created_at, source) "
+                "VALUES (42, 'abc', 'FACT', 'User', 'Test memory', 1.0, 1700000000, 'chat')"
+            )
+        store.record_recall(42, "ses-X", 0.75)
+        memories = store.get_session_memories("ses-X")
+        assert len(memories) == 1
+        assert memories[0]["id"] == 42
+        assert memories[0]["text"] == "Test memory"
+        assert memories[0]["type"] == "FACT"
+        assert abs(memories[0]["score"] - 0.75) < 0.001
+
+    def test_get_session_memories_empty(self, store):
+        assert store.get_session_memories("nonexistent-session") == []
+
+    def test_record_recall_multiple_memories_same_session(self, store):
+        store.record_recall(1, "ses-Z", 0.9)
+        store.record_recall(2, "ses-Z", 0.6)
+        store.record_recall(3, "ses-Z", 0.4)
+        # Distinct memories recalled by ses-Z
+        assert store.get_memory_sessions(1)[0]["session_id"] == "ses-Z"
+        assert store.get_memory_sessions(2)[0]["session_id"] == "ses-Z"
+        assert store.get_memory_sessions(3)[0]["session_id"] == "ses-Z"
+
+    def test_browse_includes_session_count(self, store):
+        with store._connect() as con:
+            con.execute(
+                "INSERT INTO memories (id, identity, type, subject, text, confidence, created_at, source) "
+                "VALUES (10, 'xyz', 'FACT', 'User', 'Another memory', 1.0, 1700000000, 'chat')"
+            )
+        store.record_recall(10, "ses-1", 0.8)
+        store.record_recall(10, "ses-2", 0.7)
+        results = store.browse(limit=10)
+        mem = next((r for r in results if r["id"] == 10), None)
+        assert mem is not None
+        assert mem["session_count"] == 2
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
 

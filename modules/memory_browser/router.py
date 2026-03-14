@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Request, Query
-from fastapi.responses import HTMLResponse, Response
+from fastapi.responses import HTMLResponse, JSONResponse, Response
 from fastapi.templating import Jinja2Templates
 import json
 import logging
@@ -97,3 +97,23 @@ async def unboost_memory(request: Request, memory_id: int):
         return Response(status_code=200, headers={"HX-Trigger": json.dumps({"showMessage": {"level": "info", "message": "Boost removed"}, "memoryRefresh": None})})
     except Exception as e:
         return Response(status_code=200, headers={"HX-Trigger": json.dumps({"showMessage": {"level": "error", "message": "Unboost failed"}})})
+
+@router.get("/provenance/{memory_id}", response_class=JSONResponse)
+async def get_memory_provenance(request: Request, memory_id: int):
+    """Return the sessions that have recalled a specific memory entry."""
+    loop = asyncio.get_running_loop()
+    sessions = await loop.run_in_executor(
+        memory_store.executor,
+        partial(memory_store.get_memory_sessions, memory_id),
+    )
+    return JSONResponse(content={"memory_id": memory_id, "sessions": sessions})
+
+@router.get("/session/{session_id}", response_class=JSONResponse)
+async def get_session_provenance(request: Request, session_id: str):
+    """Return all memories recalled in a specific session."""
+    loop = asyncio.get_running_loop()
+    memories = await loop.run_in_executor(
+        memory_store.executor,
+        partial(memory_store.get_session_memories, session_id),
+    )
+    return JSONResponse(content={"session_id": session_id, "memories": memories})

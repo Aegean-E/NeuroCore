@@ -129,24 +129,57 @@ async def process_and_save_document(tracking_id: str, file_path: str, original_f
 
         file_hash = document_store.compute_file_hash(file_path)
         file_size = os.path.getsize(file_path)
-        
-        # Check if document already exists (duplicate)
+
+        # Check if a document with this filename already exists
+        existing_doc = document_store.get_document_by_filename(original_filename)
+
+        if existing_doc:
+            if existing_doc['file_hash'] == file_hash:
+                # Byte-for-byte identical — nothing to do
+                if os.path.exists(file_path):
+                    try:
+                        os.remove(file_path)
+                    except OSError as e:
+                        logger.warning(f"Failed to remove duplicate file {stored_filename}: {e}")
+                with upload_progress_lock:
+                    upload_progress[tracking_id]["status"] = "done"
+                    upload_progress[tracking_id]["progress"] = 100
+                    upload_progress[tracking_id]["message"] = "Document already exists (no changes)"
+                return
+
+            # Same filename, different content — perform delta re-index
+            result = document_store.reindex_document(
+                existing_doc['id'], file_hash, file_size, page_count, chunks
+            )
+            if os.path.exists(file_path):
+                try:
+                    os.remove(file_path)
+                except OSError as e:
+                    logger.warning(f"Failed to remove re-indexed file {stored_filename}: {e}")
+            with upload_progress_lock:
+                upload_progress[tracking_id]["status"] = "done"
+                upload_progress[tracking_id]["progress"] = 100
+                upload_progress[tracking_id]["message"] = (
+                    f"Re-indexed: +{result['added']} new, -{result['removed']} removed, "
+                    f"{result['unchanged']} unchanged chunks"
+                )
+            return
+
+        # No document with this filename — check for cross-filename hash duplicate
         if document_store.document_exists(file_hash):
-            # Clean up the uploaded file since it's a duplicate
             if os.path.exists(file_path):
                 try:
                     os.remove(file_path)
                     logger.info(f"Removed duplicate file: {stored_filename}")
                 except OSError as e:
                     logger.warning(f"Failed to remove duplicate file {stored_filename}: {e}")
-            # Mark as done without adding to store
             with upload_progress_lock:
                 upload_progress[tracking_id]["status"] = "done"
                 upload_progress[tracking_id]["progress"] = 100
-                upload_progress[tracking_id]["message"] = "Document already exists (duplicate)"
+                upload_progress[tracking_id]["message"] = "Document already exists (duplicate content)"
             return
-        
-        # Document is new, add it to the store
+
+        # Truly new document — add it
         document_store.add_document(file_hash, original_filename, file_type, file_size, page_count, chunks)
 
         with upload_progress_lock:

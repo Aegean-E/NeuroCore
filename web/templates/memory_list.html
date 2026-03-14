@@ -33,6 +33,9 @@
 
         <!-- Date & Actions -->
         <div class="col-span-3 text-right flex items-center justify-end space-x-2">
+            {% if mem.session_count and mem.session_count > 0 %}
+            <span class="text-xs text-indigo-400 font-mono" title="Recalled in {{ mem.session_count }} session(s)">{{ mem.session_count }}↩</span>
+            {% endif %}
             {% if mem.importance_boost and mem.importance_boost > 0 %}
             <span class="text-xs text-amber-400" title="Boost level">{{ mem.importance_boost }}★</span>
             {% endif %}

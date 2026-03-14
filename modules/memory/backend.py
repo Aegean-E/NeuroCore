@@ -64,8 +64,20 @@ class MemoryStore:
             con.close()
 
     def _init_db(self) -> None:
-        with self._connect() as _:
-            pass # _connect now handles initialization
+        with self._connect() as con:
+            # _connect handles base table initialization via self-healing.
+            # Also ensure the session-refs table exists for existing databases.
+            con.execute("""
+                CREATE TABLE IF NOT EXISTS memory_session_refs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    memory_id INTEGER NOT NULL,
+                    session_id TEXT NOT NULL,
+                    recalled_at INTEGER NOT NULL,
+                    score REAL DEFAULT 0.0
+                )
+            """)
+            con.execute("CREATE INDEX IF NOT EXISTS idx_msr_memory_id ON memory_session_refs(memory_id);")
+            con.execute("CREATE INDEX IF NOT EXISTS idx_msr_session_id ON memory_session_refs(session_id);")
 
     def _execute_init(self, con) -> None:
         con.execute("""
@@ -134,6 +146,18 @@ class MemoryStore:
         """)
         con.execute("CREATE INDEX IF NOT EXISTS idx_goals_status ON goals(status);")
         con.execute("CREATE INDEX IF NOT EXISTS idx_goals_priority ON goals(priority DESC);")
+
+        con.execute("""
+            CREATE TABLE IF NOT EXISTS memory_session_refs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                memory_id INTEGER NOT NULL,
+                session_id TEXT NOT NULL,
+                recalled_at INTEGER NOT NULL,
+                score REAL DEFAULT 0.0
+            )
+        """)
+        con.execute("CREATE INDEX IF NOT EXISTS idx_msr_memory_id ON memory_session_refs(memory_id);")
+        con.execute("CREATE INDEX IF NOT EXISTS idx_msr_session_id ON memory_session_refs(session_id);")
 
     def _parse_embedding(self, blob) -> Optional[np.ndarray]:
         if blob is None: return None
@@ -428,51 +452,55 @@ class MemoryStore:
             sort_field = "created_at"
         sort_dir = "DESC" if sort_dir.upper() == "DESC" else "ASC"
         
-        query = "SELECT id, subject, text, confidence, created_at, parent_id, type, source FROM memories WHERE deleted = 0 AND parent_id IS NULL"
+        query = """
+            SELECT m.id, m.subject, m.text, m.confidence, m.created_at, m.parent_id, m.type, m.source,
+                   (SELECT COUNT(DISTINCT session_id) FROM memory_session_refs WHERE memory_id = m.id) AS session_count
+            FROM memories m WHERE m.deleted = 0 AND m.parent_id IS NULL"""
         params = []
         
         if source:
-            query += " AND source = ?"
+            query += " AND m.source = ?"
             params.append(source)
-        
+
         if filter_date == "TODAY":
             start_ts = int(datetime.now().replace(hour=0, minute=0, second=0, microsecond=0).timestamp())
-            query += " AND created_at >= ?"
+            query += " AND m.created_at >= ?"
             params.append(start_ts)
         elif filter_date == "WEEK":
             start_ts = int(time.time()) - (7 * 24 * 60 * 60)
-            query += " AND created_at >= ?"
+            query += " AND m.created_at >= ?"
             params.append(start_ts)
         elif filter_date == "MONTH":
             start_ts = int(time.time()) - (30 * 24 * 60 * 60)
-            query += " AND created_at >= ?"
+            query += " AND m.created_at >= ?"
             params.append(start_ts)
-            
+
         if search_text:
-            query += " AND text LIKE ?"
+            query += " AND m.text LIKE ?"
             params.append(f"%{search_text}%")
-            
+
         if mem_type:
-            query += " AND type = ?"
+            query += " AND m.type = ?"
             params.append(mem_type)
-            
-        query += f" ORDER BY {sort_field} {sort_dir} LIMIT ? OFFSET ?"
+
+        query += f" ORDER BY m.{sort_field} {sort_dir} LIMIT ? OFFSET ?"
         params.extend([limit, offset])
-        
+
         with self._connect() as con:
             rows = con.execute(query, params).fetchall()
-            
+
         return [
             {
-                "id": r[0],
-                "subject": r[1],
-                "text": r[2],
-                "confidence": r[3],
-                "created_at": r[4],
+                "id":             r[0],
+                "subject":        r[1],
+                "text":           r[2],
+                "confidence":     r[3],
+                "created_at":     r[4],
                 "is_consolidated": r[5] is not None,
-                "type": r[6],
-                "source": r[7] if len(r) > 7 else "chat",
-                "importance_boost": 0
+                "type":           r[6],
+                "source":         r[7] if len(r) > 7 else "chat",
+                "importance_boost": 0,
+                "session_count":  r[8] if len(r) > 8 else 0,
             }
             for r in rows
         ]
@@ -569,6 +597,58 @@ class MemoryStore:
                     logger.info(f"Deleted stale FAISS index file: {index_path}")
                 except Exception as e:
                     logger.warning(f"Warning: Failed to delete FAISS index file: {e}")
+
+    def record_recall(self, memory_id: int, session_id: str, score: float = 0.0) -> None:
+        """Record that a memory was surfaced during recall in a session."""
+        with self._connect() as con:
+            con.execute(
+                "INSERT INTO memory_session_refs (memory_id, session_id, recalled_at, score) VALUES (?, ?, ?, ?)",
+                (memory_id, session_id, int(time.time()), score),
+            )
+
+    def get_memory_sessions(self, memory_id: int) -> List[Dict]:
+        """Return all sessions that recalled a specific memory, grouped by session."""
+        with self._connect() as con:
+            rows = con.execute("""
+                SELECT session_id,
+                       COUNT(*)      AS recall_count,
+                       MAX(recalled_at) AS last_recalled,
+                       AVG(score)    AS avg_score
+                FROM memory_session_refs
+                WHERE memory_id = ?
+                GROUP BY session_id
+                ORDER BY last_recalled DESC
+            """, (memory_id,)).fetchall()
+        return [
+            {
+                "session_id":    r[0],
+                "recall_count":  r[1],
+                "last_recalled": r[2],
+                "avg_score":     round(r[3], 4) if r[3] is not None else 0.0,
+            }
+            for r in rows
+        ]
+
+    def get_session_memories(self, session_id: str) -> List[Dict]:
+        """Return all memories that were recalled in a specific session."""
+        with self._connect() as con:
+            rows = con.execute("""
+                SELECT r.memory_id, m.text, m.type, r.recalled_at, r.score
+                FROM memory_session_refs r
+                JOIN memories m ON r.memory_id = m.id
+                WHERE r.session_id = ?
+                ORDER BY r.recalled_at DESC
+            """, (session_id,)).fetchall()
+        return [
+            {
+                "id":          r[0],
+                "text":        r[1],
+                "type":        r[2],
+                "recalled_at": r[3],
+                "score":       round(r[4], 4) if r[4] is not None else 0.0,
+            }
+            for r in rows
+        ]
 
     def get_memory_stats(self) -> Dict[str, Any]:
         """Returns statistics about the stored memories."""
