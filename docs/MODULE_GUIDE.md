@@ -87,6 +87,14 @@ NeuroCore's modular architecture separates concerns into three layers:
 | **Service Module** | Backend services + UI | Knowledge Base, Calendar |
 | **Bridge Module** | External integrations | Telegram Bridge |
 
+### Module Discovery & Hot-Reload Safety
+
+`ModuleManager` scans `modules/` on startup and calls `load_enabled_modules()` via the FastAPI lifespan event. Key implementation details:
+
+- **`DISABLED` file marker**: If a `DISABLED` file exists in a module directory, the module is skipped entirely during discovery.
+- **`_loaded_once` set**: Tracks which module IDs have been imported at least once. On the **first** load, `sys.modules` entries are NOT flushed — preserving any submodules already imported by tests or other code. On a **re-load** (after an explicit unload), entries are flushed so code changes are picked up.
+- **`module_allowlist`**: When non-empty in `settings.json`, only listed module IDs may be loaded. Modules not in the allowlist are skipped silently with a warning.
+
 ---
 
 ## 3. Directory Structure
@@ -130,17 +138,17 @@ The `module.json` file defines how NeuroCore loads and displays your module.
     "enabled": true,
     "id": "my_new_module",
     "icon": "M12 2L2 7l10 5 10-5-10-5z...",
-    
+
     "is_flow_node": false,
     "singleton": false,
     "order": 10,
-    
+
     "config": {
         "my_setting": "default_value",
         "api_key": "",
         "timeout": 30
     },
-    
+
     "provides_nodes": [
         {
             "id": "my_custom_node",
@@ -152,11 +160,11 @@ The `module.json` file defines how NeuroCore loads and displays your module.
                 "param1": "value1"
             }
         }
-    ],
-    
-    "load_error": null
+    ]
 }
 ```
+
+> **Note:** `load_error` is a **runtime-only** field tracked in `ModuleManager._load_errors`. It is never written to `module.json`. If you see it in an older file, remove it.
 
 ### Field Reference
 
@@ -314,14 +322,22 @@ Common keys in `input_data`:
 
 | Key | Type | Description |
 |-----|------|-------------|
-| `messages` | list | Conversation history |
-| `content` | string | Direct text content |
-| `choices` | list | LLM response format |
-| `_memory_context` | string | Injected memory context |
-| `knowledge_context` | string | Injected knowledge context |
+| `messages` | list | Conversation history — preserved across all nodes |
+| `content` | string | Final LLM response text |
+| `choices` | list | Raw LLM response format |
+| `_memory_context` | string | Injected memory context (set by Memory Recall) |
+| `_kb_context` | string | Injected knowledge base context (set by Knowledge Query) |
 | `reasoning_context` | string | Injected reasoning context |
-| `_flow_id` | string | Current flow ID (in config) |
-| `_node_id` | string | Current node ID (in config) |
+| `plan_context` | string | Formatted plan string for system prompt |
+| `_route_targets` | list | Dynamic routing targets (consumed by FlowRunner) |
+| `tool_calls` | list | LLM-requested tool invocations |
+| `tool_results` | list | Tool execution results |
+| `requires_continuation` | bool | Multi-turn tool loop flag |
+| `_input_source` | string | Origin of the input (e.g., `"chat"`) — stripped before node execution |
+| `_strip_messages` | bool | If True, prevents automatic `messages` propagation from input to output |
+| `_is_error` | bool | Marks output as a flow error (shown as error in chat UI) |
+| `_flow_id` | string | Current flow ID (in config, not input) |
+| `_node_id` | string | Current node ID (in config, not input) |
 | `_repeat_count` | int | Repeater iteration count |
 
 ---
@@ -621,11 +637,18 @@ Manages custom Python tools for AI agents.
 **Node:** `tool_dispatcher` - Executes tool calls from LLM.
 
 **Features:**
-- 23 built-in tools
+- 23 built-in tools (16 standard + 7 RLM tools)
 - Custom tool creation
 - JSON Schema parameters
 - Import/export functionality
 - Tool configuration UI
+
+**Tool Storage:**
+- `modules/tools/tools.json` — tool definitions (schemas)
+- `modules/tools/library/` — standard tool Python implementations
+- `modules/tools/rlm_library/` — RLM (Recursive Language Model) tool implementations (Peek, Search, Chunk, SubCall, SetVariable, GetVariable, SetFinal)
+
+See [TOOL_GUIDE.md](./TOOL_GUIDE.md) for complete tool documentation.
 
 ---
 
@@ -646,9 +669,16 @@ Interactive AI assistant interface.
 }
 ```
 
+- `auto_rename_turns`: Number of conversation turns before auto-renaming the session using LLM.
+- `auto_compact_tokens`: Estimated token threshold above which the session is automatically compacted (0 = disabled).
+- `compact_keep_last`: Number of recent messages to preserve verbatim during compaction.
+
 **Nodes:**
 - `chat_input` - Provides user input and history (singleton)
 - `chat_output` - Formats final response (singleton)
+
+**Session Compaction:**
+The chat module supports LLM-based session compaction (`POST /chat/sessions/{id}/compact`). Older messages are summarized into a single system message while the last `compact_keep_last` messages are kept verbatim. This reduces token consumption for long conversations. Auto-compaction triggers when `_estimate_tokens(history) > auto_compact_tokens`.
 
 ---
 

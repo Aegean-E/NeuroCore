@@ -7,20 +7,27 @@ NeuroCore uses a hybrid concurrency model with both synchronous and asynchronous
 ## Lock Types Used
 
 ### 1. threading.RLock
-Used in synchronous code paths:
-- `core/flow_manager.py` - FlowManager.lock
-- `core/module_manager.py` - ModuleManager.lock
-- `core/observability.py` - Metrics._lock
+Used in synchronous code paths (reentrant — safe for nested acquisition):
+- `core/flow_manager.py` — `FlowManager.lock`
+- `core/module_manager.py` — `ModuleManager.lock`
+- `core/settings.py` — `SettingsManager.lock`
+- `core/session_manager.py` — `SessionPersistenceManager._sync_lock`
+- `core/observability.py` — `Metrics._lock` (threading.Lock, not RLock — single-level)
 
-### 2. asyncio.Lock
-Used in asynchronous code paths:
-- `core/llm.py` - _client_lock
-- `core/flow_runner.py` - _cache_lock
-- `modules/chat/sessions.py` - _async_lock
-- `modules/reasoning_book/service.py` - _lock
+### 2. threading.Lock (non-reentrant)
+- `core/observability.py` — `Metrics._lock`
+- `core/session_manager.py` — `SessionManager._lock` (instance-level)
+- `core/session_manager.py` — `_init_lock` (module-level singleton guard)
+- `modules/chat/sessions.py` — `SessionManager._lock` (all session operations; async callers bridge via `asyncio.to_thread`)
 
-### 3. No Lock
-- `core/debug.py` - DebugLogger (explicitly not thread-safe for compound operations)
+### 3. asyncio.Lock
+Used in asynchronous code paths (must be `await`ed inside `async` functions):
+- `core/llm.py` — `_client_lock` (lazy-initialized, module-level)
+- `core/flow_runner.py` — `_cache_lock` (per event-loop: stored in dict keyed by `id(loop)`)
+- `modules/reasoning_book/service.py` — `_lock`
+
+### 4. No Lock
+- `core/debug.py` — `DebugLogger` (explicitly not thread-safe for compound operations)
 
 ## Lock Ordering Rules
 
@@ -55,12 +62,27 @@ with self.lock:
 ### Rule 4: Keep critical sections small
 Minimize the time locks are held to reduce deadlock window.
 
-## Flow Manager and Module Manager
+## Flow Manager, Module Manager, and Settings Manager
 
-Both use threading.RLock because:
+All three use `threading.RLock` because:
 1. They are accessed from synchronous FastAPI route handlers
 2. Their operations involve file I/O which is synchronous
-3. The asyncio-based FlowRunner calls them during initialization (synchronous)
+3. The asyncio-based FlowRunner accesses them during initialization (synchronous)
+
+## FlowRunner Cache Lock (`_cache_lock`)
+
+The FlowRunner's `_cache_lock` is a per-event-loop `asyncio.Lock`. Because multiple event loops can exist during testing, the lock is stored in a dict keyed by `id(loop)` rather than as a single instance. When a new event loop is detected, a fresh lock is created for it. This avoids "attached to a different loop" errors across test runs.
+
+## ModuleManager Hot-Reload Safety (`_loaded_once`)
+
+`ModuleManager` tracks which module IDs have been imported using the `_loaded_once` set. On first load, it does **not** flush `sys.modules` entries for the module — this is critical in test environments where submodules (e.g., `modules.tools.sandbox`) may have already been imported. On subsequent reloads (after an explicit unload), it flushes `sys.modules` to pick up code changes. Never clear `_loaded_once` directly; use `_unload_module_router` followed by `_load_module_router` for proper hot-swapping.
+
+## Session Manager Locks
+
+`core/session_manager.py` has two distinct lock scopes:
+- `_lock` (`threading.Lock`) — protects the in-memory `SessionManager` state per instance
+- `_sync_lock` (`threading.RLock`) — protects `SessionPersistenceManager` file operations
+- `_init_lock` (`threading.Lock`) — module-level singleton guard for `get_session_manager()`
 
 ## Best Practices
 
@@ -68,16 +90,19 @@ Both use threading.RLock because:
 2. **Use RLock** instead of Lock when the same thread might acquire the lock multiple times
 3. **Add timeout** to lock acquisitions when possible (use `Lock(timeout=...)` if available)
 4. **Log warnings** when operations take longer than 1 second (potential lock contention)
+5. **Never `await` while holding a `threading.Lock`** — the lock is not released during the await, blocking other threads
 
 ## Testing for Deadlocks
 
 Run the concurrency stress tests:
 ```bash
 pytest tests/test_core_concurrency.py -v
+pytest tests/test_core_robustness.py -v
 ```
 
 These tests verify:
 - Multiple threads can access FlowManager concurrently
 - Multiple coroutines can access async locks
+- FlowRunner input isolation (source nodes receive independent copies)
 - No deadlocks occur under load
 

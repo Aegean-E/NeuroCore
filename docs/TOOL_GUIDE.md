@@ -56,16 +56,18 @@ A **Tool** is a bridge between your AI agent and the external world. It consists
 
 The Tool Library is built on these core components:
 
-- **🔧 Tool Definitions** (`tools.json`): Stores tool metadata and JSON schemas
-- **📁 Library Directory** (`library/`): Contains Python implementation files
+- **🔧 Tool Definitions** (`modules/tools/tools.json`): Stores tool metadata and JSON schemas
+- **📁 Library Directory** (`modules/tools/library/`): Contains standard Python implementation files
+- **🧠 RLM Library** (`modules/tools/rlm_library/`): Contains Recursive Language Model tool implementations
 - **⚡ Tool Dispatcher Node**: Executes tool calls within AI Flows
 - **🎯 System Prompt Integration**: Injects available tools into LLM context
+- **🔒 Sandbox** (`modules/tools/sandbox.py`): Restricted execution environment for all tool code
 
 ---
 
 ## 3. Built-in Tools Reference
 
-NeuroCore comes with **23 powerful built-in tools** ready to use:
+NeuroCore comes with **23 built-in tools**: 16 standard tools in `library/` and 7 RLM tools in `rlm_library/`.
 
 ### 🌤️ Information & Utilities
 
@@ -108,8 +110,8 @@ NeuroCore comes with **23 powerful built-in tools** ready to use:
 | **MarkGoalComplete** | Mark goals as completed | `goal_id` (number) |
 | **DeleteGoal** | Remove goals from system | `goal_id` (number) |
 
-### 🧠 RLM (Recursive Language Model) Tools
-Used for processing long inputs by breaking them into manageable chunks.
+### 🧠 RLM Tools (`rlm_library/`)
+Used by agents for memory manipulation, variable storage, and recursive sub-calls when processing long or complex inputs.
 
 | Tool | Description | Key Parameters |
 |------|-------------|----------------|
@@ -608,6 +610,22 @@ Control tool execution with `max_tools_per_turn`:
 - Prevents runaway tool loops
 - Remaining tools are queued for next turn
 - Tracked via `_tool_count` and `_remaining_tool_calls`
+
+### Sandbox Security Layers
+
+All tool code (standard and custom) executes in `modules/tools/sandbox.py` with these protections:
+
+| Layer | Mechanism |
+|-------|-----------|
+| Static Analysis | Regex scanning for dangerous patterns before execution |
+| Import Restrictions | `RestrictedImport` blocks `os`, `sys`, `subprocess`, `socket`, `shutil`, `importlib`, `pickle`, `ctypes`, `mmap`, `multiprocessing`, `pathlib`, and 10+ more |
+| Restricted Builtins | Removes `eval`, `exec`, `open`, `__import__`, `compile`, `globals`, `locals` |
+| File Access Control | `SafeOpen` with optional directory whitelist |
+| Network Restrictions | `SafeHttpxClient` with domain whitelist |
+| SSRF Protection | Blocks requests to private IP ranges (127.x, 10.x, 192.168.x, 172.16–31.x) |
+| Resource Limits | Configurable timeout (default 30s), max output size (100 KB) |
+
+Security errors raise `SandboxSecurityError` from `core/errors.py`.
 
 ---
 

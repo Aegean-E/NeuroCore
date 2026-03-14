@@ -41,7 +41,7 @@
 Built on the principles of **Speed**, **Simplicity**, and **Modularity**, NeuroCore delivers a solid foundation for building custom AI-powered applications with a fast, modern web stack and a powerful visual workflow editor.
 
 <p align="center">
-  <b>70+ Python files &nbsp;•&nbsp; 32 HTML templates &nbsp;•&nbsp; 66 tests &nbsp;•&nbsp; 16 modules &nbsp;•&nbsp; 16 built-in tools &nbsp;•&nbsp; 37+ API routes</b>
+  <b>165 Python files &nbsp;•&nbsp; 33 HTML templates &nbsp;•&nbsp; 926 tests &nbsp;•&nbsp; 16 modules &nbsp;•&nbsp; 23 built-in tools &nbsp;•&nbsp; 40+ API routes</b>
 </p>
 
 
@@ -130,16 +130,20 @@ At its heart, NeuroCore is a **flow-based execution engine** that treats AI work
 ├──────────────────────────────────────────────────────────────┤
 │           ⚙️  Core Layer                                     │
 │   main.py          → FastAPI app + lifespan manager          │
-│   core/routers.py  → All HTTP routes (37+ endpoints)         │
+│   core/routers.py  → All HTTP routes (40+ endpoints)         │
 │   core/observability.py → Distributed tracing + metrics      │
-│   core/session_manager.py → Session persistence + tracing     │
+│   core/session_manager.py → Session + EpisodeState persist.  │
 │   core/structured_output.py → Pydantic schema enforcement    │
-│   core/flow_runner.py  → DAG execution engine (Kahn's algo)  │
+│   core/flow_runner.py  → DAG engine (Kahn's, timeout, eps.)  │
 │   core/flow_manager.py → Flow CRUD (ai_flows.json)           │
 │   core/module_manager.py → Dynamic hot-swap module loader    │
 │   core/llm.py      → OpenAI-compatible HTTP client           │
 │   core/settings.py → Thread-safe settings manager            │
 │   core/debug.py    → Structured debug logging system         │
+│   core/errors.py   → Typed exception hierarchy               │
+│   core/planner_helpers.py → Plan dependency graphs           │
+│   core/flow_data.py → FlowData TypedDict + helpers           │
+│   core/flow_context.py → FlowContext Pydantic model          │
 ├──────────────────────────────────────────────────────────────┤
 │           🔌 Module Layer                                    │
 │   modules/<name>/                                            │
@@ -151,6 +155,8 @@ At its heart, NeuroCore is a **flow-based execution engine** that treats AI work
 │           💾 Data Layer                                      │
 │   data/memory.sqlite3 + memory.faiss  → Long-term memory     │
 │   data/knowledge_base.sqlite3 + .faiss→ RAG documents        │
+│   data/execution_trace.jsonl  → Node execution traces        │
+│   data/episodes/   → EpisodeState (long-running tasks)       │
 │   settings.json    → Runtime configuration                   │
 │   ai_flows.json    → Saved flow definitions                  │
 │   chat_sessions.json → Chat session history                  │
@@ -200,6 +206,7 @@ A clean, modern chat interface for direct interaction with your configured AI fl
 - **Multimodal Support** — Upload images to interact with vision-capable models
 - **Session Management** — Create, rename, and delete chat sessions
 - **Auto-Renaming** — Sessions automatically titled based on conversation context
+- **Session Compaction** — LLM summarizes old messages to reduce token usage; keeps last N messages verbatim. Triggered manually (`POST /chat/sessions/{id}/compact`) or automatically when token count exceeds a configured threshold.
 
 ### 📚 Long-Term Memory
 **FAISS + SQLite with LLM-powered filtering — not your average RAG.**
@@ -349,12 +356,12 @@ Every tool executes in an isolated sandbox with multiple defense layers:
 - **Static Analysis** — Pre-execution code scanning for dangerous patterns
 
 
-#### Built-in Tools (16 Total)
+#### Built-in Tools (23 Total)
 
 **🧮 Calculations & Conversions**
 | Tool | Description |
 |------|-------------|
-| **Calculator** | Evaluates mathematical expressions |
+| **Calculator** | Evaluates mathematical expressions (AST-based, no `eval`) |
 | **ConversionCalculator** | Converts units (temperature, length, weight, volume) |
 | **CurrencyConverter** | Real-time currency conversion (Frankfurter API) |
 | **TimeZoneConverter** | Timezone conversions (IANA format) |
@@ -364,7 +371,7 @@ Every tool executes in an isolated sandbox with multiple defense layers:
 | Tool | Description |
 |------|-------------|
 | **Weather** | Current weather for any location |
-| **FetchURL** | Extracts text content from URLs |
+| **FetchURL** | Extracts text content from URLs (with SSRF protection) |
 | **WikipediaLookup** | Searches Wikipedia articles |
 | **ArXivSearch** | Searches academic papers |
 | **YouTubeTranscript** | Fetches YouTube video transcripts |
@@ -381,7 +388,18 @@ Every tool executes in an isolated sandbox with multiple defense layers:
 **📧 Communication**
 | Tool | Description |
 |------|-------------|
-| **SendEmail** | Sends emails via SMTP |
+| **SendEmail** | Sends emails via SMTP (TLS verified) |
+
+**🧠 RLM Tools** *(Recursive Language Model — for complex long-context reasoning)*
+| Tool | Description |
+|------|-------------|
+| **Peek** | View a slice of the current prompt by character position |
+| **Search** | Find regex matches in the prompt |
+| **Chunk** | Split prompt into manageable chunks |
+| **SubCall** | Recursively call an LLM with a sub-prompt |
+| **SetVariable** | Store intermediate results |
+| **GetVariable** | Retrieve stored results |
+| **SetFinal** | Set final answer and terminate processing |
 
 
 ### 📱 Telegram Integration
@@ -465,12 +483,15 @@ async def send(self, processed_data: dict) -> dict:
 | **Bridge Nodes** | BFS component grouping | Implicit parallel connections for synchronized execution |
 | **Conditional Routing** | `_route_targets` key | Dynamic branching based on runtime conditions |
 | **Context Propagation** | `messages` key preservation | Maintains conversation history across all nodes |
-| **Loop Guard** | `max_node_loops` counter | Prevents infinite loops (default: 1,000 iterations) |
-| **Executor Cache** | Class-level `_executor_cache` | Avoids re-importing modules on every execution |
-| **Dynamic Import** | `importlib` + `reload()` | Hot code updates without server restart |
+| **Loop Guard** | `max_node_loops` counter | Prevents infinite loops (default: 100, max 1,000) |
+| **Executor Cache** | Class-level `_executor_cache` (FIFO, max 100) | Avoids re-importing modules on every execution |
+| **Dynamic Import** | `importlib` + `reload()` (debug mode only) | Hot code updates without server restart |
 | **Background Tasks** | `asyncio.create_task()` | Non-blocking operations (memory save, consolidation) |
 | **Auto-Start** | Lifespan event handler | Repeater nodes start automatically on app launch |
 | **Bridge Execution** | Upstream-to-downstream ordering | Ensures bridged nodes execute in correct sequence |
+| **Execution Timeout** | `asyncio.wait_for` | Per-flow timeout via `run(timeout=...)` |
+| **Episode Persistence** | `EpisodeState` + `data/episodes/` | Resume long-running agent tasks across invocations |
+| **Input Isolation** | Shallow-copy for source nodes, deep-copy of `messages` | Prevents cross-node state mutation |
 
 ### Bridge Nodes: Advanced Parallel Execution
 
@@ -692,15 +713,26 @@ The application uses `settings.json`. On first run, it will be created with defa
     "embedding_model": "",
     "temperature": 0.7,
     "max_tokens": 2048,
-    "debug_mode": true,
+    "debug_mode": false,
     "request_timeout": 60.0,
-    "max_node_loops": 1000
+    "max_node_loops": 100,
+    "module_allowlist": [],
+    "ui_wide_mode": false,
+    "ui_show_footer": true
 }
 ```
+
+- `module_allowlist` — restrict which modules can be hot-loaded (empty = allow all)
+- `ui_wide_mode` — use a wider layout in the web UI
+- `debug_mode` — enables per-node execution tracing and reloads node modules on every call
 
 ### Running
 
 ```bash
+# Windows
+py main.py
+
+# macOS/Linux
 python main.py
 ```
 
@@ -731,18 +763,22 @@ Access at `http://localhost:8000`
 
 ```
 NeuroCore/
-├── core/                       # Core application logic
+├── core/                       # Core application logic (15 files)
 │   ├── dependencies.py         # FastAPI dependency injection
-│   ├── debug.py                # Debug logging system
+│   ├── debug.py                # Structured debug logging
+│   ├── errors.py               # Typed exception hierarchy
+│   ├── flow_context.py         # FlowContext Pydantic model
+│   ├── flow_data.py            # FlowData TypedDict + helpers
 │   ├── flow_manager.py         # AI Flow CRUD operations
-│   ├── flow_runner.py          # Flow execution engine (DAG)
+│   ├── flow_runner.py          # DAG execution engine (timeout, episodes)
 │   ├── llm.py                  # LLM API client (OpenAI-compatible)
 │   ├── module_manager.py       # Dynamic module loading & hot-swap
-│   ├── routers.py              # Main API routes (37+ endpoints)
+│   ├── planner_helpers.py      # Plan dependency graphs & cycle detection
+│   ├── routers.py              # Main API routes (40+ endpoints)
+│   ├── session_manager.py      # Session persistence + EpisodeState
 │   ├── settings.py             # Thread-safe settings manager
-│   ├── observability.py         # Distributed tracing + metrics
-│   ├── session_manager.py      # Session persistence + tracing
-│   └── structured_output.py     # Pydantic schema enforcement
+│   ├── observability.py        # Distributed tracing + metrics
+│   └── structured_output.py    # Pydantic schema enforcement
 ├── modules/                    # Self-contained feature modules (16)
 │   ├── agent_loop/             # Agent loop node
 │   ├── annotations/            # Flow annotation nodes
@@ -760,11 +796,20 @@ NeuroCore/
 │   ├── system_prompt/          # System prompt injection
 │   ├── telegram/               # Telegram bot integration
 │   └── tools/                  # Tool library and dispatcher
-│       └── library/            # Built-in tool Python files (16)
-├── tests/                      # Comprehensive test suite (66 files)
+│       ├── library/            # 16 standard built-in tool files
+│       └── rlm_library/        # 7 RLM tool files
+├── tests/                      # Comprehensive test suite (67 files, 926 tests)
 ├── web/
-│   └── templates/              # Jinja2 HTML templates (32)
-├── data/                       # Persistent data (SQLite + FAISS indexes)
+│   └── templates/              # Jinja2 HTML templates (33)
+├── data/                       # Persistent data (SQLite + FAISS + traces)
+│   ├── memory.sqlite3          # Long-term memory DB
+│   ├── memory.faiss            # Long-term memory vector index
+│   ├── knowledge_base.sqlite3  # RAG document DB (FTS5)
+│   ├── knowledge_base.faiss    # RAG vector index
+│   ├── reasoning_book.json     # Reasoning journal
+│   ├── execution_trace.jsonl   # Per-node execution traces (debug)
+│   ├── session.json            # Session persistence
+│   └── episodes/               # EpisodeState for long-running tasks
 ├── screenshots/                # UI screenshots
 ├── docs/                       # Documentation
 ├── main.py                     # FastAPI application entry point
@@ -785,24 +830,25 @@ NeuroCore exposes a comprehensive REST API:
 | Group | Key Endpoints |
 |-------|--------------|
 | **Dashboard** | `GET /` · `GET /dashboard/gui` · `GET /dashboard/stats` · `GET /dashboard/recent-sessions` |
-| **Modules** | `GET /modules/list` · `GET /modules/{id}/details` · `POST /modules/{id}/config` · `POST /modules/{id}/enable` · `POST /modules/{id}/disable` · `POST /modules/reorder` |
-| **AI Flow** | `GET /ai-flow` · `POST /ai-flow/save` · `GET /ai-flow/{id}` · `GET /ai-flow/{id}/validate` · `POST /ai-flow/{id}/set-active` · `POST /ai-flow/{id}/run-node/{node_id}` · `POST /ai-flow/{id}/delete` |
-| **Settings** | `GET /settings` · `POST /settings/save` · `POST /settings/reset` · `GET /settings/export/config` · `POST /settings/import/config` · `GET /settings/export/flows` · `POST /settings/import/flows` |
-| **Debug** | `GET /debug` · `GET /debug/logs` · `GET /debug/events` · `POST /debug/clear` |
+| **Modules** | `GET /modules/list` · `GET /modules/{id}/details` · `GET /modules/{id}/default-config` · `GET /modules/{id}/default-prompt` · `POST /modules/{id}/config` · `POST /modules/{id}/{action}` · `POST /modules/reorder` |
+| **AI Flow** | `GET /ai-flow` · `POST /ai-flow/save` · `GET /ai-flow/{id}` · `GET /ai-flow/{id}/validate` · `POST /ai-flow/{id}/rename` · `POST /ai-flow/{id}/set-active` · `POST /ai-flow/stop-active` · `POST /ai-flow/make-default` · `POST /ai-flow/{id}/run-node/{node_id}` · `POST /ai-flow/{id}/delete` |
+| **Settings** | `GET /settings` · `POST /settings/save` · `POST /settings/reset` · `GET /settings/export/config` · `POST /settings/import/config` · `GET /settings/export/flows` · `POST /settings/import/flows` · `GET /settings/modules-nav` |
+| **Debug** | `GET /debug` · `GET /debug/logs` · `GET /debug/events` · `GET /debug/summary` · `GET /debug/agent-summary` · `POST /debug/clear` |
+| **Goals** | `GET /goals` |
 | **System** | `GET /llm-status` · `GET /navbar` · `GET /footer` · `GET /system-time` |
 
 ---
 
 ## 🧪 Testing
 
-Comprehensive test suite with **50+ test files** and **500+ individual tests** covering all layers:
+Comprehensive test suite with **67 test files** and **926 individual tests** covering all layers:
 
 ```bash
 # Run all tests
-python tests/run_tests.py
+py tests/run_tests.py
 
 # Run with coverage
-python tests/run_tests.py --coverage
+py tests/run_tests.py --coverage
 
 # Run specific test file
 pytest tests/test_tool_sandbox.py -v
@@ -810,6 +856,8 @@ pytest tests/test_tool_sandbox.py -v
 # Run with markers
 pytest -m "not slow"  # Skip slow integration tests
 ```
+
+`asyncio_mode = "auto"` is set globally in `pyproject.toml` — no `@pytest.mark.asyncio` needed. E2E tests require a live server; set `NEUROCORE_RUN_E2E=1` to enable them.
 
 ### Test Philosophy
 
@@ -822,16 +870,17 @@ NeuroCore follows **test-driven development** principles:
 
 | Area | Test Files | Test Count |
 |------|-----------|------------|
-| **Core Engine** | `test_flow_runner.py`, `test_flow_manager.py`, `test_flow_integration.py`, `test_flow_validation.py` | 40+ |
+| **Core Engine** | `test_flow_runner.py`, `test_flow_manager.py`, `test_flow_integration.py`, `test_flow_validation.py`, `test_core_flow_manager.py` | 40+ |
 | **Module System** | `test_module_manager.py`, `test_dependencies.py` | 20+ |
 | **Memory** | `test_memory_nodes.py`, `test_memory_arbiter.py`, `test_memory_consolidation.py`, `test_memory_router.py`, `test_memory_browser.py` | 50+ |
 | **Knowledge Base** | `test_knowledge_base.py`, `test_knowledge_base_improvements.py` | 30+ |
 | **Chat** | `test_chat_module.py`, `test_chat_sessions.py`, `test_chat_features.py`, `test_chat_router_flow.py` | 40+ |
-| **Tools** | `test_tools_library.py`, `test_tools_node.py`, `test_tool_sandbox.py` | 90+ |
+| **Tools** | `test_tools_library.py`, `test_tools_node.py`, `test_tool_sandbox.py`, `test_sandbox_security.py` | 90+ |
 | **LLM** | `test_core_llm.py`, `test_llm_node.py` | 25+ |
-| **Security** | `test_tool_sandbox.py` | 24 |
+| **Security** | `test_tool_sandbox.py`, `test_sandbox_security.py` | 24+ |
 | **Robustness** | `test_core_concurrency.py`, `test_core_robustness.py`, `test_core_improvements.py` | 30+ |
-| **Integrations** | `test_telegram_module.py`, `test_calendar.py`, `test_reasoning_book.py` | 35+ |
+| **Integrations** | `test_telegram_module.py`, `test_calendar.py`, `test_reasoning_book.py`, `test_calendar_events.py`, `test_calendar_node.py` | 35+ |
+| **E2E** | `test_e2e.py` | 7 (requires `NEUROCORE_RUN_E2E=1`) |
 
 ### Security Testing
 

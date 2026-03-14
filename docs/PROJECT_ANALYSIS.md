@@ -105,52 +105,67 @@ NeuroCore is a **modular, extensible AI orchestration platform** built with Pyth
 
 ```
 NeuroCore/
-├── main.py                    # FastAPI app entry point
-├── core/                      # Core framework
-│   ├── flow_runner.py        # DAG execution engine
-│   ├── flow_manager.py       # Flow CRUD operations
-│   ├── module_manager.py     # Dynamic module loading
-│   ├── llm.py                # LLM API client
-│   ├── settings.py           # Configuration management
-│   ├── observability.py      # Tracing, metrics, logging
-│   ├── structured_output.py  # Pydantic schema enforcement
-│   ├── debug.py              # Debug logging
-│   ├── routers.py            # HTTP endpoints
-│   ├── dependencies.py       # Dependency injection
-│   ├── errors.py             # Error definitions
-│   ├── flow_data.py          # Data structures
-│   ├── flow_context.py       # Execution context
-│   └── schemas/              # Domain models
-│       ├── hypothesis.py     # Scientific hypothesis
-│       ├── article.py        # Academic article
-│       ├── finding.py        # Research finding
-│       └── study_design.py   # Study design
+├── main.py                    # FastAPI app entry point, lifespan management
+├── core/                      # Core framework (15 files, ~36K LOC total project)
+│   ├── flow_runner.py        # DAG execution engine (Kahn's sort, bridge groups, episode support)
+│   ├── flow_manager.py       # Flow CRUD operations (JSON persistence)
+│   ├── module_manager.py     # Dynamic module loading (_loaded_once, allowlist)
+│   ├── llm.py                # LLM API client (OpenAI-compatible, async)
+│   ├── settings.py           # Thread-safe config (RLock, atomic write)
+│   ├── observability.py      # Tracing, metrics, structured JSON logging
+│   ├── structured_output.py  # Pydantic schema enforcement (retry logic)
+│   ├── session_manager.py    # Chat session + EpisodeState persistence
+│   ├── debug.py              # Structured debug logging
+│   ├── routers.py            # 40+ HTTP endpoints
+│   ├── dependencies.py       # FastAPI dependency injection (LLMBridge)
+│   ├── errors.py             # Typed exception hierarchy
+│   ├── flow_data.py          # FlowData TypedDict + helper functions
+│   ├── flow_context.py       # FlowContext Pydantic model
+│   ├── planner_helpers.py    # PlanHelper: dependency graphs, cycle detection
+│   └── schemas/              # Domain models for scientific research
+│       ├── hypothesis.py
+│       ├── article.py
+│       ├── finding.py
+│       └── study_design.py
 ├── modules/                  # Extensible modules (16 total)
 │   ├── llm_module/          # Core LLM integration
-│   ├── system_prompt/       # Context injection
-│   ├── memory/              # Vector + SQLite memory
+│   ├── system_prompt/       # Context injection (memory, KB, reasoning, plan, skills)
+│   ├── memory/              # Vector + SQLite memory (FAISS + arbiter + consolidation)
 │   ├── tools/               # Sandbox execution
-│   ├── chat/                # I/O handling
-│   ├── logic/               # Control flow nodes
-│   ├── planner/             # Planning
-│   ├── reflection/          # Quality assurance
-│   ├── knowledge_base/      # RAG system
+│   │   ├── library/         # 16 standard built-in tool files
+│   │   └── rlm_library/     # 7 RLM tool files
+│   ├── chat/                # Chat I/O + session management + compaction
+│   ├── logic/               # Control flow nodes (Delay, Repeater, Conditional, etc.)
+│   ├── planner/             # Planning nodes
+│   ├── reflection/          # Quality assurance node
+│   ├── knowledge_base/      # RAG system (hybrid search, FTS5 + FAISS)
 │   ├── reasoning_book/      # Thought logging
-│   ├── skills/              # Prompt templates
+│   ├── skills/              # Instruction file management
 │   ├── calendar/            # Event management
-│   ├── telegram/            # Telegram bridge
-│   ├── memory_browser/      # Memory UI
-│   ├── annotations/         # Documentation
-│   └── agent_loop/          # Autonomous execution
-├── web/                     # Frontend assets
-│   ├── static/             # CSS, JS
-│   └── templates/          # Jinja2 templates
-├── data/                   # Runtime data
-│   ├── memory.faiss        # Vector index
-│   ├── memory.sqlite3      # Relational store
-│   └── reasoning_book.json # Thought logs
-├── tests/                  # Test suite (70+ files)
-└── docs/                   # Documentation
+│   ├── telegram/            # Telegram bot bridge
+│   ├── memory_browser/      # Memory management UI
+│   ├── annotations/         # Flow documentation nodes
+│   └── agent_loop/          # Autonomous execution loop
+├── web/
+│   └── templates/           # 33 Jinja2 HTML templates
+├── data/                    # Runtime data (mutable, excluded from reloader)
+│   ├── memory.faiss         # Long-term memory vector index
+│   ├── memory.sqlite3       # Long-term memory relational store
+│   ├── knowledge_base.faiss # RAG vector index
+│   ├── knowledge_base.sqlite3 # RAG relational store
+│   ├── reasoning_book.json  # Thought log
+│   ├── execution_trace.jsonl # Per-node execution trace (debug)
+│   ├── session.json         # Session persistence
+│   └── episodes/            # EpisodeState JSON files (long-running tasks)
+├── tests/                   # 67 test files, 926 tests
+├── docs/                    # Documentation
+├── chat_sessions.json       # Chat session history
+├── ai_flows.json            # Saved flow definitions
+├── settings.json            # Runtime configuration
+├── pyproject.toml           # Project metadata, pytest config, ruff rules
+├── requirements.txt         # Runtime dependencies
+├── Dockerfile
+└── docker-compose.yml
 ```
 
 ---
@@ -169,17 +184,35 @@ NeuroCore/
 - **Debug Logging**: Per-node execution tracing
 - **Automatic Context Propagation**: Preserves conversation history
 
+**`run()` Signature**:
+```python
+async def run(
+    self,
+    initial_input: dict,
+    start_node_id: str = None,
+    timeout: float = None,
+    raise_errors: bool = False,
+    episode_id: str = None,
+) -> dict
+```
+- `timeout`: wraps execution in `asyncio.wait_for`; returns `{"error": "timeout"}` on expiry
+- `raise_errors`: if True, re-raises node exceptions instead of returning error dicts
+- `episode_id`: restores `EpisodeState` (plan, current_step, completed_steps) from `data/episodes/` before execution
+
 **Execution Flow**:
 ```python
-1. Load flow definition (nodes, connections, bridges)
-2. Build bridge groups using BFS (connected components)
-3. Compute topological execution order (Kahn's algorithm)
-4. For each node in order:
-   a. Collect input from upstream nodes
+1. [Optional] Load EpisodeState from data/episodes/ and inject into initial_input
+2. Load flow definition (nodes, connections, bridges)
+3. Build bridge groups using BFS (connected components)
+4. Compute topological execution order (Kahn's algorithm)
+5. For each node in order:
+   a. Collect input from upstream nodes (or initial_input for source nodes)
    b. Merge bridge group data
-   c. Execute node.receive()
-   d. Store output for downstream nodes
-5. Return final output
+   c. Deep-copy messages list to prevent cross-node mutation
+   d. Execute node.receive() → node.send()
+   e. Auto-propagate `messages` key if output omits it
+   f. Store output for downstream nodes
+6. Return final output dict
 ```
 
 **Bridge System**:
@@ -196,9 +229,13 @@ NeuroCore/
 **Key Features**:
 - **Hot-Swapping**: Enable/disable modules without restart
 - **Auto-Discovery**: Scans `modules/` directory
-- **Router Injection**: Dynamically adds FastAPI routes
+- **Router Injection**: Dynamically adds FastAPI routes via `app.include_router()`
 - **Ordering**: Configurable module sort order
-- **Dependency Tracking**: Clears caches on module changes
+- **Dependency Tracking**: Clears FlowRunner cache on module changes
+- **`_loaded_once` Set**: Prevents accidental `sys.modules` flush on first import (critical for test isolation)
+- **`DISABLED` Marker**: `DISABLED` file in module dir skips discovery entirely
+- **`module_allowlist`**: Runtime security control from `settings.json`
+- **`load_error` Isolation**: Load errors stored in `_load_errors` dict only — never written to `module.json`
 
 **Module States**:
 ```
@@ -232,6 +269,22 @@ DISABLED (file marker) → DISCOVERED → ENABLED → LOADED → ACTIVE
 - **Tool Support**: Function calling format
 - **Configurable**: Model, temperature, max_tokens
 - **Shared Client**: Connection pooling for efficiency
+
+### 2.4b EpisodeState (`core/session_manager.py`)
+
+**Purpose**: Persist long-running agent task state across flow executions
+
+**Key Fields**:
+- `episode_id` — unique identifier
+- `plan` — list of steps
+- `current_step` — current step index
+- `completed_steps` — set of completed step indices
+- `phase` — lifecycle phase (`PHASE_PLANNING`, `PHASE_EXECUTING`, `PHASE_REPLANNING`, `PHASE_COMPLETED`, `PHASE_FAILED`, `PHASE_PAUSED`)
+- `max_context_tokens` — token budget for context window
+
+**Storage**: `data/episodes/{episode_id}.json`
+
+When `FlowRunner.run(episode_id=...)` is called, the episode is loaded and its state injected into `initial_input` before execution begins. After execution, the phase is updated.
 
 ### 2.5 Observability (`core/observability.py`)
 
@@ -274,6 +327,32 @@ async def structured_completion(
     timeout: float = 60.0
 ) -> BaseModel
 ```
+
+### 2.6b FlowData and FlowContext
+
+**`core/flow_data.py`** — `FlowData` TypedDict with typed helper functions:
+```python
+messages = get_messages(data)         # Returns list, never None
+plan     = get_plan(data)             # Returns list
+data     = set_plan(data, steps)      # Type-safe setter
+```
+
+**`core/flow_context.py`** — `FlowContext` Pydantic model for runtime-validated payloads:
+```python
+ctx = FlowContext(messages=[...], plan_needed=True)
+ctx.messages.append({"role": "assistant", "content": "hi"})
+```
+
+Both are optional — existing nodes using plain `dict` continue to work.
+
+### 2.6c PlanHelper (`core/planner_helpers.py`)
+
+Consolidates plan dependency logic previously scattered across `PlannerExecutor` and `PlanStepTracker`:
+- `build_dependency_graph(plan)` — produces adjacency list + reverse map from step `dependencies` fields
+- `detect_circular_dependencies(plan)` — returns `(bool, cycle_path_or_None)`
+- `get_executable_steps(plan, completed_steps)` — returns step indices whose dependencies are all satisfied
+- `generate_plan_context(plan, current_step, completed_steps)` — formats a human-readable plan string for system prompt injection
+- `validate_dependencies(plan)` — validates all dependency indices are in range
 
 ### 2.7 Scientific Schemas (`core/schemas/`)
 
@@ -526,10 +605,10 @@ Conditional Router checks for more tools
 - `chat_output`: Formats final response
 
 **Features**:
-- Session management
-- Message history
-- Auto-renaming
-- Token compaction
+- Session management (create, rename, delete)
+- Message history with token estimation
+- Auto-renaming (LLM-generated title after N turns)
+- **Session Compaction**: LLM summarizes older messages when token count exceeds `auto_compact_tokens`; preserves last `compact_keep_last` messages verbatim. Available as `POST /chat/sessions/{id}/compact` and triggered automatically on send.
 
 ### 3.8 Telegram Bridge (`modules/telegram/`)
 
@@ -671,14 +750,16 @@ Conditional Router checks for more tools
 
 | Category | Count | Key Files |
 |----------|-------|-----------|
-| Core | 20+ | `test_core_*.py` |
-| Memory | 8 | `test_memory_*.py` |
-| Tools | 5 | `test_tool_*.py`, `test_tools_*.py` |
-| Chat | 6 | `test_chat_*.py` |
-| Integrations | 7 | `test_telegram*.py`, `test_calendar*.py` |
-| Security | 3 | `test_tool_sandbox.py`, `test_sandbox_security.py` |
-| E2E | 1 | `test_e2e.py` |
-| **Total** | **70+** | |
+| Core | 20+ | `test_core_*.py`, `test_flow_runner.py`, `test_flow_manager.py`, `test_flow_integration.py` |
+| Memory | 8+ | `test_memory_*.py` |
+| Tools | 5+ | `test_tool_*.py`, `test_tools_*.py` |
+| Chat | 6+ | `test_chat_module.py`, `test_chat_sessions.py`, `test_chat_features.py`, `test_chat_router_flow.py` |
+| Integrations | 7+ | `test_telegram*.py`, `test_calendar*.py`, `test_reasoning_book.py` |
+| Security | 3+ | `test_tool_sandbox.py`, `test_sandbox_security.py` |
+| E2E | 1 | `test_e2e.py` (requires live server, skipped in CI) |
+| **Total** | **926 tests / 67 files** | |
+
+`asyncio_mode = "auto"` is set in `pyproject.toml` — no need for `@pytest.mark.asyncio` decorators. The `conftest.py` auto-backs up `module.json` files during tests to prevent state pollution.
 
 ### 6.2 Testing Patterns
 
@@ -728,19 +809,20 @@ Input data (runtime)
 
 ```python
 DEFAULT_SETTINGS = {
-    "llm_api_url": "http://localhost:1234/v1",
-    "llm_api_key": "",
+    "llm_api_url":       "http://localhost:1234/v1",
+    "llm_api_key":       "",
     "embedding_api_url": "",
-    "default_model": "local-model",
-    "embedding_model": "",
-    "active_ai_flows": [],
-    "temperature": 0.7,
-    "max_tokens": 2048,
-    "debug_mode": False,
-    "ui_wide_mode": False,
-    "ui_show_footer": True,
-    "request_timeout": 60.0,
-    "max_node_loops": 100
+    "default_model":     "local-model",
+    "embedding_model":   "",
+    "active_ai_flows":   [],
+    "temperature":       0.7,
+    "max_tokens":        2048,
+    "debug_mode":        False,
+    "ui_wide_mode":      False,   # Wide layout for the web UI
+    "ui_show_footer":    True,    # Show/hide footer in web UI
+    "request_timeout":   60.0,
+    "max_node_loops":    100,
+    "module_allowlist":  [],      # Empty = allow all; non-empty = restrict hot-loading
 }
 ```
 
@@ -750,11 +832,17 @@ DEFAULT_SETTINGS = {
 |------|---------|
 | `settings.json` | Global application settings |
 | `ai_flows.json` | Flow definitions |
+| `chat_sessions.json` | Chat session history |
 | `modules/*/module.json` | Module metadata & config |
 | `modules/tools/tools.json` | Tool definitions |
-| `data/memory.sqlite3` | Memory database |
-| `data/memory.faiss` | Vector index |
-| `data/reasoning_book.json` | Reasoning logs |
+| `data/memory.sqlite3` | Long-term memory relational store |
+| `data/memory.faiss` | Long-term memory vector index |
+| `data/knowledge_base.sqlite3` | RAG document relational store (FTS5) |
+| `data/knowledge_base.faiss` | RAG document vector index |
+| `data/reasoning_book.json` | Reasoning journal logs |
+| `data/execution_trace.jsonl` | Per-node execution traces (debug) |
+| `data/session.json` | Session persistence data |
+| `data/episodes/` | EpisodeState JSON files for long-running tasks |
 
 ---
 
@@ -762,17 +850,22 @@ DEFAULT_SETTINGS = {
 
 ### 8.1 Lock Types
 
-| Lock Type | Usage |
-|-----------|-------|
-| `threading.RLock` | Synchronous code (FlowManager, ModuleManager, Metrics) |
-| `asyncio.Lock` | Async code (LLMBridge, FlowRunner cache, ChatSessions) |
+| Lock Type | Owner | Usage |
+|-----------|-------|-------|
+| `threading.RLock` | FlowManager, ModuleManager, SettingsManager, SessionPersistenceManager | Synchronous shared state |
+| `threading.Lock` | Metrics, SessionManager (instance), `_init_lock` (singleton guard) | Single-level synchronous guards |
+| `asyncio.Lock` | LLMBridge, FlowRunner cache (per event loop), ChatSessions, ReasoningBook | Async resources |
 
 ### 8.2 Lock Ordering Rules
 
-1. Never mix threading and asyncio locks in same code path
-2. Always acquire threading.RLock before asyncio.Lock
-3. Use context managers (`with`/`async with`)
-4. Keep critical sections small
+1. Never mix threading and asyncio locks in the same code path
+2. Always acquire threading.RLock before asyncio.Lock (never the reverse)
+3. Lock acquisition order for threading.RLock: `module_manager._lock` → `flow_manager._lock` → `settings._lock`
+4. Use context managers (`with`/`async with`)
+5. Keep critical sections small — never `await` while holding a threading lock
+6. FlowRunner's `_cache_lock` is per-event-loop to avoid "attached to a different loop" errors in tests
+
+See `docs/CONCURRENCY.md` for full details.
 
 ---
 
@@ -887,12 +980,15 @@ async def get_executor_class(node_type_id: str):
 
 | Metric | Value |
 |--------|-------|
-| Total Python Files | 80+ |
-| Lines of Code | ~15,000 |
-| Test Files | 70+ |
-| Test Coverage | 85%+ |
+| Total Python Files | 165 |
+| Lines of Code | ~36,661 |
+| Test Files | 67 |
+| Test Count | 926 |
+| HTML Templates | 33 |
 | Modules | 16 |
+| Built-in Tools | 23 (16 standard + 7 RLM) |
 | Core Classes | 30+ |
+| API Endpoints (core routers only) | 40+ |
 
 ### 13.2 Patterns Used
 
@@ -970,6 +1066,6 @@ The codebase demonstrates **mature software engineering practices** with consist
 
 ---
 
-*Analysis generated: 2025*  
-*Version: Based on exhaustive codebase review*
+*Analysis last updated: 2026-03-14*
+*Version: Based on exhaustive codebase review — 165 Python files, 926 tests, 16 modules*
 
