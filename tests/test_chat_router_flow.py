@@ -63,7 +63,6 @@ def mock_chat_sessions():
         router_module.session_manager._save_sessions = original_save
 
 
-@pytest.mark.skip(reason="Flaky - needs investigation")  # TODO: Fix this test
 def test_send_message_no_active_flow(client, mock_chat_sessions):
     """Test response when no AI flow is active."""
     session = mock_chat_sessions.create_session("Test")
@@ -79,7 +78,6 @@ def test_send_message_no_active_flow(client, mock_chat_sessions):
         assert response.status_code == 200
         assert "Error: No active AI Flow is set" in response.text
 
-@pytest.mark.skip(reason="Flaky - needs investigation")  # TODO: Fix this test
 def test_send_message_flow_execution_error(client, mock_chat_sessions):
     """Test response when the AI flow returns an error."""
     session = mock_chat_sessions.create_session("Test")
@@ -101,7 +99,6 @@ def test_send_message_flow_execution_error(client, mock_chat_sessions):
         assert response.status_code == 200
         assert "Flow Execution Error: Something exploded" in response.text
 
-@pytest.mark.skip(reason="Flaky - needs investigation")  # TODO: Fix this test
 def test_send_message_flow_crash(client, mock_chat_sessions):
     """Test response when the FlowRunner raises an exception."""
     session = mock_chat_sessions.create_session("Test")
@@ -123,7 +120,6 @@ def test_send_message_flow_crash(client, mock_chat_sessions):
         assert response.status_code == 200
         assert "Critical Error running AI Flow" in response.text
 
-@pytest.mark.skip(reason="Flaky - needs investigation")  # TODO: Fix this test
 def test_send_message_success(client, mock_chat_sessions):
     """Test successful message flow."""
     session = mock_chat_sessions.create_session("Test")

@@ -68,7 +68,6 @@ def test_get_chat_sessions_route(client, mock_chat_sessions):
     assert response.status_code == 200
     assert "/chat/gui?session_id=" in response.text
 
-@pytest.mark.skip(reason="Flaky in isolated module-router test harness")
 @pytest.mark.asyncio
 async def test_chat_send_route(client, httpx_mock, mock_chat_sessions, monkeypatch):
     # Define a consistent, isolated URL for this test to avoid state pollution
@@ -114,7 +113,6 @@ async def test_chat_send_route(client, httpx_mock, mock_chat_sessions, monkeypat
     assert "hello" in response.text
     assert "Mocked AI Response" in response.text
 
-@pytest.mark.skip(reason="Flaky in isolated module-router test harness")
 def test_create_new_session_route(client, mock_chat_sessions):
     """Tests the endpoint for creating a new session."""
     assert len(mock_chat_sessions.list_sessions()) == 0
@@ -124,7 +122,6 @@ def test_create_new_session_route(client, mock_chat_sessions):
     assert "newSessionCreated" in response.headers["HX-Trigger"]
     assert len(mock_chat_sessions.list_sessions()) == 1
 
-@pytest.mark.skip(reason="Flaky in isolated module-router test harness")
 def test_delete_session_route(client, mock_chat_sessions):
     """Tests the endpoint for deleting a session."""
     session = mock_chat_sessions.create_session("To Be Deleted")
@@ -136,7 +133,6 @@ def test_delete_session_route(client, mock_chat_sessions):
     assert "sessionsChanged" in response.headers["HX-Trigger"]
     assert len(mock_chat_sessions.list_sessions()) == 0, "Deleting the last session should result in zero sessions"
 
-@pytest.mark.skip(reason="Flaky in isolated module-router test harness")
 def test_rename_session_route(client, mock_chat_sessions):
     """Tests the endpoint for renaming a session."""
     session = mock_chat_sessions.create_session("Old Name")

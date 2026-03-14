@@ -45,7 +45,6 @@ def test_settings_concurrency(settings_manager):
         data = json.load(f)
         assert data["llm_api_key"] == "val1"
 
-@pytest.mark.skip(reason="Flaky with observability tracing wrapper in this environment")
 @pytest.mark.asyncio
 async def test_flow_runner_input_isolation():
     """Test that FlowRunner copies input for source nodes."""

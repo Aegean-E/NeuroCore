@@ -48,7 +48,6 @@ def patch_settings_url(monkeypatch):
     monkeypatch.setattr(global_settings, "save_settings", mock_save)
 
 
-@pytest.mark.skip(reason="Flaky in isolated test environment; requires full session router wiring")
 @pytest.mark.asyncio
 async def test_multimodal_image_upload(client, mock_chat_sessions):
     session = mock_chat_sessions.create_session("Image Test")
@@ -84,7 +83,6 @@ async def test_multimodal_image_upload(client, mock_chat_sessions):
     assert user_msg["content"][1]["type"] == "image_url"
 
 
-@pytest.mark.skip(reason="Flaky in isolated test environment; requires full session router wiring")
 @pytest.mark.asyncio
 async def test_auto_rename_trigger(client, mock_chat_sessions):
     session = mock_chat_sessions.create_session("Session 2023-01-01")
