@@ -646,33 +646,45 @@ def instrument_llm_calls():
         
         @wraps(original_chat_completion)
         async def traced_chat_completion(self, *args, **kwargs):
+            model_name = str(kwargs.get("model") or "unknown")
             ctx = get_or_create_trace_context()
             span = ctx.add_span("llm_call", SpanKind.CLIENT, attributes={
-                "model": kwargs.get("model", args[1] if len(args) > 1 else None),
+                "model": model_name,
             })
-            
+
             start_time = time.time()
             try:
                 result = await original_chat_completion(self, *args, **kwargs)
                 elapsed_ms = (time.time() - start_time) * 1000
-                
-                # Extract token usage if available
+
+                # Extract token usage and record flat + per-model counters
                 if isinstance(result, dict):
                     tokens = result.get("usage", {})
                     if tokens:
-                        metrics.increment("llm.tokens_used", tokens.get("total_tokens", 0))
-                        metrics.increment("llm.prompt_tokens", tokens.get("prompt_tokens", 0))
-                        metrics.increment("llm.completion_tokens", tokens.get("completion_tokens", 0))
-                
+                        pt = tokens.get("prompt_tokens", 0)
+                        ct = tokens.get("completion_tokens", 0)
+                        tt = tokens.get("total_tokens", 0) or (pt + ct)
+                        model_tag = {"model": model_name}
+                        # Flat totals (backwards-compatible)
+                        metrics.increment("llm.tokens_used", tt)
+                        metrics.increment("llm.prompt_tokens", pt)
+                        metrics.increment("llm.completion_tokens", ct)
+                        # Per-model breakdown
+                        metrics.increment("llm.tokens_used", tt, tags=model_tag)
+                        metrics.increment("llm.prompt_tokens", pt, tags=model_tag)
+                        metrics.increment("llm.completion_tokens", ct, tags=model_tag)
+
                 metrics.timing("llm.latency", elapsed_ms)
                 metrics.increment("llm.calls_success")
-                
+                metrics.increment("llm.calls_success", tags={"model": model_name})
+
                 span.finish()
                 return result
             except Exception as e:
                 elapsed_ms = (time.time() - start_time) * 1000
                 metrics.timing("llm.latency", elapsed_ms)
                 metrics.increment("llm.calls_failed")
+                metrics.increment("llm.calls_failed", tags={"model": model_name})
                 span.finish(status="error", error=str(e))
                 raise
         
@@ -733,7 +745,7 @@ def instrument_tools():
 def get_dashboard_data() -> Dict[str, Any]:
     """
     Get data for observability dashboard.
-    
+
     Returns:
         Dict with metrics, traces, and system info
     """
@@ -741,6 +753,50 @@ def get_dashboard_data() -> Dict[str, Any]:
         "metrics": metrics.get_all_metrics(),
         "timestamp": datetime.utcnow().isoformat() + "Z",
     }
+
+
+def get_token_stats() -> Dict[str, Any]:
+    """Get LLM token usage stats, broken down by model.
+
+    Returns a dict with two keys:
+    - ``total``: aggregate counters across all models.
+    - ``by_model``: per-model breakdown, keyed by model name.
+    """
+    counters = metrics.get_all_metrics().get("counters", {})
+
+    total = {
+        "prompt_tokens":     int(counters.get("llm.prompt_tokens", 0)),
+        "completion_tokens": int(counters.get("llm.completion_tokens", 0)),
+        "total_tokens":      int(counters.get("llm.tokens_used", 0)),
+        "calls_success":     int(counters.get("llm.calls_success", 0)),
+        "calls_failed":      int(counters.get("llm.calls_failed", 0)),
+    }
+
+    by_model: Dict[str, Dict[str, int]] = {}
+    for key, value in counters.items():
+        if "{" not in key or "model=" not in key:
+            continue
+        brace = key.index("{")
+        metric_name = key[:brace]
+        tags_str = key[brace + 1 : key.index("}")]
+        tags = dict(t.split("=", 1) for t in tags_str.split(",") if "=" in t)
+        model = tags.get("model", "unknown")
+        if model not in by_model:
+            by_model[model] = {
+                "prompt_tokens": 0, "completion_tokens": 0,
+                "total_tokens": 0, "calls": 0,
+            }
+        v = int(value)
+        if metric_name == "llm.prompt_tokens":
+            by_model[model]["prompt_tokens"] = v
+        elif metric_name == "llm.completion_tokens":
+            by_model[model]["completion_tokens"] = v
+        elif metric_name == "llm.tokens_used":
+            by_model[model]["total_tokens"] = v
+        elif metric_name == "llm.calls_success":
+            by_model[model]["calls"] = v
+
+    return {"total": total, "by_model": by_model}
 
 
 # =============================================================================

@@ -23,6 +23,7 @@ from core.observability import (
     StructuredLogger,
     structured_logger,
     get_dashboard_data,
+    get_token_stats,
 )
 
 
@@ -395,6 +396,62 @@ class TestIntegration:
         
         # Check spans were created (there will be additional spans from previous tests)
         assert len(ctx.spans) >= 1
+
+
+class TestGetTokenStats:
+    """Tests for get_token_stats()."""
+
+    def setup_method(self):
+        metrics.reset()
+
+    def test_empty_returns_zero_totals(self):
+        stats = get_token_stats()
+        assert stats["total"]["total_tokens"] == 0
+        assert stats["total"]["prompt_tokens"] == 0
+        assert stats["total"]["completion_tokens"] == 0
+        assert stats["total"]["calls_success"] == 0
+        assert stats["total"]["calls_failed"] == 0
+        assert stats["by_model"] == {}
+
+    def test_flat_counters_appear_in_total(self):
+        metrics.increment("llm.prompt_tokens", 100)
+        metrics.increment("llm.completion_tokens", 50)
+        metrics.increment("llm.tokens_used", 150)
+        metrics.increment("llm.calls_success", 2)
+        stats = get_token_stats()
+        assert stats["total"]["prompt_tokens"] == 100
+        assert stats["total"]["completion_tokens"] == 50
+        assert stats["total"]["total_tokens"] == 150
+        assert stats["total"]["calls_success"] == 2
+
+    def test_per_model_breakdown(self):
+        model_tag = {"model": "gpt-4"}
+        metrics.increment("llm.prompt_tokens", 200, tags=model_tag)
+        metrics.increment("llm.completion_tokens", 80, tags=model_tag)
+        metrics.increment("llm.tokens_used", 280, tags=model_tag)
+        metrics.increment("llm.calls_success", 3, tags=model_tag)
+        stats = get_token_stats()
+        assert "gpt-4" in stats["by_model"]
+        m = stats["by_model"]["gpt-4"]
+        assert m["prompt_tokens"] == 200
+        assert m["completion_tokens"] == 80
+        assert m["total_tokens"] == 280
+        assert m["calls"] == 3
+
+    def test_multiple_models_tracked_independently(self):
+        for model in ("gpt-4", "llama-3"):
+            tag = {"model": model}
+            metrics.increment("llm.tokens_used", 100, tags=tag)
+            metrics.increment("llm.calls_success", 1, tags=tag)
+        stats = get_token_stats()
+        assert set(stats["by_model"].keys()) == {"gpt-4", "llama-3"}
+        assert stats["by_model"]["gpt-4"]["total_tokens"] == 100
+        assert stats["by_model"]["llama-3"]["total_tokens"] == 100
+
+    def test_calls_failed_counted(self):
+        metrics.increment("llm.calls_failed", 2)
+        stats = get_token_stats()
+        assert stats["total"]["calls_failed"] == 2
 
 
 class TestEnableTraceFileExport:

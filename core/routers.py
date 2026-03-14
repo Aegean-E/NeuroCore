@@ -869,20 +869,38 @@ async def get_agent_summary(request: Request, since: float = None, limit: int = 
 @router.get("/debug/summary", response_class=HTMLResponse)
 async def get_debug_summary(request: Request, since: float = None, limit: int = 5, _: bool = Depends(require_debug_mode)):
     """Get the agent summary panel for the debug page.
-    
+
     Query params:
         since: Optional time window in seconds (e.g., 300 = last 5 minutes, 900 = last 15 minutes)
         limit: Number of recent events to include (default: 5)
     """
     from core.session_manager import session_manager
-    
+    from core.observability import get_token_stats
+
     # Convert relative time (seconds) to absolute timestamp
     since_ts = None
     if since is not None:
         since_ts = time.time() - since
-    
+
     summary = session_manager.get_trace_summary(limit=limit, since=since_ts)
-    return templates.TemplateResponse(request, "debug_summary.html", {"summary": summary})
+    return templates.TemplateResponse(
+        request, "debug_summary.html",
+        {"summary": summary, "stats": get_token_stats()},
+    )
+
+@router.get("/debug/token-stats", response_class=JSONResponse)
+async def get_token_stats_json(request: Request, _: bool = Depends(require_debug_mode)):
+    """Return LLM token usage counters (total + per-model) as JSON."""
+    from core.observability import get_token_stats
+    return JSONResponse(content=get_token_stats())
+
+@router.get("/debug/token-stats/partial", response_class=HTMLResponse)
+async def get_token_stats_partial(request: Request, _: bool = Depends(require_debug_mode)):
+    """Return the token stats panel as an HTML partial for HTMX polling."""
+    from core.observability import get_token_stats
+    return templates.TemplateResponse(
+        request, "debug_token_stats.html", {"stats": get_token_stats()}
+    )
 
 @router.post("/debug/clear")
 async def clear_debug_logs(request: Request, _: bool = Depends(require_debug_mode)):
