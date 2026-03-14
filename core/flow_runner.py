@@ -210,6 +210,86 @@ class FlowRunner:
         return ordered
 
 
+    def _get_bridge_levels(self, node_id: str) -> list:
+        """Group bridge-group nodes into parallel execution levels using Kahn's algorithm.
+
+        Nodes in the same level have no bridge dependency on each other and can
+        therefore run concurrently via ``asyncio.gather``.
+
+        Example — bridges A→C, B→C, C→D, target node D:
+            level 0: [A, B]   ← independent, run in parallel
+            level 1: [C]      ← depends on A and B, runs after level 0
+            (D is the target node and is excluded)
+
+        Returns:
+            list[list[str]]: Ordered levels, each a sorted list of node IDs.
+        """
+        if node_id not in self.bridge_groups:
+            return []
+
+        group = set(self.bridge_groups[node_id])
+
+        # Build directed adjacency + in-degree within the group
+        in_degree = {n: 0 for n in group}
+        adj = {n: [] for n in group}
+        for b in self.bridges:
+            fn, tn = b['from'], b['to']
+            if fn in adj and tn in adj:
+                adj[fn].append(tn)
+                in_degree[tn] += 1
+
+        # Kahn's level extraction
+        levels = []
+        current = sorted(n for n in group if in_degree[n] == 0)
+        visited = set(current)
+
+        while current:
+            levels.append(current)
+            nxt = []
+            for n in current:
+                for nbr in adj[n]:
+                    in_degree[nbr] -= 1
+                    if in_degree[nbr] == 0 and nbr not in visited:
+                        visited.add(nbr)
+                        nxt.append(nbr)
+            current = sorted(nxt)
+
+        return levels
+
+    async def _run_bridge_node(self, bridge_node_id: str, bridge_input: dict):
+        """Execute a single bridge node and return its output dict, or None to stop the chain.
+
+        Raises any non-cancellation exception so that ``asyncio.gather(
+        return_exceptions=True)`` can capture it without killing sibling tasks.
+        """
+        bridge_meta = self.nodes[bridge_node_id]
+        bridge_module_id = bridge_meta['moduleId']
+        bridge_type_id = bridge_meta['nodeTypeId']
+
+        bridge_executor_class = await self._get_executor_class(bridge_module_id, bridge_type_id)
+        if not bridge_executor_class:
+            return bridge_input  # pass-through when executor is missing
+
+        bridge_executor = bridge_executor_class()
+        bridge_config = (bridge_meta.get('config') or {}).copy()
+        bridge_config['_flow_id'] = self.flow_id
+        bridge_config['_node_id'] = bridge_node_id
+
+        bridge_processed = await bridge_executor.receive(bridge_input, config=bridge_config)
+        if bridge_processed is None:
+            return None  # intentional stop signal
+
+        bridge_output = await bridge_executor.send(bridge_processed)
+
+        if settings.get("debug_mode") and bridge_output is not None:
+            debug_logger.log(
+                self.flow_id, bridge_node_id,
+                bridge_meta.get('name', bridge_node_id),
+                "bridge_output", {"output": bridge_output},
+            )
+
+        return bridge_output  # may be None (stop signal from send)
+
     def _compute_execution_order(self):
         """
         Performs a topological sort (Kahn's algorithm) to find the execution order.
@@ -593,61 +673,87 @@ class FlowRunner:
                 # 1. Determine Input Data (DAG Logic) - use precomputed incoming_edges for O(1) lookup
                 incoming_edges = self.incoming_edges.get(node_id, [])
                 
-                # Bridge Execution: Process upstream bridge nodes before this node
-                # Bridges create implicit execution chains where earlier nodes in the
-                # chain feed their outputs to later nodes. This allows for patterns like:
-                # Memory Recall -> System Prompt -> LLM Core (all bridged together)
+                # Bridge Execution: Process upstream bridge nodes before this node.
+                # Independent nodes in the same bridge level run concurrently via
+                # asyncio.gather; dependent levels remain sequential.
+                # Example: Memory Recall + KB Query (parallel) → System Prompt → LLM Core
                 if node_id in self.bridge_groups and node_id not in explicit_start_nodes:
-                    bridge_chain = self._get_bridge_order(node_id)
+                    bridge_levels = self._get_bridge_levels(node_id)
                     # Start with initial input (excluding the internal routing marker)
                     bridge_input = {k: v for k, v in initial_input.items() if k != "_input_source"} if isinstance(initial_input, dict) else initial_input
-                    
-                    # Execute each upstream bridge node in order
-                    for bridge_node_id in bridge_chain:
-                        if bridge_node_id != node_id and bridge_node_id not in node_outputs:
-                            bridge_meta = self.nodes[bridge_node_id]
-                            bridge_module_id = bridge_meta['moduleId']
-                            bridge_type_id = bridge_meta['nodeTypeId']
-                            
-                            # Use thread-safe method to get executor class
-                            bridge_executor_class = await self._get_executor_class(bridge_module_id, bridge_type_id)
-                            
-                            if bridge_executor_class:
-                                try:
-                                    bridge_executor = bridge_executor_class()
-                                    bridge_config = (bridge_meta.get('config') or {}).copy()
-                                    bridge_config['_flow_id'] = self.flow_id
-                                    bridge_config['_node_id'] = bridge_node_id
-                                    
-                                    # Execute the bridge node's receive/send cycle
-                                    bridge_processed = await bridge_executor.receive(bridge_input, config=bridge_config)
-                                    if bridge_processed is None:
-                                        # Node returned None - stop this branch
-                                        break
-                                    bridge_output = await bridge_executor.send(bridge_processed)
-                                    node_outputs[bridge_node_id] = bridge_output
-                                    
-                                    # If send() returns None, stop the bridge chain to avoid stale input
-                                    if bridge_output is None:
-                                        break
-                                    
-                                    # Merge bridge output into input for next node in chain
-                                    # This allows bridge nodes to progressively build context
-                                    if isinstance(bridge_output, dict):
-                                        bridge_input = bridge_input.copy()
-                                        bridge_input.update(bridge_output)
-                                except Exception as bridge_err:
-                                    # Catch all non-cancellation exceptions so a single failing
-                                    # bridge node cannot silently kill the whole flow.
-                                    # asyncio.CancelledError (a BaseException) is intentionally
-                                    # NOT caught here and will propagate normally.
+
+                    chain_stopped = False
+                    for level in bridge_levels:
+                        if chain_stopped:
+                            break
+
+                        # Skip nodes that are the target itself or already computed
+                        to_run = [n for n in level if n != node_id and n not in node_outputs]
+                        if not to_run:
+                            continue
+
+                        if len(to_run) == 1:
+                            # ── Serial fast-path (single node, no gather overhead) ──
+                            bridge_node_id = to_run[0]
+                            try:
+                                result = await self._run_bridge_node(bridge_node_id, bridge_input)
+                            except Exception as bridge_err:
+                                import traceback
+                                logger.error(f"[Bridge Error] Node {bridge_node_id} failed: {bridge_err}")
+                                logger.error(f"[Bridge Error] Traceback: {traceback.format_exc()}")
+                                if settings.get("debug_mode"):
+                                    bridge_meta = self.nodes[bridge_node_id]
+                                    debug_logger.log(self.flow_id, bridge_node_id, bridge_meta.get('name', bridge_node_id), "bridge_error", {"error": str(bridge_err), "traceback": traceback.format_exc()})
+                                chain_stopped = True
+                                break
+
+                            if result is None:
+                                chain_stopped = True
+                                break
+
+                            node_outputs[bridge_node_id] = result
+                            if isinstance(result, dict):
+                                bridge_input = {**bridge_input, **result}
+
+                        else:
+                            # ── Parallel fast-path (multiple independent nodes) ──
+                            # Deep-copy messages so parallel nodes each get an independent copy
+                            def _make_input(base):
+                                inp = base.copy()
+                                if "messages" in inp and isinstance(inp["messages"], list):
+                                    inp["messages"] = copy.deepcopy(inp["messages"])
+                                return inp
+
+                            results = await asyncio.gather(
+                                *[self._run_bridge_node(n, _make_input(bridge_input)) for n in to_run],
+                                return_exceptions=True,
+                            )
+
+                            level_output = bridge_input.copy()
+                            any_stopped = False
+                            for bridge_node_id, result in zip(to_run, results):
+                                if isinstance(result, Exception):
                                     import traceback
-                                    logger.error(f"[Bridge Error] Node {bridge_node_id} failed: {bridge_err}")
-                                    logger.error(f"[Bridge Error] Traceback: {traceback.format_exc()}")
+                                    logger.error(f"[Bridge Error] Node {bridge_node_id} failed: {result}")
                                     if settings.get("debug_mode"):
-                                        debug_logger.log(self.flow_id, bridge_node_id, bridge_meta.get('name', bridge_node_id), "bridge_error", {"error": str(bridge_err), "traceback": traceback.format_exc()})
-                                    # Continue without bridge output - don't fail the whole flow
-                                    break
+                                        bridge_meta = self.nodes[bridge_node_id]
+                                        debug_logger.log(self.flow_id, bridge_node_id, bridge_meta.get('name', bridge_node_id), "bridge_error", {"error": str(result)})
+                                    # One parallel node failed — skip its contribution but continue
+                                    continue
+
+                                if result is None:
+                                    any_stopped = True
+                                    continue
+
+                                node_outputs[bridge_node_id] = result
+                                if isinstance(result, dict):
+                                    level_output.update(result)
+
+                            if any_stopped:
+                                chain_stopped = True
+                                break
+
+                            bridge_input = level_output
 
                 
                 if node_id in explicit_start_nodes:
