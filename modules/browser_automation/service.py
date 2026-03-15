@@ -14,8 +14,15 @@ class BrowserService:
             cls._instance.browser = None
             cls._instance.context = None
             cls._instance.page = None
-            cls._instance.lock = asyncio.Lock()
+            cls._instance._lock = None  # Lazy init to avoid event-loop issues at import time
         return cls._instance
+
+    @property
+    def lock(self):
+        """Lazily create the asyncio.Lock on first access inside the running event loop."""
+        if self._lock is None:
+            self._lock = asyncio.Lock()
+        return self._lock
 
     async def start(self, config: dict = None):
         """Initializes the playwright browser if not already running."""
