@@ -172,5 +172,5 @@ if __name__ == "__main__":
     # Exclude all .json files from the reloader. This prevents the server from
     # restarting when state files (settings, flows, sessions, module configs)
     # are updated by the application itself, which fixes the module reordering issue.
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True, reload_excludes=["*.json", "data/*.json", "modules/*/*.json"], loop="asyncio")
+    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True, reload_excludes=["*.json", "data/*.json", "data/execution_trace.jsonl", "data/*.sqlite3*", "modules/*/*.json"], loop="asyncio")
 

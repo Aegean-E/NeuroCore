@@ -291,12 +291,43 @@ class Metrics:
         # FIX: Use threading.Lock for sync-safe operations instead of asyncio.Lock
         self._lock = threading.Lock()
         self._max_timings_per_metric = 1000  # Keep last 1000 timings
+        self._metrics_file = "data/metrics_counters.json"
+        self._load_counters()
+        
+    def _load_counters(self):
+        """Load persisted counters from disk on startup."""
+        import os
+        try:
+            if os.path.exists(self._metrics_file):
+                with open(self._metrics_file, 'r') as f:
+                    data = json.load(f)
+                    for k, v in data.items():
+                        self._counters[k] = float(v)
+        except Exception:
+            pass  # Fail silently to avoid interrupting startup
+            
+    def _save_counters(self):
+        """Save counters to disk on updates."""
+        import os
+        try:
+            # Atomic save to prevent corruption
+            import tempfile
+            os.makedirs(os.path.dirname(self._metrics_file), exist_ok=True)
+            with tempfile.NamedTemporaryFile('w', dir=os.path.dirname(self._metrics_file), delete=False) as tf:
+                json.dump(dict(self._counters), tf)
+                temp_name = tf.name
+            os.replace(temp_name, self._metrics_file)
+        except Exception:
+            pass  # Fail silently
     
     def increment(self, metric: str, value: float = 1.0, tags: Optional[Dict[str, str]] = None):
         """Increment a counter metric."""
         key = self._make_key(metric, tags)
         with self._lock:
             self._counters[key] += value
+            # Only save LLM metrics immediately to avoid disk I/O bloat
+            if metric.startswith("llm."):
+                self._save_counters()
     
     def timing(self, metric: str, duration_ms: float, tags: Optional[Dict[str, str]] = None):
         """Record a timing metric in milliseconds."""

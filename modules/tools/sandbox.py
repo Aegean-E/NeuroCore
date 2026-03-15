@@ -193,6 +193,7 @@ class SafeHttpxClient:
         'api.telegram.org',  # Telegram
         '127.0.0.1',  # Internal API for modules (BrowserAutomation)
         'localhost',  # Internal API for modules
+        'github.com', 'www.github.com', 'raw.githubusercontent.com', # Added for FetchURL
     }
     
     # Allowed URL schemes
