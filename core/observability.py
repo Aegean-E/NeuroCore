@@ -596,7 +596,9 @@ def instrument_flow_runner():
     original_run = FlowRunner.run
     
     @wraps(original_run)
-    async def traced_run(self, initial_input: dict, start_node_id: str = None, timeout: float = None):
+    async def traced_run(self, initial_input: dict, start_node_id: str = None,
+                         timeout: float = None, raise_errors: bool = False,
+                         episode_id: str = None, stream_queue=None):
         # Create or propagate trace context
         trace_id = initial_input.get("_trace_id") if isinstance(initial_input, dict) else None
         with create_trace_context(trace_id) as ctx:
@@ -612,7 +614,8 @@ def instrument_flow_runner():
                 
                 start_time = time.time()
                 try:
-                    result = await original_run(self, initial_input, start_node_id, timeout)
+                    result = await original_run(self, initial_input, start_node_id, timeout,
+                                                raise_errors, episode_id, stream_queue)
                     elapsed_ms = (time.time() - start_time) * 1000
                     
                     metrics.timing("flow.latency", elapsed_ms, {"flow_id": self.flow_id})

@@ -184,8 +184,18 @@ async def send_message(
 
     if not active_flow:
         ai_response = "Error: No active AI Flow is set. Please go to the AI Flow page to create and activate a flow."
-        flow_error = "no_active_flow"
         elapsed_time = 0
+        return templates.TemplateResponse(
+            request, 
+            "chat_message_pair.html", 
+            {
+                "user_message": user_content,
+                "ai_response": ai_response,
+                "elapsed_time": elapsed_time,
+                "error": "no_active_flow"
+            },
+            headers={"HX-Trigger": "sessionsChanged"}
+        )
     else:
         # Check if streaming is enabled via some parameter or globally, for now we will assume streaming is always preferred for chat if tools aren't blocking it.
         # However, to be safe, we'll try to stream.

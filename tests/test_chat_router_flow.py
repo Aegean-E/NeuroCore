@@ -94,10 +94,18 @@ def test_send_message_flow_execution_error(client, mock_chat_sessions):
         runner_instance = MockRunner.return_value
         runner_instance.run = AsyncMock(return_value={"error": "Something exploded"})
         
-        response = client.post(f"/chat/send?session_id={session['id']}", data={"message": "Hi"})
+        import asyncio
+        with patch("asyncio.create_task", side_effect=lambda coro: asyncio.ensure_future(coro)):
+            response = client.post(f"/chat/send?session_id={session['id']}", data={"message": "Hi"})
+            # Give background tasks a moment to run
+            asyncio.run(asyncio.sleep(0.1))
         
         assert response.status_code == 200
-        assert "Flow Execution Error: Something exploded" in response.text
+        assert "Thinking..." in response.text
+        
+        with client.stream("GET", f"/chat/stream/{session['id']}") as stream_response:
+            events = [line for line in stream_response.iter_lines() if line]
+            assert any("Something exploded" in e for e in events)
 
 def test_send_message_flow_crash(client, mock_chat_sessions):
     """Test response when the FlowRunner raises an exception."""
@@ -115,10 +123,18 @@ def test_send_message_flow_crash(client, mock_chat_sessions):
         runner_instance = MockRunner.return_value
         runner_instance.run = AsyncMock(side_effect=Exception("Critical Failure"))
         
-        response = client.post(f"/chat/send?session_id={session['id']}", data={"message": "Hi"})
+        import asyncio
+        with patch("asyncio.create_task", side_effect=lambda coro: asyncio.ensure_future(coro)):
+            response = client.post(f"/chat/send?session_id={session['id']}", data={"message": "Hi"})
+            # Give background tasks a moment to run
+            asyncio.run(asyncio.sleep(0.1))
         
         assert response.status_code == 200
-        assert "Critical Error running AI Flow" in response.text
+        assert "Thinking..." in response.text
+        
+        with client.stream("GET", f"/chat/stream/{session['id']}") as stream_response:
+            events = [line for line in stream_response.iter_lines() if line]
+            assert any("Critical Failure" in e for e in events)
 
 def test_send_message_success(client, mock_chat_sessions):
     """Test successful message flow."""
@@ -136,10 +152,18 @@ def test_send_message_success(client, mock_chat_sessions):
         runner_instance = MockRunner.return_value
         runner_instance.run = AsyncMock(return_value={"content": "AI Reply"})
         
-        response = client.post(f"/chat/send?session_id={session['id']}", data={"message": "Hi"})
+        import asyncio
+        with patch("asyncio.create_task", side_effect=lambda coro: asyncio.ensure_future(coro)):
+            response = client.post(f"/chat/send?session_id={session['id']}", data={"message": "Hi"})
+            # Give background tasks a moment to run
+            asyncio.run(asyncio.sleep(0.1))
         
         assert response.status_code == 200
-        assert "AI Reply" in response.text
+        assert "Thinking..." in response.text
+        
+        with client.stream("GET", f"/chat/stream/{session['id']}") as stream_response:
+            events = [line for line in stream_response.iter_lines() if line]
+            assert any("AI Reply" in e for e in events)
         
         # Verify history update
         history = session["history"]
