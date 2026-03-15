@@ -213,6 +213,15 @@ async def send_message(
                 flow_result = await runner.run(initial_data, stream_queue=queue)
                 
                 ai_response = flow_result.get("content", "")
+                if not ai_response:
+                    # Fallback: look for the last non-empty assistant turn in messages.
+                    # Agent loops often write results there even when "content" is empty.
+                    messages = flow_result.get("messages", [])
+                    for msg in reversed(messages):
+                        if msg.get("role") == "assistant" and msg.get("content", "").strip():
+                            ai_response = msg["content"].strip()
+                            break
+
                 if ai_response:
                     session_manager.add_message(session_id, "assistant", ai_response)
                     await queue.put({"type": "replace", "content": ai_response})
@@ -221,6 +230,16 @@ async def send_message(
                     await queue.put({"type": "error", "content": flow_result["error"]})
                 else:
                     await queue.put({"type": "error", "content": "Flow produced no response."})
+
+                # --- Emit actual token usage from the LLM API response ---
+                # Check multiple paths: bare LLM output has usage at top level;
+                # Memory Save / agent loop wraps it under response.usage.
+                usage = (
+                    flow_result.get("usage")
+                    or (flow_result.get("response") or {}).get("usage")
+                )
+                if isinstance(usage, dict) and usage.get("total_tokens"):
+                    await queue.put({"type": "usage", "content": usage})
                     
                 # --- Auto-Renaming Logic ---
                 module_manager = request.app.state.module_manager
@@ -314,6 +333,9 @@ async def stream_chat(session_id: str):
                 elif isinstance(chunk, dict) and chunk.get("type") == "rename":
                     payload = json.dumps({"title": chunk.get("content", "")})
                     yield f"event: rename\ndata: {payload}\n\n"
+                elif isinstance(chunk, dict) and chunk.get("type") == "usage":
+                    payload = json.dumps(chunk.get("content", {}))
+                    yield f"event: usage\ndata: {payload}\n\n"
         finally:
             if session_id in active_streams:
                 del active_streams[session_id]
