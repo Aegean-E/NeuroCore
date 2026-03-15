@@ -1,4 +1,3 @@
-import httpx
 import re
 from urllib.parse import urlparse
 
@@ -55,7 +54,7 @@ else:
                 # Truncate if too long to prevent context overflow
                 max_len = 2000
                 if len(text) > max_len:
-                    text = text[:max_len] + "... (content truncated)"
+                    text = text[:max_len] + " [content truncated]"
 
                 result = text
     except Exception as e:

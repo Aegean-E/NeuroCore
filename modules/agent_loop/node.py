@@ -313,7 +313,8 @@ class AgentLoopExecutor:
         max_llm_retries: int,
         retry_delay: float,
         tool_error_strategy: str,
-        trace: list
+        trace: list,
+        stream_queue: asyncio.Queue = None
     ) -> tuple:
         """
         Core agent loop: LLM ↔ Tool execution until no more tool calls or max_iterations.
@@ -377,12 +378,41 @@ class AgentLoopExecutor:
 
             final_response = response
             assistant_message = response["choices"][0]["message"]
+            
+            # --- Accumulate thinking steps in real-time ---
+            if not hasattr(self, '_thinking_steps'):
+                self._thinking_steps = []
+            
+            content = assistant_message.get("content") or ""
+            tool_calls = assistant_message.get("tool_calls", [])
+            if tool_calls:
+                for tc in tool_calls:
+                    fn = tc.get("function", {})
+                    name = fn.get("name", "?")
+                    args = fn.get("arguments", "{}")
+                    try:
+                        args_dict = json.loads(args)
+                        args_display = ", ".join(f"{k}={repr(v)[:80]}" for k, v in args_dict.items())
+                    except Exception:
+                        args_display = args[:160]
+                    self._thinking_steps.append({
+                        "type": "tool_call",
+                        "name": name,
+                        "content": f"{name}({args_display})"
+                    })
+            elif content.strip() and iteration < max_iterations - 1:
+                # Intermediate text response (not final, since iteration continues)
+                # But wait, it hits break below if no tool calls!
+                # If no tool calls, it breaks, so this ONLY triggers if there ARE tool calls 
+                # or if some other logic continues. 
+                pass
+
+            if stream_queue and tool_calls:
+                await stream_queue.put({"type": "thinking", "content": list(self._thinking_steps)})
 
             # Append assistant message to conversation
             llm_messages.append(assistant_message)
 
-            # Check for tool calls
-            tool_calls = assistant_message.get("tool_calls", [])
             if not tool_calls:
                 # No more tool calls — agent has finished
                 trace.append(iteration_trace)
@@ -394,9 +424,7 @@ class AgentLoopExecutor:
                 tool_name = tool_call.get("function", {}).get("name", "unknown")
                 tool_args = tool_call.get("function", {}).get("arguments", "{}")
                 
-                # Tool call deduplication: detect loops
-                # Normalize tool_args for deduplication by sorting keys
-                # This ensures different JSON representations of same args are treated as duplicates
+                # ... [Existing Deduplication Logic] ...
                 try:
                     args_dict = json.loads(tool_args)
                     normalized_args = json.dumps(args_dict, sort_keys=True)
@@ -404,11 +432,9 @@ class AgentLoopExecutor:
                     normalized_args = tool_args
                 call_signature = f"{tool_name}:{normalized_args}"
                 if call_signature in seen_calls:
-                    # Model is spinning - same tool call detected
                     iteration_trace["errors"].append(
                         f"Loop detected: '{tool_name}' called with same arguments repeatedly"
                     )
-                    # Don't execute again, break the loop
                     break
                 seen_calls.add(call_signature)
                 
@@ -416,7 +442,18 @@ class AgentLoopExecutor:
 
                 tool_result = await self._execute_tool(tool_call, tool_library)
 
-                # Detect tool execution errors using structured success field
+                # Append tool result to real-time thinking trace
+                success = tool_result.get("success", False if not tool_result.get("content") else True)
+                display = (tool_result.get("content") or "").strip()[:400]
+                self._thinking_steps.append({
+                    "type": "tool_result",
+                    "name": tool_name,
+                    "content": display,
+                    "success": success
+                })
+                if stream_queue:
+                    await stream_queue.put({"type": "thinking", "content": list(self._thinking_steps)})
+
                 if not tool_result.get("success", False):
                     had_tool_error = True
                     tool_error_occurred = True
@@ -662,7 +699,8 @@ class AgentLoopExecutor:
                 max_llm_retries=max_llm_retries,
                 retry_delay=retry_delay,
                 tool_error_strategy=tool_error_strategy,
-                trace=agent_loop_trace
+                trace=agent_loop_trace,
+                stream_queue=config.get("_stream_queue") if config else None
             )
 
             # --- Episode Checkpoint Saving ---

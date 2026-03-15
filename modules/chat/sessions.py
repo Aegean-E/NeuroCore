@@ -100,10 +100,13 @@ class SessionManager:
         with self._lock:
             return sorted(self.sessions.values(), key=lambda x: x.get('updated_at', x['created_at']), reverse=True)
 
-    def add_message(self, session_id, role, content):
+    def add_message(self, session_id, role, content, **kwargs):
         with self._lock:
             if session_id in self.sessions:
-                self.sessions[session_id]["history"].append({"role": role, "content": content})
+                msg = {"role": role, "content": content}
+                if kwargs:
+                    msg.update(kwargs)
+                self.sessions[session_id]["history"].append(msg)
                 self.sessions[session_id]["updated_at"] = datetime.utcnow().isoformat() + 'Z'
                 self._save_sessions()
                 return True

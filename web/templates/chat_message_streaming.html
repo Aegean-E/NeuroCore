@@ -142,9 +142,6 @@
                 thinkingTrace.appendChild(details);
                 thinkingTrace.style.display = 'block';
 
-                // Remove "Thinking..." placeholder once trace is shown
-                const ph = contentDiv.querySelector('.stream-placeholder');
-                if (ph) ph.remove();
                 scrollToBottom();
             } catch(e) {
                 console.warn('Failed to render thinking trace', e);

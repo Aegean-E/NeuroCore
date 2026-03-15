@@ -1,6 +1,13 @@
 import os
 import asyncio
 import sys
+
+# On Windows, asyncio defaults to SelectorEventLoop which cannot spawn subprocesses.
+# Playwright (and any module that uses asyncio.create_subprocess_exec) requires
+# ProactorEventLoop on Windows. Apply this policy as early as possible.
+if sys.platform == "win32":
+    asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
+
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Depends, HTTPException, Header
 from fastapi.staticfiles import StaticFiles
@@ -165,4 +172,5 @@ if __name__ == "__main__":
     # Exclude all .json files from the reloader. This prevents the server from
     # restarting when state files (settings, flows, sessions, module configs)
     # are updated by the application itself, which fixes the module reordering issue.
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True, reload_excludes=["*.json", "data/*.json", "modules/*/*.json"])
+    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True, reload_excludes=["*.json", "data/*.json", "modules/*/*.json"], loop="asyncio")
+

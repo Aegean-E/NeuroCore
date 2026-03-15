@@ -12,6 +12,7 @@ from core.flow_manager import flow_manager
 import json
 import logging
 import asyncio
+from core.observability import get_token_stats
 
 logger = logging.getLogger(__name__)
 
@@ -149,7 +150,8 @@ async def chat_gui(request: Request, session_id: str = Query(None)):
 
     return templates.TemplateResponse(request, "chat_gui.html", {
         "session": active_session,
-        "estimated_tokens": estimated_tokens
+        "estimated_tokens": estimated_tokens,
+        "stats": get_token_stats()
     })
 
 @router.get("/sessions", response_class=HTMLResponse)
@@ -326,7 +328,7 @@ async def send_message(
                     await queue.put({"type": "thinking", "content": thinking_steps})
 
                 if ai_response:
-                    session_manager.add_message(session_id, "assistant", ai_response)
+                    session_manager.add_message(session_id, "assistant", ai_response, thinking=thinking_steps)
                     await queue.put({"type": "replace", "content": ai_response})
                 elif flow_result.get("error"):
                     session_manager.add_message(session_id, "assistant", f"Error: {flow_result['error']}")
