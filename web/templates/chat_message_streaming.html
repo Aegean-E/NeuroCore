@@ -1,0 +1,93 @@
+<div class="flex flex-col items-end space-y-1">
+    <div class="bg-blue-600 p-4 rounded-2xl rounded-tr-none max-w-[80%] text-white shadow-lg">
+        {% if user_message is string %}
+            <p class="text-sm">{{ user_message }}</p>
+        {% else %}
+            {% for part in user_message %}
+                {% if part.type == 'text' %}
+                    <p class="text-sm">{{ part.text }}</p>
+                {% elif part.type == 'image_url' %}
+                    <img src="{{ part.image_url.url }}" class="max-w-full h-auto rounded-lg mt-2 max-h-64 border border-blue-400/50">
+                {% endif %}
+            {% endfor %}
+        {% endif %}
+    </div>
+</div>
+
+<div class="bg-slate-800 p-4 rounded-2xl rounded-tl-none max-w-[80%] shadow-lg border border-slate-700/50">
+    <div class="text-sm prose prose-invert" id="ai-content-{{ msg_id }}">
+        <span class="animate-pulse text-slate-500 stream-placeholder">Thinking...</span>
+    </div>
+    <div class="text-xs text-slate-500 mt-2 stream-status" style="display: none;">
+        Response time: <span class="stream-timer">0.0</span>s
+    </div>
+</div>
+
+<script>
+    (function(){
+        const source = new EventSource('/chat/stream/{{ session_id }}');
+        const contentDiv = document.getElementById('ai-content-{{ msg_id }}');
+        const statusDiv = contentDiv.nextElementSibling;
+        const timerSpan = statusDiv.querySelector('.stream-timer');
+        
+        let firstTokenReceived = false;
+        let mdBuffer = "";
+        let startTime = Date.now();
+        let timerInterval = setInterval(() => {
+            timerSpan.innerText = ((Date.now() - startTime) / 1000).toFixed(1);
+        }, 100);
+
+        source.onmessage = function(event) {
+            if (!firstTokenReceived) {
+                const placeholder = contentDiv.querySelector('.stream-placeholder');
+                if (placeholder) placeholder.remove();
+                firstTokenReceived = true;
+                statusDiv.style.display = 'block';
+            }
+            
+            const chunk = JSON.parse(event.data);
+            if (chunk.text) {
+                // We use Node append to prevent HTML injection but allow markdown-like layout preservation 
+                mdBuffer += chunk.text;
+                contentDiv.innerText = mdBuffer;
+                
+                const messageContainer = document.getElementById('chat-messages');
+                if (messageContainer) {
+                    messageContainer.scrollTop = messageContainer.scrollHeight;
+                }
+            }
+        };
+        
+        source.addEventListener('replace', function(event) {
+            const chunk = JSON.parse(event.data);
+            if (chunk.text) {
+                contentDiv.innerText = chunk.text;
+                const messageContainer = document.getElementById('chat-messages');
+                if (messageContainer) {
+                    messageContainer.scrollTop = messageContainer.scrollHeight;
+                }
+            }
+        });
+        
+        source.addEventListener('rename', function(event) {
+            htmx.trigger(document.body, "sessionsChanged");
+        });
+        
+        source.addEventListener('error', function(e) {
+            if (e.data) {
+                try {
+                    const err = JSON.parse(e.data);
+                    contentDiv.innerText = "\n\nError: " + (err.error || "Unknown stream error");
+                } catch(err) {
+                    console.error("Stream parse error", err);
+                }
+            }
+        });
+        
+        source.addEventListener('done', function() {
+            clearInterval(timerInterval);
+            timerSpan.innerText = ((Date.now() - startTime) / 1000).toFixed(1);
+            source.close();
+        });
+    })();
+</script>

@@ -256,7 +256,7 @@ class FlowRunner:
 
         return levels
 
-    async def _run_bridge_node(self, bridge_node_id: str, bridge_input: dict):
+    async def _run_bridge_node(self, bridge_node_id: str, bridge_input: dict, stream_queue: asyncio.Queue = None):
         """Execute a single bridge node and return its output dict, or None to stop the chain.
 
         Raises any non-cancellation exception so that ``asyncio.gather(
@@ -274,6 +274,8 @@ class FlowRunner:
         bridge_config = (bridge_meta.get('config') or {}).copy()
         bridge_config['_flow_id'] = self.flow_id
         bridge_config['_node_id'] = bridge_node_id
+        if stream_queue:
+            bridge_config['_stream_queue'] = stream_queue
 
         bridge_processed = await bridge_executor.receive(bridge_input, config=bridge_config)
         if bridge_processed is None:
@@ -573,7 +575,7 @@ class FlowRunner:
             'warnings': warnings
         }
 
-    async def run(self, initial_input: dict, start_node_id: str = None, timeout: float = None, raise_errors: bool = False, episode_id: str = None):
+    async def run(self, initial_input: dict, start_node_id: str = None, timeout: float = None, raise_errors: bool = False, episode_id: str = None, stream_queue: asyncio.Queue = None):
         """
         Executes the flow in order, passing data between nodes.
         
@@ -583,6 +585,7 @@ class FlowRunner:
             timeout: Optional timeout in seconds for the entire flow execution
             raise_errors: If True, raise exceptions instead of returning error dicts
             episode_id: Optional episode ID for episode persistence support
+            stream_queue: Optional asyncio.Queue to emit streaming tokens into
         """
         # --- Episode Persistence Support ---
         sm = None
@@ -696,7 +699,7 @@ class FlowRunner:
                             # ── Serial fast-path (single node, no gather overhead) ──
                             bridge_node_id = to_run[0]
                             try:
-                                result = await self._run_bridge_node(bridge_node_id, bridge_input)
+                                result = await self._run_bridge_node(bridge_node_id, bridge_input, stream_queue=stream_queue)
                             except Exception as bridge_err:
                                 import traceback
                                 logger.error(f"[Bridge Error] Node {bridge_node_id} failed: {bridge_err}")
@@ -725,7 +728,7 @@ class FlowRunner:
                                 return inp
 
                             results = await asyncio.gather(
-                                *[self._run_bridge_node(n, _make_input(bridge_input)) for n in to_run],
+                                *[self._run_bridge_node(n, _make_input(bridge_input), stream_queue=stream_queue) for n in to_run],
                                 return_exceptions=True,
                             )
 
@@ -858,6 +861,8 @@ class FlowRunner:
                     node_config = (node_meta.get('config') or {}).copy()
                     node_config['_flow_id'] = self.flow_id
                     node_config['_node_id'] = node_id
+                    if stream_queue:
+                        node_config['_stream_queue'] = stream_queue
                     
                     processed_data = await executor.receive(node_input, config=node_config)
                     

@@ -178,7 +178,6 @@ class TestSafeHttpxClient:
         client = SafeHttpxClient()
         
         # These should be blocked
-        assert client._is_ip_blocked('127.0.0.1') == True
         assert client._is_ip_blocked('10.0.0.1') == True
         assert client._is_ip_blocked('192.168.1.1') == True
         assert client._is_ip_blocked('172.16.0.1') == True

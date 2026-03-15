@@ -65,6 +65,13 @@ class LLMExecutor:
 
         messages = input_data.get("messages", [])
         
+        # Check if streaming is enabled and tools are NOT present
+        stream_queue = config.get("_stream_queue")
+        has_tools = bool(final_params.get("tools"))
+        
+        if stream_queue and not has_tools:
+            return await self._receive_with_stream(messages, final_params, stream_queue)
+        
         # Execute with timeout and retry logic
         return await self._execute_with_retry_and_timeout(
             messages=messages,
@@ -173,6 +180,52 @@ class LLMExecutor:
         except asyncio.TimeoutError:
             logger.error(f"LLM call timed out after {timeout}s")
             return {"error": f"Timeout after {timeout}s", "choices": []}
+
+    async def _receive_with_stream(self, messages: list, params: dict, queue: asyncio.Queue) -> dict:
+        """
+        Execute LLM call using streaming endpoint and pushing tokens to the queue.
+        Re-assembles full response text and returns choices dict matching normal output.
+        """
+        full_content = ""
+        
+        try:
+            stream_gen = self.bridge.chat_completion_stream(
+                messages=messages,
+                **params
+            )
+            
+            async for chunk in stream_gen:
+                if "error" in chunk:
+                    logger.warning(f"Error chunk in stream: {chunk['error']}")
+                    break
+                    
+                choices = chunk.get("choices", [])
+                if not choices:
+                    continue
+                    
+                delta = choices[0].get("delta", {})
+                content = delta.get("content")
+                if content:
+                    full_content += content
+                    # Put just the token event into the queue
+                    await queue.put({"type": "token", "content": content})
+                    
+        except asyncio.TimeoutError:
+            logger.warning("Timeout during LLM streaming")
+        except Exception as e:
+            logger.error(f"Error during LLM streaming: {e}")
+            
+        return {
+            "choices": [
+                {
+                    "message": {
+                        "role": "assistant",
+                        "content": full_content
+                    },
+                    "finish_reason": "stop"
+                }
+            ]
+        }
 
     async def send(self, processed_data: dict) -> dict:
         return processed_data

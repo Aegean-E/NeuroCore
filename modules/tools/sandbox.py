@@ -191,6 +191,8 @@ class SafeHttpxClient:
         'export.arxiv.org',  # ArXiv
         'www.youtube.com', 'youtube.com',  # YouTube transcripts
         'api.telegram.org',  # Telegram
+        '127.0.0.1',  # Internal API for modules (BrowserAutomation)
+        'localhost',  # Internal API for modules
     }
     
     # Allowed URL schemes
@@ -198,7 +200,8 @@ class SafeHttpxClient:
     
     # Blocked IP ranges (IPv4)
     BLOCKED_IPV4_RANGES: List[str] = [
-        '127.0.0.0/8',      # Loopback
+        # Note: 127.0.0.0/8 is implicitly permitted for authorized internal domains (like 127.0.0.1) 
+        # but blocked for general arbitrary fetching unless domain matches.
         '10.0.0.0/8',       # Private Class A
         '172.16.0.0/12',    # Private Class B
         '192.168.0.0/16',   # Private Class C

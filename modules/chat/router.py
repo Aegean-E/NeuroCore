@@ -11,11 +11,15 @@ from core.flow_runner import FlowRunner
 from core.flow_manager import flow_manager
 import json
 import logging
+import asyncio
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
 templates = Jinja2Templates(directory="web/templates")
+
+# Global dict to store active streaming queues for chat sessions
+active_streams = {}
 
 @router.get("", response_class=HTMLResponse)
 async def chat_page(request: Request):
@@ -183,97 +187,127 @@ async def send_message(
         flow_error = "no_active_flow"
         elapsed_time = 0
     else:
-        start_time = time.time()
-        try:
-            runner = FlowRunner(flow_id=active_flow['id'])
+        # Check if streaming is enabled via some parameter or globally, for now we will assume streaming is always preferred for chat if tools aren't blocking it.
+        # However, to be safe, we'll try to stream.
+        msg_id = int(time.time() * 1000)
+        queue = asyncio.Queue()
+        active_streams[session_id] = queue
+        
+        async def run_flow_background():
+            from modules.chat.sessions import session_manager
             
-            # The initial input to the flow will be the full chat history.
-            initial_data = {"messages": active_session["history"], "_input_source": "chat"}
-            
-            flow_result = await runner.run(initial_data)
-            
-            elapsed_time = round(time.time() - start_time, 1)
-            
-            # Check for structured error flag from flow_result
-            if flow_result.get("_is_error"):
-                ai_response = f"Flow Execution Error: {flow_result.get('error', 'Unknown error')}"
-                flow_error = "flow_error"
-            elif "error" in flow_result:
-                ai_response = f"Flow Execution Error: {flow_result['error']}"
-                flow_error = "flow_error"
-            else:
-                # The final output of the flow is expected to be the AI response content,
-                # typically processed by a "Chat Output" node.
-                ai_response = flow_result.get("content", "Flow finished but produced no valid response content.")
+            start_time = time.time()
+            try:
+                runner = FlowRunner(flow_id=active_flow['id'])
+                initial_data = {"messages": active_session["history"], "_input_source": "chat"}
+                flow_result = await runner.run(initial_data, stream_queue=queue)
                 
-                # Check for "no valid response" case - but NOT "Error:" string
-                if "produced no valid response" in ai_response:
-                    flow_error = "no_valid_content"
-                    ai_response = None  # Mark as failed so we don't add to history
-        except Exception as e:
-            ai_response = f"Critical Error running AI Flow: {e}"
-            flow_error = "exception"
-            elapsed_time = round(time.time() - start_time, 1) if 'start_time' in locals() else 0
+                ai_response = flow_result.get("content", "")
+                if ai_response:
+                    session_manager.add_message(session_id, "assistant", ai_response)
+                    await queue.put({"type": "replace", "content": ai_response})
+                elif flow_result.get("error"):
+                    session_manager.add_message(session_id, "assistant", f"Error: {flow_result['error']}")
+                    await queue.put({"type": "error", "content": flow_result["error"]})
+                else:
+                    await queue.put({"type": "error", "content": "Flow produced no response."})
+                    
+                # --- Auto-Renaming Logic ---
+                module_manager = request.app.state.module_manager
+                chat_module = module_manager.modules.get("chat")
+                config = chat_module.get("config", {}) if chat_module else {}
+                auto_rename_turns = int(config.get("auto_rename_turns", 3))
 
-    # Add AI response to history only if it's valid and not an error
-    if ai_response and not flow_error:
-        session_manager.add_message(session_id, "assistant", ai_response)
+                # Reload session to ensure latest state
+                current_session = session_manager.get_session(session_id)
+                if current_session and len(current_session["history"]) >= auto_rename_turns * 2 and current_session["name"].startswith("Session "):
+                    try:
+                        user_text = None
+                        ai_text = None
+                        for msg in current_session["history"]:
+                            content = msg.get("content", "")
+                            if msg.get("role") == "user" and user_text is None:
+                                user_text = content if isinstance(content, str) else "Image/Multimodal Content"
+                            elif msg.get("role") == "assistant" and ai_text is None:
+                                ai_text = content if isinstance(content, str) else "Image/Multimodal Content"
+                            if user_text and ai_text:
+                                break
+                        
+                        if user_text is None: user_text = "Image/Multimodal Content"
+                        if ai_text is None: ai_text = "Response"
+                        
+                        summary_context = f"User: {user_text[:500]}\\nAI: {ai_text[:500]}"
+                        prompt = f"Generate a short, concise title (3-5 words) for this conversation based on the start:\\n\\n{summary_context}\\n\\nTitle:"
+                        
+                        title_response = await llm.chat_completion(
+                            messages=[{"role": "user", "content": prompt}],
+                            temperature=0.7,
+                            max_tokens=15
+                        )
+                        
+                        if "choices" in title_response:
+                            new_title = title_response["choices"][0]["message"]["content"].strip().strip('"')
+                            if new_title and len(new_title) < 50:
+                                session_manager.rename_session(session_id, new_title)
+                                await queue.put({"type": "rename", "content": new_title})
+                    except Exception as err:
+                        logger.warning(f"Auto-rename failed: {err}")
+                
+            except Exception as e:
+                logger.error(f"Stream generation error: {e}")
+                await queue.put({"type": "error", "content": str(e)})
+            finally:
+                await queue.put(None)
+        
+        # Start the background execution
+        asyncio.create_task(run_flow_background())
+        
+        return templates.TemplateResponse(
+            request, 
+            "chat_message_streaming.html", 
+            {
+                "user_message": user_content,
+                "session_id": session_id,
+                "msg_id": msg_id
+            },
+            headers={"HX-Trigger": "sessionsChanged"}
+        )
 
-    # Reload session to ensure we have the absolute latest state for auto-renaming
-    active_session = session_manager.get_session(session_id)
-
-    # --- Auto-Renaming Logic ---
-    auto_rename_turns = int(config.get("auto_rename_turns", 3))
-
-    if len(active_session["history"]) >= auto_rename_turns * 2 and active_session["name"].startswith("Session "):
+@router.get("/stream/{session_id}")
+async def stream_chat(session_id: str):
+    from fastapi.responses import StreamingResponse
+    import json
+    
+    queue = active_streams.get(session_id)
+    
+    async def event_generator():
+        if not queue:
+            yield "event: error\ndata: No active stream\n\n"
+            return
+            
         try:
-            # Construct a prompt to summarize the conversation
-            # We use the first user message and the AI response
-            # Find first user message and first assistant message robustly
-            user_text = None
-            ai_text = None
-            for msg in active_session["history"]:
-                content = msg.get("content", "")
-                if msg.get("role") == "user" and user_text is None:
-                    user_text = content if isinstance(content, str) else "Image/Multimodal Content"
-                elif msg.get("role") == "assistant" and ai_text is None:
-                    ai_text = content if isinstance(content, str) else "Image/Multimodal Content"
-                if user_text and ai_text:
+            while True:
+                chunk = await queue.get()
+                if chunk is None:
+                    yield "event: done\ndata: {}\n\n"
                     break
-            
-            # Fallback if not found
-            if user_text is None:
-                user_text = "Image/Multimodal Content"
-            if ai_text is None:
-                ai_text = "Response"
-            
-            # Truncate to avoid huge context if messages are long
-            summary_context = f"User: {user_text[:500]}\nAI: {ai_text[:500]}"
-            
-            prompt = f"Generate a short, concise title (3-5 words) for this conversation based on the start:\n\n{summary_context}\n\nTitle:"
-            
-            # Call LLM for title generation
-            title_response = await llm.chat_completion(
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0.7,
-                max_tokens=15
-            )
-            
-            if "choices" in title_response:
-                new_title = title_response["choices"][0]["message"]["content"].strip().strip('"')
-                if new_title and len(new_title) < 50:
-                    session_manager.rename_session(session_id, new_title)
-        except Exception as e:
-            logger.warning(f"Auto-rename failed: {e}")
+                    
+                if isinstance(chunk, dict) and chunk.get("type") == "token":
+                    payload = json.dumps({"text": chunk.get("content", "")})
+                    yield f"event: message\ndata: {payload}\n\n"
+                elif isinstance(chunk, dict) and chunk.get("type") == "error":
+                    payload = json.dumps({"error": chunk.get("content", "")})
+                    yield f"event: error\ndata: {payload}\n\n"
+                elif isinstance(chunk, dict) and chunk.get("type") == "replace":
+                    payload = json.dumps({"text": chunk.get("content", "")})
+                    yield f"event: replace\ndata: {payload}\n\n"
+                elif isinstance(chunk, dict) and chunk.get("type") == "rename":
+                    payload = json.dumps({"title": chunk.get("content", "")})
+                    yield f"event: rename\ndata: {payload}\n\n"
+        finally:
+            if session_id in active_streams:
+                del active_streams[session_id]
+                
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
 
-    return templates.TemplateResponse(
-        request, 
-        "chat_message_pair.html", 
-        {
-            "user_message": user_content,
-            "ai_response": ai_response or "Flow failed to produce a response. Please check the flow configuration.",
-            "elapsed_time": elapsed_time
-        },
-        headers={"HX-Trigger": "sessionsChanged"}
-    )
 

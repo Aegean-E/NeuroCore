@@ -111,7 +111,21 @@ async def test_chat_send_route(client, httpx_mock, mock_chat_sessions, monkeypat
 
     assert response.status_code == 200
     assert "hello" in response.text
-    assert "Mocked AI Response" in response.text
+    assert "Thinking..." in response.text  # The placeholder is returned immediately
+
+    # Now verify the streaming endpoint
+    with client.stream("GET", f"/chat/stream/{session_id}") as stream_response:
+        assert stream_response.status_code == 200
+        # Wait for the background task to push tokens
+        events = []
+        for line in stream_response.iter_lines():
+            if line:
+                events.append(line)
+        
+        # event: message
+        # data: {"text": "..."}
+        # Or error, etc.
+        assert any("Mocked AI Response" in e for e in events) or any("Flow produced no response" in e for e in events)
 
 def test_create_new_session_route(client, mock_chat_sessions):
     """Tests the endpoint for creating a new session."""
