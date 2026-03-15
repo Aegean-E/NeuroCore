@@ -21,6 +21,104 @@ templates = Jinja2Templates(directory="web/templates")
 # Global dict to store active streaming queues for chat sessions
 active_streams = {}
 
+
+def _extract_thinking_steps(flow_result: dict) -> list:
+    """Extract intermediate agent thinking steps from a flow result.
+
+    Returns a list of step dicts with keys:
+        type: 'tool_call' | 'tool_result' | 'assistant' | 'reflection'
+        content: str  (display text)
+        name: str | None  (tool name for tool events)
+    """
+    steps = []
+    messages = flow_result.get("messages", [])
+    agent_loop_trace = flow_result.get("agent_loop_trace", [])
+
+    # Only emit thinking trace when there was actual agent loop activity
+    total_tool_calls = sum(len(t.get("tool_calls", [])) for t in agent_loop_trace)
+    has_reflections = any(
+        msg.get("role") == "system" and "REFLECTION FEEDBACK" in (msg.get("content") or "")
+        for msg in messages
+    )
+    has_intermediate_assistant = sum(
+        1 for msg in messages
+        if msg.get("role") == "assistant" and (msg.get("tool_calls") or msg.get("content", "").strip())
+    ) > 1  # more than just the final answer
+
+    if not (total_tool_calls or has_reflections or has_intermediate_assistant):
+        return []  # Simple single-turn — no thinking to show
+
+    # Identify the final assistant message (last non-empty assistant turn)
+    final_assistant_idx = None
+    for i in range(len(messages) - 1, -1, -1):
+        m = messages[i]
+        if m.get("role") == "assistant" and (
+            m.get("content", "").strip() or not m.get("tool_calls")
+        ):
+            final_assistant_idx = i
+            break
+
+    for idx, msg in enumerate(messages):
+        role = msg.get("role", "")
+        content = msg.get("content") or ""
+
+        if role == "assistant":
+            tool_calls = msg.get("tool_calls", [])
+            if tool_calls:
+                for tc in tool_calls:
+                    fn = tc.get("function", {})
+                    name = fn.get("name", "?")
+                    raw_args = fn.get("arguments", "{}")
+                    try:
+                        args = json.loads(raw_args)
+                        args_display = ", ".join(f"{k}={repr(v)[:80]}" for k, v in args.items())
+                    except Exception:
+                        args_display = raw_args[:160]
+                    steps.append({
+                        "type": "tool_call",
+                        "name": name,
+                        "content": f"{name}({args_display})"
+                    })
+            elif content.strip() and idx != final_assistant_idx:
+                # Intermediate text response (not the final answer)
+                steps.append({
+                    "type": "assistant",
+                    "name": None,
+                    "content": content.strip()[:500]
+                })
+
+        elif role == "tool":
+            tool_name = msg.get("name", "tool")
+            success = msg.get("success", True)
+            display = (content or "").strip()[:400]
+            steps.append({
+                "type": "tool_result",
+                "name": tool_name,
+                "content": display,
+                "success": success
+            })
+
+        elif role == "system" and "REFLECTION FEEDBACK" in content:
+            # Extract just the feedback line
+            lines = content.strip().splitlines()
+            feedback_lines = []
+            capture = False
+            for line in lines:
+                if "REFLECTION FEEDBACK:" in line:
+                    capture = True
+                    feedback_lines.append(line.replace("REFLECTION FEEDBACK:", "").strip())
+                elif capture and line.startswith("ORIGINAL USER"):
+                    break
+                elif capture:
+                    feedback_lines.append(line)
+            steps.append({
+                "type": "reflection",
+                "name": None,
+                "content": " ".join(feedback_lines).strip()[:300]
+            })
+
+    return steps
+
 @router.get("", response_class=HTMLResponse)
 async def chat_page(request: Request):
     # Access module manager from app state to render the sidebar correctly
@@ -222,6 +320,11 @@ async def send_message(
                             ai_response = msg["content"].strip()
                             break
 
+                # --- Emit thinking trace (intermediate agent steps) ---
+                thinking_steps = _extract_thinking_steps(flow_result)
+                if thinking_steps:
+                    await queue.put({"type": "thinking", "content": thinking_steps})
+
                 if ai_response:
                     session_manager.add_message(session_id, "assistant", ai_response)
                     await queue.put({"type": "replace", "content": ai_response})
@@ -336,6 +439,9 @@ async def stream_chat(session_id: str):
                 elif isinstance(chunk, dict) and chunk.get("type") == "usage":
                     payload = json.dumps(chunk.get("content", {}))
                     yield f"event: usage\ndata: {payload}\n\n"
+                elif isinstance(chunk, dict) and chunk.get("type") == "thinking":
+                    payload = json.dumps(chunk.get("content", []))
+                    yield f"event: thinking\ndata: {payload}\n\n"
         finally:
             if session_id in active_streams:
                 del active_streams[session_id]
