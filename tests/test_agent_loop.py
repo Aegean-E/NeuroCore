@@ -1168,10 +1168,11 @@ class TestHybridAgentExecutor:
     # --- excluded tools set ---
 
     def test_excluded_tools_set(self):
-        """Peek/Search/Chunk/SubCall/SetFinal must be excluded (all need prompt_var)."""
+        """Only SetFinal is excluded; Peek/Search/Chunk/SubCall are now hybrid-compatible."""
         excluded = HybridAgentExecutor._EXCLUDED_TOOLS
-        for name in ("Peek", "Search", "Chunk", "SubCall", "SetFinal"):
-            assert name in excluded, f"{name} should be in _EXCLUDED_TOOLS"
+        assert "SetFinal" in excluded
+        for name in ("Peek", "Search", "Chunk", "SubCall", "GetVariable", "SetVariable"):
+            assert name not in excluded, f"{name} should NOT be in _EXCLUDED_TOOLS"
 
     # --- system note is injected ---
 
@@ -1375,6 +1376,45 @@ class TestHybridAgentExecutor:
 
         assert any(s["type"] == "tool_call" for s in ex._thinking_steps)
         assert any(s["type"] == "tool_result" for s in ex._thinking_steps)
+
+    # --- SubCall built-in (async LLM call, not sandbox) ---
+
+    async def test_sub_call_executes_llm(self):
+        ex = self._make_executor()
+        ex.llm.chat_completion = AsyncMock(return_value=make_llm_response("sub answer"))
+        rs = {**self._repl_state(), "sub_call_count": 0, "max_sub_calls": 20,
+              "recursion_depth": 0, "max_recursion_depth": 3,
+              "estimated_cost": 0.0, "max_cost_usd": 1.0}
+        result = await ex._execute_sub_call({"prompt": "summarise this"}, rs)
+        assert result["success"] is True
+        assert result["content"] == "sub answer"
+        assert rs["sub_call_count"] == 1
+
+    async def test_sub_call_respects_max_sub_calls(self):
+        ex = self._make_executor()
+        rs = {**self._repl_state(), "sub_call_count": 20, "max_sub_calls": 20,
+              "recursion_depth": 0, "max_recursion_depth": 3,
+              "estimated_cost": 0.0, "max_cost_usd": 1.0}
+        result = await ex._execute_sub_call({"prompt": "hello"}, rs)
+        assert result["success"] is False
+        assert "max_sub_calls" in result["content"]
+
+    async def test_sub_call_intercepted_in_execute_tool(self):
+        """SubCall tool_call must be handled as built-in, not via sandbox."""
+        ex = self._make_executor()
+        ex.llm.chat_completion = AsyncMock(return_value=make_llm_response("built-in result"))
+        rs = {**self._repl_state(), "sub_call_count": 0, "max_sub_calls": 20,
+              "recursion_depth": 0, "max_recursion_depth": 3,
+              "estimated_cost": 0.0, "max_cost_usd": 1.0}
+        tool_call = {
+            "id": "sc1",
+            "function": {"name": "SubCall", "arguments": '{"prompt":"what is 2+2"}'},
+        }
+        result = await ex._execute_tool(tool_call, {}, rs, large_output_threshold=3000)
+        assert result["success"] is True
+        assert result["content"] == "built-in result"
+        # Sandbox must NOT have been called
+        ex._sandbox.execute.assert_not_called()
 
     # --- get_executor_class dispatcher ---
 

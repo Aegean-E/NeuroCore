@@ -1780,8 +1780,11 @@ class HybridAgentExecutor:
     - Handles tool outputs of arbitrary size without truncation.
     """
 
-    # Tools from the RLM library that require prompt_var or async LLM calls — exclude from hybrid
-    _EXCLUDED_TOOLS: frozenset = frozenset({"SetFinal", "Peek", "Search", "Chunk", "SubCall"})
+    # SetFinal changes the termination model — hybrid uses no-tool-calls convention instead.
+    # All other RLM tools (Peek, Search, Chunk, SubCall, GetVariable, SetVariable) work in
+    # hybrid: Peek/Search/Chunk now accept var_name to operate on stored variables; SubCall
+    # is intercepted as an async built-in (same approach as RLMAgentLoopExecutor).
+    _EXCLUDED_TOOLS: frozenset = frozenset({"SetFinal"})
 
     _tools_cache: dict = {"mtime": 0.0, "data": {}}
     _library_cache: dict = {"mtime": 0.0, "data": {}, "file_mtimes": {}}
@@ -1832,10 +1835,13 @@ class HybridAgentExecutor:
             "## Variable Storage\n"
             f"Tool outputs longer than {threshold:,} characters are stored as named variables "
             "instead of being placed inline. When a tool result shows "
-            "\"[Output stored as 'var_name': N chars | preview: ...]\", "
-            "call GetVariable(\"var_name\") to read the full content.\n"
-            "You can also store your own intermediate results with "
-            "SetVariable(name, value) and retrieve them with GetVariable(name)."
+            "\"[Output stored as 'var_name': N chars | preview: ...]\", use these tools:\n"
+            "- GetVariable(name) — read the full content of a variable\n"
+            "- Peek(var_name=name, start=0, end=1000) — read a character-range slice\n"
+            "- Search(var_name=name, pattern=\"regex\") — find regex matches inside a variable\n"
+            "- Chunk(var_name=name, size=2000, overlap=200) — split into overlapping chunks\n"
+            "- SetVariable(name, value) — store your own intermediate result\n"
+            "- SubCall(prompt=\"...\") — run a focused sub-prompt through the LLM"
         )
 
     def _load_tools(self):
@@ -1941,6 +1947,45 @@ class HybridAgentExecutor:
     # Core: adaptive tool execution
     # ------------------------------------------------------------------
 
+    async def _execute_sub_call(self, args: dict, repl_state: dict) -> dict:
+        """Execute SubCall as an async built-in (mirrors RLMAgentLoopExecutor).
+
+        Cannot run inside the sandbox because it needs an awaited LLM call.
+        """
+        if repl_state.get("sub_call_count", 0) >= repl_state.get("max_sub_calls", 20):
+            return {"role": "tool", "name": "sub_call", "content": "Error: max_sub_calls limit reached", "success": False}
+        if repl_state.get("recursion_depth", 0) >= repl_state.get("max_recursion_depth", 3):
+            return {"role": "tool", "name": "sub_call", "content": "Error: max_recursion_depth limit reached", "success": False}
+        if repl_state.get("estimated_cost", 0.0) >= repl_state.get("max_cost_usd", 1.0):
+            return {"role": "tool", "name": "sub_call", "content": "Error: max_cost_usd limit reached", "success": False}
+
+        prompt = args.get("prompt", "")
+        if not prompt:
+            return {"role": "tool", "name": "sub_call", "content": "Error: No prompt provided for SubCall", "success": False}
+
+        model = args.get("model") or repl_state.get("sub_call_model") or settings.get("default_model")
+        max_tokens = int(args.get("max_tokens", 2000))
+
+        repl_state["sub_call_count"] = repl_state.get("sub_call_count", 0) + 1
+        old_depth = repl_state.get("recursion_depth", 0)
+        repl_state["recursion_depth"] = old_depth + 1
+        try:
+            response = await self.llm.chat_completion(
+                messages=[{"role": "user", "content": prompt}],
+                model=model,
+                max_tokens=max_tokens,
+            )
+            repl_state["recursion_depth"] = old_depth
+            if response and "choices" in response:
+                content = response["choices"][0]["message"].get("content", "")
+                estimated_tokens = len(prompt) // 4 + max_tokens
+                repl_state["estimated_cost"] = repl_state.get("estimated_cost", 0.0) + (estimated_tokens / 1000) * 0.001
+                return {"role": "tool", "name": "sub_call", "content": content, "success": True}
+            return {"role": "tool", "name": "sub_call", "content": "Error: SubCall LLM returned no choices", "success": False}
+        except Exception as e:
+            repl_state["recursion_depth"] = old_depth
+            return {"role": "tool", "name": "sub_call", "content": f"Error in SubCall: {e}", "success": False}
+
     async def _execute_tool(
         self,
         tool_call: dict,
@@ -1959,6 +2004,12 @@ class HybridAgentExecutor:
             args = json.loads(tool_call["function"]["arguments"])
         except (json.JSONDecodeError, KeyError):
             args = {}
+
+        # SubCall requires an async LLM call — intercept before sandbox execution
+        if func_name.lower() in ("subcall", "sub_call"):
+            result = await self._execute_sub_call(args, repl_state)
+            result["tool_call_id"] = tool_call.get("id", "")
+            return result
 
         # Pass repl_state so RLM-library tools (Peek, GetVariable, …) work correctly
         args["_repl_state"] = repl_state
@@ -2246,7 +2297,13 @@ class HybridAgentExecutor:
 
         repl_state: dict = {
             "variables": {},
-            "_var_counts": {},  # per-tool call counter for unique variable naming
+            "_var_counts": {},      # per-tool call counter for unique variable naming
+            "sub_call_count": 0,
+            "max_sub_calls": 20,
+            "recursion_depth": 0,
+            "max_recursion_depth": 3,
+            "estimated_cost": 0.0,
+            "max_cost_usd": 1.0,
         }
         trace: list = []
 
