@@ -452,6 +452,26 @@
                 </div>
             </div>
         </div>
+        <!-- Messaging Input Node Editor -->
+        <div id="config-messaging-input" class="hidden">
+            <div class="space-y-4">
+                <div>
+                    <label class="block text-sm font-medium text-slate-400 mb-3">Accept messages from</label>
+                    <div id="messaging-input-platforms" class="space-y-2 bg-slate-950 border border-slate-700 rounded-xl p-4"></div>
+                    <p class="text-xs text-slate-500 mt-2">Leave all unchecked to accept messages from any platform.</p>
+                </div>
+            </div>
+        </div>
+        <!-- Messaging Output Node Editor -->
+        <div id="config-messaging-output" class="hidden">
+            <div class="space-y-4">
+                <div>
+                    <label class="block text-sm font-medium text-slate-400 mb-3">Send reply via</label>
+                    <div id="messaging-output-platform" class="space-y-2 bg-slate-950 border border-slate-700 rounded-xl p-4"></div>
+                    <p class="text-xs text-slate-500 mt-2">Auto routes the reply back to the same platform the message came from.</p>
+                </div>
+            </div>
+        </div>
         <!-- Conditional Router Editor -->
         <div id="config-conditional-router" class="hidden">
             <div class="space-y-4">
@@ -1096,6 +1116,16 @@
                                     ${(existingConfig.allowed_tools || []).length > 5 ? `<span class="bg-purple-900/30 px-1.5 py-0.5 rounded" title="${(existingConfig.allowed_tools || []).slice(5).join(', ')}">...</span>` : ''}
                                 </div>
                                 ` : ''}
+                                ${nodeTypeId === 'messaging_input' ? (() => {
+                                    const platforms = existingConfig.platforms || [];
+                                    const label = platforms.length === 0 ? 'All Platforms' : platforms.map(id => MESSAGING_PLATFORMS.find(p => p.id === id)?.label || id).join(', ');
+                                    return `<div id="tools-badge-${nodeId}" class="text-[9px] text-blue-400 mt-1"><span class="bg-blue-900/30 px-2 py-0.5 rounded">${label}</span></div>`;
+                                })() : ''}
+                                ${nodeTypeId === 'messaging_output' ? (() => {
+                                    const plat = existingConfig.platform || 'auto';
+                                    const platLabel = plat === 'auto' ? 'Auto' : (MESSAGING_PLATFORMS.find(p => p.id === plat)?.label || plat);
+                                    return `<div id="tools-badge-${nodeId}" class="text-[9px] text-emerald-400 mt-1"><span class="bg-emerald-900/30 px-2 py-0.5 rounded">${platLabel}</span></div>`;
+                                })() : ''}
                             </div>
                         </div>
                         <div class="flex space-x-1">
@@ -2005,6 +2035,15 @@
             }
         }
 
+        // Platform registry — extend this list to support future messaging platforms.
+        // Each entry: { id: string (matches _messaging_platform values), label: string (display name) }
+        const MESSAGING_PLATFORMS = [
+            { id: 'telegram',  label: 'Telegram'  },
+            { id: 'discord',   label: 'Discord'   },
+            { id: 'signal',    label: 'Signal'    },
+            { id: 'whatsapp',  label: 'WhatsApp'  },
+        ];
+
         // --- Config Modal Logic ---
         window.openConfigModal = function(nodeId) {
             activeConfigNodeId = nodeId;
@@ -2026,6 +2065,8 @@
             document.getElementById('config-schedule-start').classList.add('hidden');
             document.getElementById('config-agent-loop').classList.add('hidden');
             document.getElementById('config-planner').classList.add('hidden');
+            document.getElementById('config-messaging-input').classList.add('hidden');
+            document.getElementById('config-messaging-output').classList.add('hidden');
 
             if (node.nodeTypeId === 'delay_node') {
                 document.getElementById('config-delay').classList.remove('hidden');
@@ -2121,6 +2162,29 @@
                 document.getElementById('config-schedule-start').classList.remove('hidden');
                 document.getElementById('schedule-date-input').value = node.config.schedule_date || '';
                 document.getElementById('schedule-time-input').value = node.config.schedule_time || '';
+            } else if (node.nodeTypeId === 'messaging_input') {
+                document.getElementById('config-messaging-input').classList.remove('hidden');
+                const allowedPlatforms = node.config.platforms || [];
+                const inputContainer = document.getElementById('messaging-input-platforms');
+                inputContainer.innerHTML = MESSAGING_PLATFORMS.map(p => {
+                    const checked = allowedPlatforms.includes(p.id) ? 'checked' : '';
+                    return `<label class="flex items-center space-x-3 cursor-pointer hover:bg-slate-900 px-2 py-2 rounded transition-colors">
+                        <input type="checkbox" value="${p.id}" ${checked} class="messaging-input-platform w-4 h-4 rounded border-slate-700 bg-slate-950 text-blue-600 focus:ring-blue-500">
+                        <span class="text-sm text-slate-300">${p.label}</span>
+                    </label>`;
+                }).join('');
+            } else if (node.nodeTypeId === 'messaging_output') {
+                document.getElementById('config-messaging-output').classList.remove('hidden');
+                const selectedPlatform = node.config.platform || 'auto';
+                const outputContainer = document.getElementById('messaging-output-platform');
+                const outputOptions = [{ id: 'auto', label: 'Auto — reply to originating platform' }, ...MESSAGING_PLATFORMS];
+                outputContainer.innerHTML = outputOptions.map(p => {
+                    const checked = selectedPlatform === p.id ? 'checked' : '';
+                    return `<label class="flex items-center space-x-3 cursor-pointer hover:bg-slate-900 px-2 py-2 rounded transition-colors">
+                        <input type="radio" name="messaging-output-platform-radio" value="${p.id}" ${checked} class="w-4 h-4 border-slate-700 bg-slate-950 text-blue-600 focus:ring-blue-500">
+                        <span class="text-sm text-slate-300">${p.label}</span>
+                    </label>`;
+                }).join('');
             } else {
                 document.getElementById('config-default').classList.remove('hidden');
                 document.getElementById('node-config-input').value = JSON.stringify(node.config || {}, null, 4);
@@ -2249,6 +2313,12 @@
                     if (falseBranches.length > 0) {
                         newConfig.false_branches = falseBranches;
                     }
+                } else if (node.nodeTypeId === 'messaging_input') {
+                    const checked = Array.from(document.querySelectorAll('.messaging-input-platform:checked')).map(cb => cb.value);
+                    newConfig = { platforms: checked };
+                } else if (node.nodeTypeId === 'messaging_output') {
+                    const radio = document.querySelector('input[name="messaging-output-platform-radio"]:checked');
+                    newConfig = { platform: radio ? radio.value : 'auto' };
                 } else if (node.nodeTypeId === 'schedule_start_node') {
                     newConfig = {
                         schedule_date: document.getElementById('schedule-date-input').value,
@@ -2312,6 +2382,28 @@
                         if (titleEl) {
                             titleEl.insertAdjacentHTML('afterend', badgeHtml);
                         }
+                    } else if (node.nodeTypeId === 'messaging_input') {
+                        const platforms = newConfig.platforms || [];
+                        const label = platforms.length === 0
+                            ? 'All Platforms'
+                            : platforms.map(id => MESSAGING_PLATFORMS.find(p => p.id === id)?.label || id).join(', ');
+                        const badgeHtml = `
+                            <div id="tools-badge-${node.id}" class="text-[9px] text-blue-400 mt-1">
+                                <span class="bg-blue-900/30 px-2 py-0.5 rounded">${label}</span>
+                            </div>
+                        `;
+                        const titleEl = nodeElement.querySelector('[id^="explanation-"]');
+                        if (titleEl) titleEl.insertAdjacentHTML('afterend', badgeHtml);
+                    } else if (node.nodeTypeId === 'messaging_output') {
+                        const plat = newConfig.platform || 'auto';
+                        const platLabel = plat === 'auto' ? 'Auto' : (MESSAGING_PLATFORMS.find(p => p.id === plat)?.label || plat);
+                        const badgeHtml = `
+                            <div id="tools-badge-${node.id}" class="text-[9px] text-emerald-400 mt-1">
+                                <span class="bg-emerald-900/30 px-2 py-0.5 rounded">${platLabel}</span>
+                            </div>
+                        `;
+                        const titleEl = nodeElement.querySelector('[id^="explanation-"]');
+                        if (titleEl) titleEl.insertAdjacentHTML('afterend', badgeHtml);
                     }
                 }
                 

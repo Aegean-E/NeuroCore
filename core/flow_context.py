@@ -124,7 +124,9 @@ class FlowContext(BaseModel):
     
     # === Internal/State ===
     repeat_count: int = Field(default=0, description="Repeater loop count")
-    input_source: Optional[str] = Field(default=None, description="Input source (chat/telegram)")
+    input_source: Optional[str] = Field(default=None, description="Input source (chat/telegram/discord/messaging)")
+    messaging_platform: Optional[str] = Field(default=None, description="Active messaging platform (telegram/discord/signal)")
+    messaging_reply_to: Optional[str] = Field(default=None, description="Platform-specific reply address (chat_id/channel_id/phone)")
     current_goal: Optional[Dict[str, Any]] = Field(default=None, description="Active goal")
     error: Optional[str] = Field(default=None, description="Error message")
     planning_error: Optional[str] = Field(default=None, description="Planning error message")
@@ -207,6 +209,8 @@ class FlowContext(BaseModel):
             "_route_targets": "route_targets",
             "_repeat_count": "repeat_count",
             "_input_source": "input_source",
+            "_messaging_platform": "messaging_platform",
+            "_messaging_reply_to": "messaging_reply_to",
         }
         
         for old_key, new_key in field_mappings.items():

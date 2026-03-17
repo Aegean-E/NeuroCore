@@ -696,6 +696,195 @@
     </div>
     {% endif %}
 
+    {% if module.id == 'messaging_bridge' and module.enabled %}
+    <div class="bg-slate-900 rounded-xl border border-slate-800 p-6 mt-6">
+        <h3 class="text-base font-semibold text-white mb-4">Platform Settings</h3>
+
+        <!-- Tab bar -->
+        <div class="flex space-x-1 mb-6 bg-slate-950 rounded-lg p-1" id="mb-tabs">
+            <button type="button" onclick="mbShowTab('telegram')"
+                    id="mb-tab-telegram"
+                    class="flex-1 py-2 px-3 rounded-md text-sm font-medium transition-colors bg-slate-700 text-white">
+                Telegram
+            </button>
+            <button type="button" onclick="mbShowTab('discord')"
+                    id="mb-tab-discord"
+                    class="flex-1 py-2 px-3 rounded-md text-sm font-medium transition-colors text-slate-400 hover:text-white">
+                Discord
+            </button>
+            <button type="button" onclick="mbShowTab('signal')"
+                    id="mb-tab-signal"
+                    class="flex-1 py-2 px-3 rounded-md text-sm font-medium transition-colors text-slate-400 hover:text-white">
+                Signal
+            </button>
+            <button type="button" onclick="mbShowTab('whatsapp')"
+                    id="mb-tab-whatsapp"
+                    class="flex-1 py-2 px-3 rounded-md text-sm font-medium transition-colors text-slate-400 hover:text-white">
+                WhatsApp
+            </button>
+        </div>
+
+        <!-- Telegram tab -->
+        <div id="mb-panel-telegram">
+            <form hx-post="/messaging_bridge/settings/save/telegram"
+                  hx-swap="none"
+                  hx-on::after-request="const btn = this.querySelector('button[type=submit]'); const orig = btn.innerText; btn.innerText = 'Saved!'; btn.classList.remove('bg-blue-600', 'hover:bg-blue-500'); btn.classList.add('bg-emerald-600', 'hover:bg-emerald-500'); setTimeout(() => { btn.innerText = orig; btn.classList.add('bg-blue-600', 'hover:bg-blue-500'); btn.classList.remove('bg-emerald-600', 'hover:bg-emerald-500'); }, 2000);">
+                <div class="grid grid-cols-1 gap-6">
+                    <div>
+                        <label class="block text-sm font-medium text-slate-400 mb-2">Bot Token</label>
+                        <input type="password" name="bot_token" value="{{ module.config.telegram_bot_token }}" placeholder="123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11"
+                               class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-slate-400 mb-2">Chat ID</label>
+                        <input type="number" name="chat_id" value="{{ module.config.telegram_chat_id }}" placeholder="123456789"
+                               class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all">
+                        <p class="text-xs text-slate-500 mt-2">The Chat ID where the bot will send messages by default.</p>
+                    </div>
+                </div>
+                <div class="mt-6 bg-slate-950/50 rounded-lg p-4 border border-slate-700/50">
+                    <h4 class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Available Commands</h4>
+                    <ul class="text-sm text-slate-300 space-y-1 font-mono">
+                        <li><span class="text-blue-400">/new_session</span> — Start a fresh conversation</li>
+                        <li><span class="text-blue-400">/delete_session</span> — Delete current history</li>
+                        <li><span class="text-blue-400">/help</span> — Show command list</li>
+                    </ul>
+                </div>
+                <div class="mt-4 flex justify-end">
+                    <button type="submit" class="bg-blue-600 hover:bg-blue-500 text-white px-6 py-2 rounded-lg text-sm font-semibold transition-colors">Save Telegram Settings</button>
+                </div>
+            </form>
+        </div>
+
+        <!-- Discord tab -->
+        <div id="mb-panel-discord" class="hidden">
+            <form hx-post="/messaging_bridge/settings/save/discord"
+                  hx-swap="none"
+                  hx-on::after-request="const btn = this.querySelector('button[type=submit]'); const orig = btn.innerText; btn.innerText = 'Saved!'; btn.classList.remove('bg-indigo-600', 'hover:bg-indigo-500'); btn.classList.add('bg-emerald-600', 'hover:bg-emerald-500'); setTimeout(() => { btn.innerText = orig; btn.classList.add('bg-indigo-600', 'hover:bg-indigo-500'); btn.classList.remove('bg-emerald-600', 'hover:bg-emerald-500'); }, 2000);">
+                <div class="grid grid-cols-1 gap-6">
+                    <div>
+                        <label class="block text-sm font-medium text-slate-400 mb-2">Bot Token</label>
+                        <input type="password" name="bot_token" value="{{ module.config.discord_bot_token }}" placeholder="OTk4..."
+                               class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-slate-400 mb-2">Channel ID</label>
+                        <input type="text" name="channel_id" value="{{ module.config.discord_channel_id }}" placeholder="123456789012345678"
+                               class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all">
+                        <p class="text-xs text-slate-500 mt-2">The Discord channel the bot listens to and replies in.</p>
+                    </div>
+                </div>
+                <div class="mt-6 bg-slate-950/50 rounded-lg p-4 border border-slate-700/50">
+                    <h4 class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Setup Notes</h4>
+                    <ul class="text-sm text-slate-300 space-y-1">
+                        <li>• Enable <span class="font-mono text-indigo-400">MESSAGE CONTENT</span> privileged intent in the Discord Developer Portal.</li>
+                        <li>• Install <span class="font-mono text-slate-300">websockets</span> package for real-time message receiving.</li>
+                    </ul>
+                </div>
+                <div class="mt-4 flex justify-end">
+                    <button type="submit" class="bg-indigo-600 hover:bg-indigo-500 text-white px-6 py-2 rounded-lg text-sm font-semibold transition-colors">Save Discord Settings</button>
+                </div>
+            </form>
+        </div>
+
+        <!-- Signal tab -->
+        <div id="mb-panel-signal" class="hidden">
+            <form hx-post="/messaging_bridge/settings/save/signal"
+                  hx-swap="none"
+                  hx-on::after-request="const btn = this.querySelector('button[type=submit]'); const orig = btn.innerText; btn.innerText = 'Saved!'; btn.classList.remove('bg-blue-500', 'hover:bg-blue-400'); btn.classList.add('bg-emerald-600', 'hover:bg-emerald-500'); setTimeout(() => { btn.innerText = orig; btn.classList.add('bg-blue-500', 'hover:bg-blue-400'); btn.classList.remove('bg-emerald-600', 'hover:bg-emerald-500'); }, 2000);">
+                <div class="grid grid-cols-1 gap-6">
+                    <div>
+                        <label class="block text-sm font-medium text-slate-400 mb-2">signal-cli REST API URL</label>
+                        <input type="text" name="api_url" value="{{ module.config.signal_api_url }}" placeholder="http://localhost:8080"
+                               class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all">
+                        <p class="text-xs text-slate-500 mt-2">URL of your running signal-cli REST API instance.</p>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-slate-400 mb-2">Phone Number (E.164)</label>
+                        <input type="text" name="phone_number" value="{{ module.config.signal_phone_number }}" placeholder="+12025551234"
+                               class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all">
+                        <p class="text-xs text-slate-500 mt-2">The registered Signal account number in E.164 format.</p>
+                    </div>
+                </div>
+                <div class="mt-6 bg-slate-950/50 rounded-lg p-4 border border-slate-700/50">
+                    <h4 class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Setup Notes</h4>
+                    <ul class="text-sm text-slate-300 space-y-1">
+                        <li>• Requires <a href="https://github.com/bbernhard/signal-cli-rest-api" target="_blank" class="text-blue-400 hover:underline">signal-cli-rest-api</a> running separately.</li>
+                        <li>• Run with Docker: <span class="font-mono text-slate-300 text-xs">docker run -p 8080:8080 bbernhard/signal-cli-rest-api</span></li>
+                        <li>• Register/link your number before connecting.</li>
+                    </ul>
+                </div>
+                <div class="mt-4 flex justify-end">
+                    <button type="submit" class="bg-blue-500 hover:bg-blue-400 text-white px-6 py-2 rounded-lg text-sm font-semibold transition-colors">Save Signal Settings</button>
+                </div>
+            </form>
+        </div>
+
+        <!-- WhatsApp tab -->
+        <div id="mb-panel-whatsapp" class="hidden">
+            <form hx-post="/messaging_bridge/settings/save/whatsapp"
+                  hx-swap="none"
+                  hx-on::after-request="const btn = this.querySelector('button[type=submit]'); const orig = btn.innerText; btn.innerText = 'Saved!'; btn.classList.remove('bg-green-600', 'hover:bg-green-500'); btn.classList.add('bg-emerald-600', 'hover:bg-emerald-500'); setTimeout(() => { btn.innerText = orig; btn.classList.add('bg-green-600', 'hover:bg-green-500'); btn.classList.remove('bg-emerald-600', 'hover:bg-emerald-500'); }, 2000);">
+                <div class="grid grid-cols-1 gap-6">
+                    <div>
+                        <label class="block text-sm font-medium text-slate-400 mb-2">Evolution API URL</label>
+                        <input type="text" name="api_url" value="{{ module.config.whatsapp_api_url }}" placeholder="http://localhost:8080"
+                               class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-green-500 transition-all">
+                        <p class="text-xs text-slate-500 mt-2">URL of your running Evolution API instance.</p>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-slate-400 mb-2">API Key</label>
+                        <input type="password" name="api_key" value="{{ module.config.whatsapp_api_key }}" placeholder="your-evolution-api-key"
+                               class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-green-500 transition-all">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-slate-400 mb-2">Instance Name</label>
+                        <input type="text" name="instance" value="{{ module.config.whatsapp_instance }}" placeholder="my-instance"
+                               class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-green-500 transition-all">
+                        <p class="text-xs text-slate-500 mt-2">The Evolution API instance name you created and linked to WhatsApp.</p>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-slate-400 mb-2">Your WhatsApp Number (E.164)</label>
+                        <input type="text" name="phone_number" value="{{ module.config.whatsapp_phone_number }}" placeholder="+12025551234"
+                               class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-green-500 transition-all">
+                        <p class="text-xs text-slate-500 mt-2">Used as the default recipient for flow-triggered output messages.</p>
+                    </div>
+                </div>
+                <div class="mt-6 bg-slate-950/50 rounded-lg p-4 border border-slate-700/50">
+                    <h4 class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Setup Notes</h4>
+                    <ul class="text-sm text-slate-300 space-y-1">
+                        <li>• Requires <a href="https://github.com/EvolutionAPI/evolution-api" target="_blank" class="text-green-400 hover:underline">Evolution API</a> running separately.</li>
+                        <li>• Run with Docker: <span class="font-mono text-slate-300 text-xs">docker run -p 8080:8080 atendai/evolution-api:latest</span></li>
+                        <li>• In Evolution API, set the webhook URL to: <span class="font-mono text-slate-300 text-xs">http://your-server/messaging_bridge/webhook/whatsapp</span></li>
+                        <li>• Scan the QR code in Evolution API to link your WhatsApp account.</li>
+                    </ul>
+                </div>
+                <div class="mt-4 flex justify-end">
+                    <button type="submit" class="bg-green-600 hover:bg-green-500 text-white px-6 py-2 rounded-lg text-sm font-semibold transition-colors">Save WhatsApp Settings</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script>
+    function mbShowTab(name) {
+        ['telegram', 'discord', 'signal', 'whatsapp'].forEach(function(p) {
+            var panel = document.getElementById('mb-panel-' + p);
+            var tab = document.getElementById('mb-tab-' + p);
+            if (p === name) {
+                panel.classList.remove('hidden');
+                tab.classList.add('bg-slate-700', 'text-white');
+                tab.classList.remove('text-slate-400', 'hover:text-white');
+            } else {
+                panel.classList.add('hidden');
+                tab.classList.remove('bg-slate-700', 'text-white');
+                tab.classList.add('text-slate-400', 'hover:text-white');
+            }
+        });
+    }
+    </script>
+    {% endif %}
+
     {% if module.id == 'memory_browser' and module.enabled %}
     <div class="mt-8">
         <div class="bg-slate-900 rounded-xl border border-slate-800 overflow-hidden h-[700px] shadow-inner" 

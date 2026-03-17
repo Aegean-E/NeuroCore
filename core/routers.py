@@ -49,7 +49,13 @@ HIDDEN_CONFIG_KEYS = {
     'memory': ['save_default_confidence', 'save_confidence_threshold', 'recall_limit', 'recall_min_score', 'consolidation_threshold', 'auto_consolidation_hours', 'arbiter_model', 'arbiter_prompt', 'similarity_threshold', 'belief_ttl_days', 'recall_access_weight'],
     'llm_module': ['temperature', 'max_tokens'],
     'chat': ['auto_rename_turns', 'auto_compact_tokens', 'compact_keep_last'],
-    'telegram': ['bot_token', 'chat_id']
+    'telegram': ['bot_token', 'chat_id'],
+    'messaging_bridge': [
+        'telegram_bot_token', 'telegram_chat_id',
+        'discord_bot_token', 'discord_channel_id',
+        'signal_api_url', 'signal_phone_number',
+        'whatsapp_api_url', 'whatsapp_api_key', 'whatsapp_instance', 'whatsapp_phone_number',
+    ],
 }
 
 # --- System & Navigation ---

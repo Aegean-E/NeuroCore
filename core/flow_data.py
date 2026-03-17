@@ -124,7 +124,9 @@ class FlowData(TypedDict, total=False):
     
     # === Internal/State ===
     _repeat_count: int  # Repeater loop count
-    _input_source: str  # Input source (chat/telegram)
+    _input_source: str  # Input source (chat/telegram/discord/messaging)
+    _messaging_platform: str  # Active messaging platform (telegram/discord/signal)
+    _messaging_reply_to: str  # Platform-specific reply address (chat_id/channel_id/phone)
     current_goal: Dict[str, Any]  # Active goal
     error: str  # Error message
     planning_error: str  # Planning error message
@@ -1061,7 +1063,13 @@ def validate_flow_data(data: Any) -> List[str]:
     
     if "_input_source" in data and not isinstance(data["_input_source"], str):
         issues.append("'_input_source' must be a string")
-    
+
+    if "_messaging_platform" in data and not isinstance(data["_messaging_platform"], str):
+        issues.append("'_messaging_platform' must be a string")
+
+    if "_messaging_reply_to" in data and not isinstance(data["_messaging_reply_to"], str):
+        issues.append("'_messaging_reply_to' must be a string")
+
     if "current_goal" in data and not isinstance(data["current_goal"], dict):
         issues.append("'current_goal' must be a dict")
     

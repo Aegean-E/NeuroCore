@@ -2,7 +2,7 @@
 DiscordBridge — thin async wrapper around the Discord REST API and Gateway.
 
 Uses:
-- httpx (already in requirements) for REST calls (send messages).
+- httpx for REST calls (send messages).
 - websockets (optional, graceful degradation) for the Gateway WebSocket to
   receive MESSAGE_CREATE events in real time.
 
@@ -28,7 +28,6 @@ logger = logging.getLogger(__name__)
 DISCORD_API_BASE = "https://discord.com/api/v10"
 DISCORD_GATEWAY = "wss://gateway.discord.gg/?v=10&encoding=json"
 
-# Gateway opcodes
 _OP_DISPATCH = 0
 _OP_HEARTBEAT = 1
 _OP_IDENTIFY = 2
@@ -50,7 +49,7 @@ class DiscordBridge:
         self.log = log_fn if log_fn else logger.info
         self._sequence = None
         self._session_id = None
-        self._heartbeat_interval = 41250  # ms, default before HELLO arrives
+        self._heartbeat_interval = 41250
         self._stop_event: asyncio.Event = None
         self._client: httpx.AsyncClient = None
 
@@ -72,23 +71,15 @@ class DiscordBridge:
         if self._stop_event:
             self._stop_event.set()
 
-    # ------------------------------------------------------------------
-    # REST — sending
-    # ------------------------------------------------------------------
-
     async def send_message(self, content: str, channel_id: str = None) -> bool:
-        """Send a message to *channel_id* (or the configured default channel).
-
-        Long messages are automatically split into ≤1 900-char chunks to stay
-        within Discord's 2 000-character limit.
-        """
+        """Send a message, splitting into <=1900-char chunks."""
         target = str(channel_id) if channel_id else self.channel_id
         if not target or not content:
             return False
         try:
             client = await self._get_client()
             for i in range(0, len(content), 1900):
-                chunk = content[i : i + 1900]
+                chunk = content[i:i + 1900]
                 resp = await client.post(
                     f"{DISCORD_API_BASE}/channels/{target}/messages",
                     json={"content": chunk},
@@ -96,12 +87,8 @@ class DiscordBridge:
                 resp.raise_for_status()
             return True
         except Exception as e:
-            self.log(f"❌ Discord send error: {e}")
+            self.log(f"Discord send error: {e}")
             return False
-
-    # ------------------------------------------------------------------
-    # Gateway — receiving
-    # ------------------------------------------------------------------
 
     async def _send_heartbeat(self, ws) -> None:
         await ws.send(json.dumps({"op": _OP_HEARTBEAT, "d": self._sequence}))
@@ -118,14 +105,13 @@ class DiscordBridge:
 
     async def _heartbeat_loop(self, ws) -> None:
         interval = self._heartbeat_interval / 1000.0
-        # Initial jitter: avoid thundering-herd on reconnect
         await asyncio.sleep(interval * random.random())
         while not self._stop_event.is_set():
             try:
                 await self._send_heartbeat(ws)
                 await asyncio.sleep(interval)
             except Exception as e:
-                self.log(f"Heartbeat error: {e}")
+                self.log(f"Discord heartbeat error: {e}")
                 break
 
     async def listen(
@@ -133,73 +119,57 @@ class DiscordBridge:
         on_message: Callable[[Dict], None],
         running_check: Callable[[], bool],
     ) -> None:
-        """Connect to the Discord Gateway and dispatch MESSAGE_CREATE events.
-
-        Implements automatic reconnection with exponential backoff.
-        Falls back gracefully if the *websockets* package is not installed.
-        """
+        """Connect to the Discord Gateway and dispatch MESSAGE_CREATE events."""
         if not WEBSOCKETS_AVAILABLE:
             logger.warning(
-                "⚠️ Discord Bridge: 'websockets' package not installed. "
+                "Discord Bridge: 'websockets' package not installed. "
                 "Cannot receive messages. Install with: pip install websockets"
             )
             return
 
         self._stop_event = asyncio.Event()
-        self.log("🔌 Discord Bridge: Connecting to Gateway…")
+        self.log("Discord Bridge: Connecting to Gateway...")
 
         reconnect_delay = 1.0
-
         while running_check() and not self._stop_event.is_set():
             heartbeat_task = None
             try:
                 async with websockets.connect(DISCORD_GATEWAY) as ws:
-                    reconnect_delay = 1.0  # reset on successful connection
-
+                    reconnect_delay = 1.0
                     async for raw in ws:
                         if self._stop_event.is_set() or not running_check():
                             break
-
                         data = json.loads(raw)
                         op = data.get("op")
                         d = data.get("d")
                         t = data.get("t")
                         s = data.get("s")
-
                         if s is not None:
                             self._sequence = s
-
                         if op == _OP_HELLO:
                             self._heartbeat_interval = d["heartbeat_interval"]
-                            heartbeat_task = asyncio.create_task(
-                                self._heartbeat_loop(ws)
-                            )
+                            heartbeat_task = asyncio.create_task(self._heartbeat_loop(ws))
                             await self._identify(ws)
-
                         elif op == _OP_HEARTBEAT_ACK:
-                            pass  # acknowledged — nothing to do
-
+                            pass
                         elif op == _OP_DISPATCH:
                             if t == "READY":
                                 self._session_id = d.get("session_id")
                                 username = d.get("user", {}).get("username", "Unknown")
-                                self.log(f"✅ Discord Bridge: Connected as {username}")
+                                self.log(f"Discord Bridge: Connected as {username}")
                             elif t == "MESSAGE_CREATE":
                                 on_message(d)
-
                         elif op == _OP_RECONNECT:
-                            self.log("🔄 Discord Gateway: Reconnect requested")
+                            self.log("Discord Gateway: Reconnect requested")
                             break
-
                         elif op == _OP_INVALID_SESSION:
-                            self.log("⚠️ Discord Gateway: Invalid session — re-identifying")
+                            self.log("Discord Gateway: Invalid session — re-identifying")
                             self._session_id = None
                             self._sequence = None
                             await asyncio.sleep(5)
                             break
-
             except Exception as e:
-                self.log(f"❌ Discord Gateway error: {e}")
+                self.log(f"Discord Gateway error: {e}")
             finally:
                 if heartbeat_task:
                     heartbeat_task.cancel()
@@ -211,8 +181,8 @@ class DiscordBridge:
             if not running_check() or self._stop_event.is_set():
                 break
 
-            self.log(f"🔄 Discord Bridge: Reconnecting in {reconnect_delay:.1f}s…")
+            self.log(f"Discord Bridge: Reconnecting in {reconnect_delay:.1f}s...")
             await asyncio.sleep(reconnect_delay)
             reconnect_delay = min(reconnect_delay * 2, 60.0)
 
-        self.log("🔌 Discord Bridge: Stopped listening.")
+        self.log("Discord Bridge: Stopped listening.")

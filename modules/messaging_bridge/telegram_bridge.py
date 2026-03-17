@@ -9,11 +9,11 @@ import logging
 
 BASE_URL = "https://api.telegram.org/bot"
 
-# Create a logger for the TelegramBridge module
 logger = logging.getLogger(__name__)
 
+
 class TelegramBridge:
-    """Handles communication with Telegram API using async httpx"""
+    """Handles communication with Telegram API using async httpx."""
 
     def __init__(self, bot_token: str, chat_id: int, log_fn: Callable[[str], None] = None):
         self.bot_token = bot_token
@@ -25,33 +25,21 @@ class TelegramBridge:
         self._stop_event: asyncio.Event = None
 
     async def _get_client(self) -> httpx.AsyncClient:
-        """Get or create the async HTTP client."""
         if self._client is None or self._client.is_closed:
             self._client = httpx.AsyncClient(timeout=45.0)
         return self._client
 
-    def __enter__(self):
-        raise TypeError("TelegramBridge is async-only, use 'async with' instead")
-
-    async def __aenter__(self):
-        return self
-
-    async def __aexit__(self, exc_type, exc_val, exc_tb):
-        await self.close()
-
     async def stop(self):
-        """Signal the listener to stop."""
         if self._stop_event:
             self._stop_event.set()
 
     async def close(self):
-        """Close the client."""
         await self.stop()
         if self._client and not self._client.is_closed:
             await self._client.aclose()
             self._client = None
 
-    async def _send_message_chunk(self, text, chat_id=None) -> bool:
+    async def _send_message_chunk(self, text: str, chat_id=None) -> bool:
         try:
             client = await self._get_client()
             target_chat_id = chat_id if chat_id is not None else self.chat_id
@@ -63,58 +51,51 @@ class TelegramBridge:
             response.raise_for_status()
             return True
         except Exception as e:
-            self.log(f"⚠️ Chunk send failed: {e}")
+            self.log(f"Telegram chunk send failed: {e}")
             return False
 
     async def send_message(self, text: str, chat_id: int = None) -> bool:
-        """Send message to Telegram"""
+        """Send a message, splitting into <=3072-char chunks."""
         try:
-            if not text: return False
+            if not text:
+                return False
             limit = 3072
             all_success = True
             for i in range(0, len(text), limit):
-                chunk = text[i:i + limit]
-                if not await self._send_message_chunk(chunk, chat_id):
+                if not await self._send_message_chunk(text[i:i + limit], chat_id):
                     all_success = False
             return all_success
         except Exception as e:
-            self.log(f"❌ Telegram send error: {e}")
+            self.log(f"Telegram send error: {e}")
             return False
 
     async def get_messages(self) -> List[Dict]:
-        """Get new messages from Telegram"""
+        """Long-poll for new messages."""
         try:
             client = await self._get_client()
-            # Use offset + 1 to confirm processed messages to Telegram
             offset = self.last_update_id + 1 if self.last_update_id is not None else None
-            
             url = f"{BASE_URL}{self.bot_token}/getUpdates"
             params = {"timeout": 40}
-            if offset is not None: params["offset"] = offset
-            
+            if offset is not None:
+                params["offset"] = offset
+
             response = await client.get(url, params=params, timeout=45)
             response.raise_for_status()
             updates = response.json()
-            
+
             messages = []
-
             for update in updates.get("result", []):
-                # Update last_update_id to the current update's ID
                 self.last_update_id = update["update_id"]
-
                 if "message" in update:
                     msg = update["message"]
-                    
-                    # Base message data
                     message_data = {
                         "id": update["update_id"],
                         "chat_id": msg.get("chat", {}).get("id"),
                         "from": msg.get("from", {}).get("first_name", "Unknown"),
-                        "timestamp": datetime.utcnow().isoformat() + 'Z',
-                        "date": msg.get("date", int(time.time())), # Capture Telegram timestamp
-                        "type": "unknown"
+                        "timestamp": datetime.utcnow().isoformat() + "Z",
+                        "date": msg.get("date", int(time.time())),
+                        "type": "unknown",
                     }
-
                     if "text" in msg:
                         message_data["type"] = "text"
                         message_data["text"] = msg["text"]
@@ -123,82 +104,62 @@ class TelegramBridge:
                         message_data["document"] = msg["document"]
                     elif "photo" in msg:
                         message_data["type"] = "photo"
-                        # Telegram sends multiple sizes; take the last one (highest quality)
                         message_data["photo"] = msg["photo"][-1]
                         message_data["caption"] = msg.get("caption", "")
                     elif "voice" in msg:
                         message_data["type"] = "voice"
                         message_data["voice"] = msg["voice"]
-                    
+
                     if message_data["type"] != "unknown":
                         messages.append(message_data)
             return messages
         except Exception as e:
-            self.log(f"❌ Telegram receive error: {e}")
+            self.log(f"Telegram receive error: {e}")
             return []
 
     async def get_file_info(self, file_id: str) -> Dict:
-        """Get file metadata from Telegram"""
         client = await self._get_client()
         url = f"{BASE_URL}{self.bot_token}/getFile"
         response = await client.get(url, params={"file_id": file_id}, timeout=30)
         response.raise_for_status()
-        return response.json()['result']
+        return response.json()["result"]
 
     async def download_file(self, file_path: str, save_path: str, max_size_mb: int = 20) -> bool:
-        """Download file from Telegram with size limit"""
         url = f"https://api.telegram.org/file/bot{self.bot_token}/{file_path}"
         os.makedirs(os.path.dirname(save_path) or ".", exist_ok=True)
-        
         temp_path = save_path + ".partial"
         client = await self._get_client()
-        
         try:
             async with client.stream("GET", url, timeout=120) as response:
                 response.raise_for_status()
-
-                # Check Content-Length header
-                content_length = int(response.headers.get('Content-Length', 0))
+                content_length = int(response.headers.get("Content-Length", 0))
                 if content_length > max_size_mb * 1024 * 1024:
-                    self.log(f"⚠️ Telegram file too large ({content_length} bytes)")
+                    self.log(f"Telegram file too large ({content_length} bytes)")
                     return False
-
                 downloaded = 0
-                with open(temp_path, 'wb') as f:
+                with open(temp_path, "wb") as f:
                     async for chunk in response.aiter_bytes(chunk_size=8192):
                         f.write(chunk)
                         downloaded += len(chunk)
                         if downloaded > max_size_mb * 1024 * 1024:
-                            self.log(f"⚠️ Telegram file too large (streaming check)")
                             break
-
                 if downloaded > max_size_mb * 1024 * 1024:
-                    # Clean up partial file
                     if os.path.exists(temp_path):
                         os.remove(temp_path)
                     return False
-
-                # Rename temp file to final path
                 os.rename(temp_path, save_path)
                 return True
-                
         except Exception as e:
-            self.log(f"❌ Telegram download error: {e}")
-            # Clean up partial file on any failure
+            self.log(f"Telegram download error: {e}")
             if os.path.exists(temp_path):
                 os.remove(temp_path)
             return False
 
-    async def listen(self, 
-               on_message: Callable[[Dict], None], 
-               running_check: Callable[[], bool]):
-        """
-        Poll for messages and dispatch to callback with exponential backoff.
-        """
-        self.log("🔌 Telegram Bridge: Listening for messages...")
+    async def listen(self, on_message: Callable[[Dict], None], running_check: Callable[[], bool]):
+        """Poll for messages with exponential backoff."""
+        self.log("Telegram Bridge: Listening for messages...")
         self._stop_event = asyncio.Event()
         self._stop_event.clear()
-        
         base_delay = 1.0
         max_delay = 60.0
         attempt = 0
@@ -207,24 +168,17 @@ class TelegramBridge:
             try:
                 messages = await self.get_messages()
                 if messages:
-                    # Reset attempt counter on success
                     attempt = 0
                     for msg in messages:
                         on_message(msg)
                 else:
-                    # No messages, increment attempt counter for backoff
                     attempt += 1
-                
-                # Calculate exponential backoff with jitter
                 delay = min(base_delay * (2 ** attempt), max_delay) + random.uniform(0, 1)
                 await asyncio.sleep(delay)
-                
             except Exception as e:
-                self.log(f"Error polling messages: {e}")
-                # Increment attempt counter on error
+                self.log(f"Telegram polling error: {e}")
                 attempt += 1
-                # Calculate exponential backoff with jitter
                 delay = min(base_delay * (2 ** attempt), max_delay) + random.uniform(0, 1)
                 await asyncio.sleep(delay)
-        
-        self.log("🔌 Telegram Bridge: Stopped listening.")
+
+        self.log("Telegram Bridge: Stopped listening.")

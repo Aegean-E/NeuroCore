@@ -633,7 +633,9 @@ class FlowRunner:
                 # Auto-detect which input node to start from based on source
                 input_node_map = {
                     "chat": "chat_input",
-                    "telegram": "telegram_input"
+                    "telegram": "telegram_input",
+                    "discord": "discord_input",
+                    "messaging": "messaging_input",
                 }
                 target_node_type = input_node_map.get(input_source)
                 if target_node_type:
