@@ -1,10 +1,10 @@
-# 🧩 NeuroCore Module Development Guide
+# NeuroCore Module Development Guide
 
 > **Build powerful extensions for NeuroCore with custom modules, nodes, and APIs**
 
 ---
 
-## 📑 Table of Contents
+## Table of Contents
 
 1. [Quick Start](#1-quick-start)
 2. [Architecture Overview](#2-architecture-overview)
@@ -43,7 +43,7 @@ EOF
 touch modules/my_module/__init__.py
 ```
 
-🎉 Your module now appears in the NeuroCore dashboard!
+Your module now appears in the NeuroCore dashboard.
 
 ---
 
@@ -85,11 +85,11 @@ NeuroCore's modular architecture separates concerns into three layers:
 | **Flow Node** | Single node for AI Flows | LLM Core, System Prompt |
 | **Node Provider** | Multiple nodes for flows | Logic & Flow, Memory |
 | **Service Module** | Backend services + UI | Knowledge Base, Calendar |
-| **Bridge Module** | External integrations | Telegram Bridge |
+| **Bridge Module** | External integrations | Messaging Bridge |
 
 ### Module Discovery & Hot-Reload Safety
 
-`ModuleManager` scans `modules/` on startup and calls `load_enabled_modules()` via the FastAPI lifespan event. Key implementation details:
+`ModuleManager` scans `modules/` on startup. Key implementation details:
 
 - **`DISABLED` file marker**: If a `DISABLED` file exists in a module directory, the module is skipped entirely during discovery.
 - **`_loaded_once` set**: Tracks which module IDs have been imported at least once. On the **first** load, `sys.modules` entries are NOT flushed — preserving any submodules already imported by tests or other code. On a **re-load** (after an explicit unload), entries are flushed so code changes are picked up.
@@ -98,8 +98,6 @@ NeuroCore's modular architecture separates concerns into three layers:
 ---
 
 ## 3. Directory Structure
-
-Create a new folder inside `modules/` with your module ID:
 
 ```
 modules/
@@ -116,12 +114,12 @@ modules/
 
 | File | Required | Purpose |
 |------|----------|---------|
-| `module.json` | ✅ Yes | Module metadata and configuration |
-| `__init__.py` | ✅ Yes | Package initialization, router exposure |
-| `router.py` | ❌ No | FastAPI routes for UI and API endpoints |
-| `node.py` | ❌ No | AI Flow node implementations |
-| `service.py` | ❌ No | Business logic layer |
-| `backend.py` | ❌ No | Data persistence layer |
+| `module.json` | Yes | Module metadata and configuration |
+| `__init__.py` | Yes | Package initialization, router exposure |
+| `router.py` | No | FastAPI routes for UI and API endpoints |
+| `node.py` | No | AI Flow node implementations |
+| `service.py` | No | Business logic layer |
+| `backend.py` | No | Data persistence layer |
 
 ---
 
@@ -175,24 +173,13 @@ The `module.json` file defines how NeuroCore loads and displays your module.
 | `enabled` | boolean | Whether module is active |
 | `id` | string | Unique identifier (snake_case) |
 | `icon` | string | SVG path data for sidebar icon |
-| `is_flow_node` | boolean | Module acts as single flow node |
+| `is_flow_node` | boolean | Module acts as a single flow node |
 | `singleton` | boolean | Only one instance allowed |
 | `order` | number | Sort order in UI (lower = first) |
 | `config` | object | Default configuration values |
-| `provides_nodes` | array | Nodes provided for AI Flows. Note: The `config` field in `provides_nodes` is for documentation/display purposes only. Per-node runtime configuration is defined in the node's executor class in `node.py` and exposed via the node's config UI in the flow editor. |
-| `load_error` | string/null | System tracking field |
+| `provides_nodes` | array | Nodes provided for AI Flows |
 
-### Icon Format
-
-Icons use SVG path data. Extract from SVG files:
-
-```svg
-<svg viewBox="0 0 24 24">
-  <path d="M12 2L2 7l10 5 10-5-10-5z"/>
-</svg>
-```
-
-Use the `d` attribute value in `module.json`.
+> The `config` field inside `provides_nodes` entries is for documentation/display purposes only. Per-node runtime configuration is handled in the executor class in `node.py`.
 
 ---
 
@@ -212,21 +199,18 @@ templates = Jinja2Templates(directory="web/templates")
 
 @router.get("/gui", response_class=HTMLResponse)
 async def module_gui(request: Request):
-    """Returns the module's GUI fragment."""
     return templates.TemplateResponse(
-        request, 
-        "my_module_gui.html", 
+        request,
+        "my_module_gui.html",
         {"data": "value"}
     )
 
 @router.get("/api/data")
 async def get_data():
-    """API endpoint for module data."""
     return {"status": "success", "data": []}
 
 @router.post("/api/action")
 async def perform_action(request: Request):
-    """Perform an action."""
     data = await request.json()
     return {"result": "done"}
 ```
@@ -238,10 +222,6 @@ async def perform_action(request: Request):
 ```python
 # modules/my_new_module/__init__.py
 from .router import router
-
-# Optional: Import other components
-from .node import get_executor_class
-from .service import MyService
 ```
 
 ### Router Patterns
@@ -251,7 +231,7 @@ from .service import MyService
 | `/gui` | HTML fragment for UI | Knowledge base interface |
 | `/api/*` | REST API endpoints | CRUD operations |
 | `/ws` | WebSocket handlers | Real-time updates |
-| `/webhook` | External callbacks | Telegram bot webhooks |
+| `/webhook` | External callbacks | WhatsApp webhook |
 
 ---
 
@@ -264,96 +244,80 @@ Create `node.py` to provide nodes for the AI Flow editor.
 ```python
 class MyNodeExecutor:
     """Executor class for a flow node."""
-    
-    async def receive(self, input_data: dict, config: dict = None) -> dict:
+
+    async def receive(self, input_data: dict, config: dict = None) -> dict | None:
         """
         Process incoming data from previous node.
-        
-        Args:
-            input_data: Data from previous node (messages, content, etc.)
-            config: Node configuration + system metadata (_flow_id, _node_id)
-            
+
         Returns:
-            Processed data for next node
+            Processed data dict, or None to stop this branch.
         """
         if input_data is None:
             return None
-            
+
         config = config or {}
-        
-        # Process data
+
         result = input_data.copy()
         result['processed'] = True
         result['my_field'] = config.get('setting', 'default')
-        
+
         return result
 
     async def send(self, processed_data: dict) -> dict:
-        """
-        Send data to next node.
-        
-        Args:
-            processed_data: Data from receive() method
-            
-        Returns:
-            Final output for next node
-        """
+        """Finalize output for downstream nodes."""
         return processed_data
 
 
 async def get_executor_class(node_type_id: str):
-    """
-    Dispatcher function called by FlowRunner.
-    
-    Args:
-        node_type_id: The node type identifier from module.json
-        
-    Returns:
-        Executor class or None
-    """
+    """Dispatcher called by FlowRunner."""
     if node_type_id == 'my_custom_node':
         return MyNodeExecutor
     return None
 ```
 
-### Input/Output Data Structure
+### Reserved Flow Keys
 
-Common keys in `input_data`:
+These keys are managed by the framework and must not be repurposed:
 
-| Key | Type | Description |
-|-----|------|-------------|
-| `messages` | list | Conversation history — preserved across all nodes |
-| `content` | string | Final LLM response text |
-| `choices` | list | Raw LLM response format |
-| `_memory_context` | string | Injected memory context (set by Memory Recall) |
-| `_kb_context` | string | Injected knowledge base context (set by Knowledge Query) |
-| `reasoning_context` | string | Injected reasoning context |
-| `plan_context` | string | Formatted plan string for system prompt |
-| `_route_targets` | list | Dynamic routing targets (consumed by FlowRunner) |
-| `tool_calls` | list | LLM-requested tool invocations |
-| `tool_results` | list | Tool execution results |
-| `requires_continuation` | bool | Multi-turn tool loop flag |
-| `_input_source` | string | Origin of the input (e.g., `"chat"`) — stripped before node execution |
-| `_strip_messages` | bool | If True, prevents automatic `messages` propagation from input to output |
-| `_is_error` | bool | Marks output as a flow error (shown as error in chat UI) |
-| `_flow_id` | string | Current flow ID (in config, not input) |
-| `_node_id` | string | Current node ID (in config, not input) |
-| `_repeat_count` | int | Repeater iteration count |
+| Key | Owner | Purpose |
+|-----|-------|---------|
+| `messages` | All nodes | Conversation history — preserved across all nodes |
+| `content` | LLM Core | Final LLM response text |
+| `_memory_context` | Memory Recall | Retrieved memory context |
+| `_kb_context` | Knowledge Query | Knowledge base retrieval results |
+| `reasoning_context` | Reasoning Book | Injected reasoning context |
+| `plan_context` | Planner | Formatted plan string |
+| `_route_targets` | Conditional Router | Dynamic routing targets (consumed by FlowRunner) |
+| `tool_calls` | LLM Core | LLM-requested tool invocations |
+| `tool_results` | Tool Dispatcher | Tool execution results |
+| `requires_continuation` | Tool Dispatcher | Multi-turn tool loop flag |
+| `_input_source` | Flow Runner | Origin (e.g., `"chat"`, `"messaging"`) |
+| `_strip_messages` | Internal | Prevent automatic messages propagation |
+| `_is_error` | Internal | Mark output as a flow error |
+| `_flow_id` | Config | Current flow ID (in config, not input) |
+| `_node_id` | Config | Current node ID (in config, not input) |
+| `_repeat_count` | Repeater | Loop iteration counter |
+| `_messaging_platform` | Messaging Bridge | Platform that originated the message |
+| `_messaging_reply_to` | Messaging Bridge | Sender address for replies |
+| `plan` | Planner | List of plan steps |
+| `current_step` | Planner | Current step index |
+| `completed_steps` | Plan Tracker | Set of completed step indices |
+| `satisfied` | Reflection | Boolean for conditional routing |
 
 ---
 
 ## 7. Core Modules Reference
 
-NeuroCore includes **16 built-in modules**:
+NeuroCore includes **17 built-in modules** with 27 node executors.
 
-### 🧠 Core AI Modules
+### Core AI Modules
 
 #### LLM Core (`llm_module`)
 Direct interface to Large Language Models.
 
 | Property | Value |
 |----------|-------|
-| **Type** | Flow Node |
+| **Node** | `llm_module` |
 | **Singleton** | Yes |
 | **Order** | 0 |
 
@@ -365,7 +329,7 @@ Direct interface to Large Language Models.
 }
 ```
 
-**Node:** `llm_module` - Executes LLM completions with configurable parameters.
+**Features:** Streaming, tool calling, vision (multimodal), configurable model/temperature/max_tokens per node.
 
 ---
 
@@ -374,7 +338,7 @@ Injects system instructions and manages tool context.
 
 | Property | Value |
 |----------|-------|
-| **Type** | Flow Node |
+| **Node** | `system_prompt` |
 | **Singleton** | No |
 | **Order** | 2 |
 
@@ -382,18 +346,12 @@ Injects system instructions and manages tool context.
 ```json
 {
     "system_prompt": "You are NeuroCore, a helpful AI assistant.",
-    "enabled_tools": []
+    "enabled_tools": [],
+    "max_token_budget": 4000
 }
 ```
 
-**Node:** `system_prompt` - Prepends system message with tool definitions and context injection.
-
-**Features:**
-- Tool context injection
-- Memory context integration
-- Knowledge context integration
-- Reasoning context integration
-- Plan context integration
+**Context injection sources:** `_memory_context`, `_kb_context`, `reasoning_context`, `plan_context`, enabled skills.
 
 ---
 
@@ -402,7 +360,7 @@ Autonomous agent with tool execution looping.
 
 | Property | Value |
 |----------|-------|
-| **Type** | Node Provider |
+| **Nodes** | `agent_loop`, `recursive_lm`, `repl_environment` |
 | **Order** | 1 |
 
 **Configuration:**
@@ -422,14 +380,7 @@ Autonomous agent with tool execution looping.
 }
 ```
 
-**Node:** `agent_loop` - Autonomous agent that loops between LLM and tools until completion.
-
-**Features:**
-- Exponential backoff retry
-- Tool error handling (continue/stop)
-- Timeout protection
-- Full execution trace
-- Reflection-driven retry support
+**Features:** Exponential backoff retry, tool error handling (continue/stop), timeout protection, real-time thinking trace streaming.
 
 ---
 
@@ -438,25 +389,18 @@ Breaks down complex requests into actionable steps.
 
 | Property | Value |
 |----------|-------|
-| **Type** | Node Provider |
+| **Nodes** | `planner`, `plan_step_tracker` |
 | **Order** | 5 |
 
 **Configuration:**
 ```json
 {
-    "max_steps": 10,
-    "enabled": true,
-    "default_planner_prompt": "You are a task planner..."
+    "max_steps": 20,
+    "enabled": true
 }
 ```
 
-**Node:** `planner` - Creates step-by-step execution plans from user requests.
-
-**Output:**
-- `plan` - Array of steps
-- `current_step` - Starting step (0)
-- `plan_context` - Formatted plan for system prompt
-- `plan_needed` - Boolean flag
+**Output:** `plan` (list of steps), `current_step`, `plan_context`, `plan_needed`.
 
 ---
 
@@ -465,64 +409,50 @@ Evaluates agent responses for quality and completeness.
 
 | Property | Value |
 |----------|-------|
-| **Type** | Flow Node |
+| **Node** | `reflection` |
 | **Order** | 4 |
 
-**Configuration:**
-```json
-{
-    "inject_improvement": true,
-    "default_reflection_prompt": "You are a reflection agent..."
-}
-```
-
-**Node:** `reflection` - Evaluates if agent response satisfies user request.
-
-**Output:**
-- `satisfied` - Boolean for Conditional Router
-- `reflection` - Detailed evaluation object
-- `messages` - With improvement feedback (if not satisfied)
+**Output:** `satisfied` (bool for Conditional Router), `reflection` (evaluation object), improved `messages` if not satisfied.
 
 ---
 
-### 🔄 Control Flow Modules
+### Control Flow Modules
 
 #### Logic & Flow (`logic`)
-Control flow nodes for branching and transformation.
+Control flow nodes for branching, transformation, and scheduling.
 
 | Property | Value |
 |----------|-------|
-| **Type** | Node Provider |
+| **Nodes** | 7 |
 | **Order** | 3 |
-
-**Nodes:**
 
 | Node ID | Name | Description | Configurable |
 |---------|------|-------------|--------------|
 | `trigger_node` | Trigger | Pass-through manual trigger | No |
 | `delay_node` | Delay | Pause execution (seconds) | Yes |
-| `script_node` | Python Script | Custom Python execution | Yes |
-| `repeater_node` | Repeater | Re-trigger flow with delay | Yes |
-| `conditional_router` | Conditional Router | Branch based on conditions | Yes |
-| `schedule_start_node` | Scheduled Start | Wait until specific time | Yes |
+| `script_node` | Python Script | Custom Python execution (sandboxed) | Yes |
+| `repeater_node` | Repeater | Re-trigger flow in background with delay | Yes |
+| `conditional_router` | Conditional Router | Branch based on field existence | Yes |
+| `schedule_start_node` | Scheduled Start | Wait until specific date/time | Yes |
+| `context_length_router` | Context Length Router | Route to RLM or standard LLM by token count | Yes |
 
-**Conditional Router Options:**
-- `check_field`: Field to check (`tool_calls`, `satisfied`, `requires_continuation`)
-- `true_branches`: Node IDs for true condition
-- `false_branches`: Node IDs for false condition
-- `invert`: Invert the condition
+**Conditional Router fields:**
+- `tool_calls` — LLM generated tool calls
+- `requires_continuation` — more tools pending
+- `satisfied` — reflection evaluation result
+- `max_tools_per_turn` — tool limit reached
 
 ---
 
-### 💾 Memory & Knowledge Modules
+### Memory & Knowledge Modules
 
 #### Long-Term Memory (`memory`)
-Vector-based memory storage with FAISS and SQLite.
+Vector-based memory with FAISS and SQLite.
 
 | Property | Value |
 |----------|-------|
-| **Type** | Node Provider |
-| **Order** | 10 |
+| **Nodes** | `memory_recall`, `memory_save`, `check_goal` |
+| **Order** | 11 |
 
 **Configuration:**
 ```json
@@ -532,22 +462,13 @@ Vector-based memory storage with FAISS and SQLite.
     "save_confidence_threshold": 0.75,
     "save_default_confidence": 1.0,
     "save_delay": 3.0,
-    "similarity_threshold": 0.9,
     "consolidation_threshold": 0.92,
     "auto_consolidation_hours": 24,
-    "belief_ttl_days": 30,
-    "recall_access_weight": 0.1,
-    "arbiter_model": "",
-    "arbiter_prompt": "Extract facts from conversation..."
+    "belief_ttl_days": 30
 }
 ```
 
-**Nodes:**
-- `memory_recall` - Searches memory and injects context
-- `memory_save` - Stores interactions with smart extraction
-- `check_goal` - Retrieves active goals
-
-**Memory Types:** BELIEF, FACT, RULE, EXPERIENCE, PREFERENCE, IDENTITY
+**Memory types:** BELIEF (30-day TTL), FACT, RULE, EXPERIENCE, PREFERENCE, IDENTITY
 
 ---
 
@@ -556,16 +477,10 @@ RAG system for document upload and querying.
 
 | Property | Value |
 |----------|-------|
-| **Type** | Node Provider |
-| **Order** | 8 |
+| **Node** | `query_knowledge` |
+| **Order** | 9 |
 
-**Node:** `query_knowledge` - Retrieves relevant context from uploaded documents.
-
-**Features:**
-- Hybrid search (vector + keyword)
-- PDF, TXT, MD support
-- Chunking and embedding
-- Source attribution
+**Features:** Hybrid search (FAISS vector + SQLite FTS5) with Reciprocal Rank Fusion (RRF, k=60), PDF/TXT/MD support, incremental re-indexing with provenance tracking.
 
 ---
 
@@ -574,21 +489,9 @@ Logs AI's internal thoughts and reasoning steps.
 
 | Property | Value |
 |----------|-------|
-| **Type** | Node Provider |
-| **Order** | 9 |
+| **Nodes** | `reasoning_save`, `reasoning_load` |
 
-**Nodes:**
-- `reasoning_save` - Saves agent responses as thoughts
-- `reasoning_load` - Loads recent thoughts into context
-
-**Configuration:**
-```json
-{
-    "source_field": "content",
-    "source": "Flow Node",
-    "last_n": 5
-}
-```
+**Storage:** `data/reasoning_book.json` (async Lock for thread safety)
 
 ---
 
@@ -597,68 +500,46 @@ UI for viewing and managing long-term memories.
 
 | Property | Value |
 |----------|-------|
-| **Type** | Service Module |
+| **Type** | UI module only (no flow nodes) |
 | **Order** | 11 |
 
-**Features:**
-- Search and filter memories
-- View memory metadata
-- Delete individual memories
-- Browse by type and source
+**Features:** Search and filter memories, view metadata, delete/merge memories, browse by type and source.
 
 ---
 
 #### Skills (`skills`)
-Manage instruction files (SKILL.md) containing best practices, patterns, and guidelines for AI tasks.
+Manage instruction files (SKILL.md) for AI tasks.
 
 | Property | Value |
 |----------|-------|
-| **Type** | Service Module |
+| **Type** | Service module (no flow nodes) |
 | **Order** | 7 |
 
-**Features:**
-- Import and export skill files
-- Inject skills into system prompts
-- Skill repository management
-- Markdown-based instruction sets
+**Features:** Import/export skill files, inject skills into system prompts, Markdown-based instruction sets.
 
 ---
 
-### 🛠️ Tool & Integration Modules
+### Tool & Integration Modules
 
 #### Tool Library (`tools`)
 Manages custom Python tools for AI agents.
 
 | Property | Value |
 |----------|-------|
-| **Type** | Node Provider |
+| **Node** | `tool_dispatcher` |
 | **Order** | 6 |
 
-**Node:** `tool_dispatcher` - Executes tool calls from LLM.
-
-**Features:**
-- 23 built-in tools (16 standard + 7 RLM tools)
-- Custom tool creation
-- JSON Schema parameters
-- Import/export functionality
-- Tool configuration UI
-
-**Tool Storage:**
-- `modules/tools/tools.json` — tool definitions (schemas)
-- `modules/tools/library/` — standard tool Python implementations
-- `modules/tools/rlm_library/` — RLM (Recursive Language Model) tool implementations (Peek, Search, Chunk, SubCall, SetVariable, GetVariable, SetFinal)
-
-See [TOOL_GUIDE.md](./TOOL_GUIDE.md) for complete tool documentation.
+**23 built-in tools** (16 standard + 7 RLM tools). See [TOOL_GUIDE.md](./TOOL_GUIDE.md) for the full reference.
 
 ---
 
 #### Chat (`chat`)
-Interactive AI assistant interface.
+Interactive AI assistant interface with streaming.
 
 | Property | Value |
 |----------|-------|
-| **Type** | Node Provider |
-| **Order** | 12 |
+| **Nodes** | `chat_input`, `chat_output` |
+| **Order** | 14 |
 
 **Configuration:**
 ```json
@@ -669,16 +550,42 @@ Interactive AI assistant interface.
 }
 ```
 
-- `auto_rename_turns`: Number of conversation turns before auto-renaming the session using LLM.
-- `auto_compact_tokens`: Estimated token threshold above which the session is automatically compacted (0 = disabled).
-- `compact_keep_last`: Number of recent messages to preserve verbatim during compaction.
+**Features:** Real-time LLM streaming via SSE, agent thinking trace display, session compaction, auto-rename.
 
-**Nodes:**
-- `chat_input` - Provides user input and history (singleton)
-- `chat_output` - Formats final response (singleton)
+---
 
-**Session Compaction:**
-The chat module supports LLM-based session compaction (`POST /chat/sessions/{id}/compact`). Older messages are summarized into a single system message while the last `compact_keep_last` messages are kept verbatim. This reduces token consumption for long conversations. Auto-compaction triggers when `_estimate_tokens(history) > auto_compact_tokens`.
+#### Messaging Bridge (`messaging_bridge`)
+Unified multi-platform messaging for Telegram, Discord, Signal, and WhatsApp.
+
+| Property | Value |
+|----------|-------|
+| **Nodes** | `messaging_input`, `messaging_output` |
+| **Order** | 15 |
+
+**Configuration (platform credentials):**
+```json
+{
+    "telegram_bot_token": "",
+    "telegram_chat_id": 0,
+    "discord_bot_token": "",
+    "discord_channel_id": "",
+    "signal_api_url": "",
+    "signal_phone_number": "",
+    "whatsapp_api_url": "",
+    "whatsapp_api_key": "",
+    "whatsapp_instance": "",
+    "whatsapp_phone_number": ""
+}
+```
+
+**`messaging_input` node config:**
+- `platforms`: `["telegram", "discord"]` — filter to specific platforms (empty = accept all)
+
+**`messaging_output` node config:**
+- `platform`: `"auto"` (reply to sender) or a specific platform ID
+- `proactive_recipients`: `["telegram:123456", "discord:987654"]` — used when there is no incoming message context (e.g. Repeater-triggered flows)
+
+**Adding a new platform:** Append one entry to `MESSAGING_PLATFORMS` in `node.py`, implement the bridge class, and wire it in `service.py`.
 
 ---
 
@@ -687,37 +594,30 @@ Event scheduling and reminders.
 
 | Property | Value |
 |----------|-------|
-| **Type** | Node Provider |
+| **Node** | `calendar_watcher` |
 | **Order** | 13 |
-
-**Node:** `calendar_watcher` - Checks for events at current time.
-
-**Features:**
-- Event creation and management
-- Reminder notifications
-- Recurring events support
 
 ---
 
-#### Telegram Bridge (`telegram`)
-Connects NeuroCore to Telegram for remote interaction.
+#### Browser Automation (`browser_automation`)
+Headless browser singleton (Playwright).
 
 | Property | Value |
 |----------|-------|
-| **Type** | Node Provider |
-| **Order** | 14 |
+| **Type** | Singleton service (no flow nodes yet) |
+| **Order** | 15 |
 
 **Configuration:**
 ```json
 {
-    "bot_token": "",
-    "chat_id": 0
+    "headless": true,
+    "timeout": 30000,
+    "viewport_width": 1280,
+    "viewport_height": 720
 }
 ```
 
-**Nodes:**
-- `telegram_input` - Receives Telegram messages (singleton)
-- `telegram_output` - Sends responses to Telegram (singleton)
+The Playwright instance is lazily initialized on first use. Currently available as a service object; flow node executors are planned (see `docs/IDEAS.md`).
 
 ---
 
@@ -726,10 +626,7 @@ Comment and organization nodes for flows.
 
 | Property | Value |
 |----------|-------|
-| **Type** | Node Provider |
-| **Order** | 7 |
-
-**Node:** `comment_node` - Resizable text box for flow documentation.
+| **Node** | `comment_node` — resizable text box |
 
 ---
 
@@ -742,9 +639,9 @@ class ProcessorExecutor:
     async def receive(self, input_data: dict, config: dict = None) -> dict:
         if input_data is None:
             return None
-        # Modify data
-        input_data['processed'] = True
-        return input_data
+        result = input_data.copy()
+        result['processed'] = True
+        return result
 
     async def send(self, processed_data: dict) -> dict:
         return processed_data
@@ -757,17 +654,17 @@ class ContextInjectorExecutor:
     async def receive(self, input_data: dict, config: dict = None) -> dict:
         if input_data is None:
             return None
-            
+
         context = "Additional context here"
-        
-        # Inject into messages or as separate field
-        if 'messages' in input_data:
-            input_data['messages'].insert(0, {
-                'role': 'system',
-                'content': context
-            })
-        
-        return input_data
+        messages = list(input_data.get('messages', []))  # Always copy before modifying
+        messages.insert(0, {'role': 'system', 'content': context})
+
+        result = input_data.copy()
+        result['messages'] = messages
+        return result
+
+    async def send(self, processed_data: dict) -> dict:
+        return processed_data
 ```
 
 ### Pattern 3: Conditional Router
@@ -777,44 +674,24 @@ class RouterExecutor:
     async def receive(self, input_data: dict, config: dict = None) -> dict:
         if input_data is None:
             return None
-            
+
         config = config or {}
         condition = config.get('check_field', 'some_field')
-        
-        # Check condition
         is_true = bool(input_data.get(condition))
-        
+
         if config.get('invert', False):
             is_true = not is_true
-            
-        # Set routing targets
+
         targets = config.get('true_branches' if is_true else 'false_branches', [])
-        input_data['_route_targets'] = targets
-        
-        return input_data
+        result = input_data.copy()
+        result['_route_targets'] = targets
+        return result
+
+    async def send(self, processed_data: dict) -> dict:
+        return processed_data
 ```
 
-### Pattern 4: Background Task
-
-```python
-import asyncio
-
-class BackgroundExecutor:
-    async def _background_task(self, data: dict):
-        await asyncio.sleep(5)  # Simulate work
-        print(f"Background task completed: {data}")
-
-    async def receive(self, input_data: dict, config: dict = None) -> dict:
-        if input_data is None:
-            return None
-            
-        # Fire and forget
-        asyncio.create_task(self._background_task(input_data.copy()))
-        
-        return input_data  # Return immediately
-```
-
-### Pattern 5: External API Call
+### Pattern 4: External Service Call
 
 ```python
 import httpx
@@ -823,127 +700,136 @@ class APIExecutor:
     async def receive(self, input_data: dict, config: dict = None) -> dict:
         if input_data is None:
             return None
-            
+
         config = config or {}
-        api_url = config.get('api_url', 'https://api.example.com')
-        
+        api_url = config.get('api_url', '')
+
         try:
             async with httpx.AsyncClient() as client:
                 response = await client.get(api_url, timeout=10.0)
+                response.raise_for_status()
                 data = response.json()
-                
-            input_data['api_result'] = data
-            return input_data
-            
+
+            result = input_data.copy()
+            result['api_result'] = data
+            return result
         except Exception as e:
-            input_data['error'] = f"API call failed: {str(e)}"
-            return input_data
+            result = input_data.copy()
+            result['error'] = f"API call failed: {e}"
+            return result
+
+    async def send(self, processed_data: dict) -> dict:
+        return processed_data
+```
+
+### Pattern 5: Background Task (Fire-and-Forget)
+
+```python
+import asyncio
+
+class BackgroundExecutor:
+    async def _background_task(self, data: dict):
+        await asyncio.sleep(5)
+        # do work
+
+    async def receive(self, input_data: dict, config: dict = None) -> dict:
+        if input_data is None:
+            return None
+
+        # Fire and forget — don't await
+        asyncio.create_task(self._background_task(input_data.copy()))
+
+        return input_data  # Return immediately without waiting
+
+    async def send(self, processed_data: dict) -> dict:
+        return processed_data
 ```
 
 ---
 
 ## 9. Advanced Topics
 
-### Dependency Injection
-
-Access core services through `config` parameter:
+### Accessing Core Services
 
 ```python
 async def receive(self, input_data: dict, config: dict = None) -> dict:
     config = config or {}
-    
+
+    # Flow metadata (available in config, not input)
     flow_id = config.get('_flow_id')
     node_id = config.get('_node_id')
-    
+
     # Access settings
     from core.settings import settings
     api_key = settings.get('llm_api_key')
-    
+
     return input_data
 ```
 
-### Error Handling
+### Thread Safety in Nodes
 
-Implement robust error handling:
+Nodes run in an async context. Rules:
+- Use `asyncio.Lock` for async state (e.g., lazy-init a client)
+- Use `asyncio.to_thread()` for any blocking I/O
+- Never `await` while holding a `threading.Lock`
 
 ```python
-async def receive(self, input_data: dict, config: dict = None) -> dict:
-    try:
-        # Processing logic
-        result = self.process(input_data)
-        return result
-    except ValueError as e:
-        return {'error': f'Invalid input: {str(e)}'}
-    except Exception as e:
-        return {'error': f'Unexpected error: {str(e)}'}
+import asyncio
+
+class StatefulExecutor:
+    _lock = asyncio.Lock()
+    _client = None
+
+    async def _get_client(self):
+        async with self._lock:
+            if self._client is None:
+                self._client = await create_async_client()
+            return self._client
+
+    async def receive(self, input_data: dict, config: dict = None) -> dict:
+        client = await self._get_client()
+        # use client...
+        return input_data
+
+    async def send(self, processed_data: dict) -> dict:
+        return processed_data
 ```
 
 ### Testing Nodes
-
-Create unit tests for your nodes:
 
 ```python
 import pytest
 from modules.my_module.node import MyNodeExecutor
 
-@pytest.mark.asyncio
+# Do NOT add @pytest.mark.asyncio — asyncio_mode = "auto" is set globally
 async def test_my_node():
     executor = MyNodeExecutor()
-    
+
     input_data = {'messages': [{'role': 'user', 'content': 'Hello'}]}
     config = {'setting': 'value'}
-    
+
     result = await executor.receive(input_data, config)
-    
+
+    assert result is not None
     assert 'processed' in result
-    assert result['processed'] is True
-```
-
-### State Management
-
-For nodes requiring state:
-
-```python
-class StatefulExecutor:
-    def __init__(self):
-        self._cache = {}
-        self._counter = 0
-    
-    async def receive(self, input_data: dict, config: dict = None) -> dict:
-        self._counter += 1
-        self._cache[config.get('_node_id')] = input_data
-        return input_data
 ```
 
 ---
 
 ## 10. Hot-Swapping & Development
 
-NeuroCore supports hot-loading for rapid development.
-
 ### Development Workflow
 
-1. **Create Module Files**
-   ```bash
-   mkdir modules/my_module
-   touch modules/my_module/__init__.py
-   touch modules/my_module/module.json
-   ```
+1. Create/edit module files
+2. Go to **Settings → Modules** in the UI
+3. Toggle **Enabled** off, then on again to reload
+4. Or restart NeuroCore for a complete refresh
 
-2. **Edit and Save**
-   - Modify code in your editor
-   - Save files
+### Hot-Reload Safety
 
-3. **Enable in UI**
-   - Go to **Settings** → **Modules**
-   - Find your module in the list
-   - Toggle **Enabled** switch
-   - Router loads automatically
-
-4. **Iterate**
-   - Make changes
-   - Disable → Enable module to reload
-   - Or restart NeuroCore for complete refresh
+- **First load**: `sys.modules` is NOT flushed — preserves already-imported submodules
+- **Re-load after unload**: `sys.modules` IS flushed to pick up code changes
+- **debug_mode=true**: Forces `importlib.reload()` on every executor class load (useful during active node development)
 
 ### Module Lifecycle
 
@@ -953,16 +839,6 @@ Created → Discovered → Enabled → Loaded → Active
    └─────────┴───────────┴─────────┴────────┘
               (Hot-swap supported)
 ```
-
-### Best Practices for Development
-
-| Practice | Benefit |
-|----------|---------|
-| Use `__init__.py` | Proper Python package structure |
-| Handle `None` input | Prevents flow crashes |
-| Validate config | Graceful degradation |
-| Log errors | Easier debugging |
-| Use type hints | Better IDE support |
 
 ---
 
@@ -976,50 +852,26 @@ Created → Discovered → Enabled → Loaded → Active
 | Router not loading | Missing `router` export | Add `from .router import router` to `__init__.py` |
 | Node not executing | Wrong `node_type_id` | Match ID in `module.json` and `get_executor_class` |
 | `NoneType` errors | Not handling `None` input | Add `if input_data is None: return None` |
-| Config not loading | Invalid JSON syntax | Validate `module.json` with JSON linter |
+| Config not loading | Invalid JSON syntax | Validate `module.json` with a JSON linter |
 | Changes not applied | Caching issue | Disable → Enable module or restart |
+| Branch not reached | Wrong `_route_targets` | Check node IDs in conditional router config |
 
 ### Debugging Tips
 
-1. **Check Module Discovery**
-   ```python
-   # In Python console
-   from core.module_manager import ModuleManager
-   mm = ModuleManager()
-   print(mm.get_all_modules())
-   ```
-
-2. **Verify Router Registration**
-   ```python
-   # Check if router is exposed
-   from modules.my_module import router
-   print(router.routes)
-   ```
-
-3. **Test Node Executor**
+1. Enable `debug_mode: true` in settings to get per-node execution traces in `data/execution_trace.jsonl`
+2. Check `load_error` state via `GET /modules` API response
+3. Test nodes in isolation:
    ```python
    import asyncio
    from modules.my_module.node import MyExecutor
-   
+
    executor = MyExecutor()
    result = asyncio.run(executor.receive({'test': 'data'}))
    print(result)
    ```
+4. Review console output for import errors on module load
+5. Look for `load_error` state via the `/modules/` API
 
-4. **Review Logs**
-   - Check console output for import errors
-   - Look for `load_error` in module.json
-   - Enable debug mode in settings
+### Pro Tip
 
-### Getting Help
-
-- Review existing modules in `modules/` for examples
-- Check test files in `tests/` for usage patterns
-- Enable debug logging in NeuroCore settings
-- Consult the [NeuroCore Documentation](https://docs.neurocore.ai)
-
----
-
-> 💡 **Pro Tip:** Start by copying an existing simple module (like `annotations`) as a template, then modify it for your needs!
-
-</diff>
+Start by copying an existing simple module (like `annotations`) as a template, then modify it for your needs.

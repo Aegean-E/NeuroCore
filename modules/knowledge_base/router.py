@@ -26,6 +26,17 @@ templates = Jinja2Templates(directory="web/templates")
 UPLOAD_DIR = "data/uploaded_docs"
 PROCESSED_DIR = "data/processed_docs"
 
+
+def _format_size(size_bytes: int) -> str:
+    """Return a human-readable file size string."""
+    if size_bytes is None:
+        return ""
+    if size_bytes < 1024:
+        return f"{size_bytes} B"
+    if size_bytes < 1024 * 1024:
+        return f"{size_bytes / 1024:.1f} KB"
+    return f"{size_bytes / (1024 * 1024):.1f} MB"
+
 if not os.path.exists(UPLOAD_DIR):
     os.makedirs(UPLOAD_DIR)
 if not os.path.exists(PROCESSED_DIR):
@@ -229,6 +240,7 @@ async def list_docs(request: Request, q: str = Query(None)):
         doc["type"] = doc.pop("file_type")
         doc["pages"] = doc.pop("page_count")
         doc["chunks"] = doc.pop("chunk_count")
+        doc["size"] = _format_size(doc.pop("file_size", None))
 
     if q:
         documents = [d for d in documents if q.lower() in d.get('filename', '').lower()]
@@ -405,6 +417,48 @@ async def delete_all_docs(request: Request):
             pass
         
     return await list_docs(request)
+
+@router.post("/reindex/{doc_id}")
+async def reindex_doc(doc_id: int, llm: LLMBridge = Depends(get_llm_bridge)):
+    """Re-embed all chunks for a document using the current embedding model.
+
+    The original file does not need to be on disk — chunk text is read from SQLite.
+    """
+    doc = document_store.get_document(doc_id)
+    if not doc:
+        return Response(
+            status_code=200,
+            headers={"HX-Trigger": json.dumps({"showMessage": {"level": "error", "message": "Document not found"}})},
+        )
+
+    chunks = document_store.get_document_chunks(doc_id)
+    if not chunks:
+        return Response(
+            status_code=200,
+            headers={"HX-Trigger": json.dumps({"showMessage": {"level": "error", "message": f"No chunks found for '{doc['filename']}'"}})},
+        )
+
+    chunk_embeddings = []
+    for chunk in chunks:
+        try:
+            emb = await llm.get_embedding(chunk["text"])
+            chunk_embeddings.append((chunk["id"], np.array(emb, dtype="float32") if emb else None))
+        except Exception as e:
+            logger.warning(f"Failed to embed chunk {chunk['id']} of doc {doc_id}: {e}")
+            chunk_embeddings.append((chunk["id"], None))
+
+    result = document_store.reembed_document(doc_id, chunk_embeddings)
+
+    msg = f"Re-indexed '{doc['filename']}': {result['updated']} chunks updated"
+    if result["failed"]:
+        msg += f", {result['failed']} failed (no embedding model?)"
+    level = "success" if result["failed"] == 0 else "warning"
+
+    return Response(
+        status_code=200,
+        headers={"HX-Trigger": json.dumps({"docsChanged": None, "showMessage": {"level": level, "message": msg}})},
+    )
+
 
 @router.post("/integrity_check", response_class=HTMLResponse)
 async def check_integrity(request: Request):

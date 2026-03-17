@@ -97,15 +97,17 @@ def test_kb_router_list(client):
     with patch("modules.knowledge_base.router.document_store") as mock_store:
         mock_store.list_documents.return_value = [
             {
-                "id": 1, "filename": "test.pdf", "file_type": "pdf", 
-                "page_count": 10, "chunk_count": 5, "created_at": 1234567890
+                "id": 1, "filename": "test.pdf", "file_type": "pdf",
+                "page_count": 10, "chunk_count": 5, "created_at": 1234567890,
+                "file_size": 204800,
             }
         ]
-        
+
         response = client.get("/knowledge_base/list")
         assert response.status_code == 200
         assert "test.pdf" in response.text
         assert "5 chunks" in response.text
+        assert "200.0 KB" in response.text
 
 def test_kb_router_delete(client):
     """Test deleting a document."""
@@ -428,3 +430,155 @@ class TestIncrementalReindex:
             assert "chunk_hash" in chunk
             expected = hashlib.sha256(chunk["text"].encode()).hexdigest()
             assert chunk["chunk_hash"] == expected
+
+
+# ---------------------------------------------------------------------------
+# get_document_chunks tests
+# ---------------------------------------------------------------------------
+
+class TestGetDocumentChunks:
+    def _make_store(self, tmp_path):
+        db = str(tmp_path / "test.sqlite3")
+        return FaissDocumentStore(db_path=db)
+
+    def test_returns_chunks_in_order(self, tmp_path):
+        store = self._make_store(tmp_path)
+        dim = 768
+        chunks = [
+            {"text": "chunk zero", "embedding": np.zeros(dim, dtype="float32"), "page_number": 1},
+            {"text": "chunk one",  "embedding": np.zeros(dim, dtype="float32"), "page_number": 1},
+            {"text": "chunk two",  "embedding": np.zeros(dim, dtype="float32"), "page_number": 2},
+        ]
+        doc_id = store.add_document("abc123", "doc.txt", "txt", 1024, None, chunks)
+        result = store.get_document_chunks(doc_id)
+        assert len(result) == 3
+        assert [r["chunk_index"] for r in result] == [0, 1, 2]
+        assert result[0]["text"] == "chunk zero"
+        assert "id" in result[0]
+
+    def test_unknown_doc_returns_empty(self, tmp_path):
+        store = self._make_store(tmp_path)
+        assert store.get_document_chunks(99999) == []
+
+
+# ---------------------------------------------------------------------------
+# reembed_document tests
+# ---------------------------------------------------------------------------
+
+class TestReembedDocument:
+    def _make_store_with_doc(self, tmp_path):
+        db = str(tmp_path / "test.sqlite3")
+        store = FaissDocumentStore(db_path=db)
+        dim = 768
+        chunks = [
+            {"text": "alpha", "embedding": np.zeros(dim, dtype="float32"), "page_number": 1},
+            {"text": "beta",  "embedding": np.zeros(dim, dtype="float32"), "page_number": 1},
+        ]
+        doc_id = store.add_document("hash_ab", "f.txt", "txt", 512, None, chunks)
+        return store, doc_id
+
+    def test_updates_sqlite_embeddings(self, tmp_path):
+        store, doc_id = self._make_store_with_doc(tmp_path)
+        chunks = store.get_document_chunks(doc_id)
+        dim = 768
+        new_emb = np.ones(dim, dtype="float32")
+        new_emb /= np.linalg.norm(new_emb)
+        pairs = [(c["id"], new_emb.copy()) for c in chunks]
+        result = store.reembed_document(doc_id, pairs)
+        assert result["updated"] == 2
+        assert result["failed"] == 0
+
+    def test_counts_none_as_failed(self, tmp_path):
+        store, doc_id = self._make_store_with_doc(tmp_path)
+        chunks = store.get_document_chunks(doc_id)
+        pairs = [(chunks[0]["id"], np.ones(768, dtype="float32")), (chunks[1]["id"], None)]
+        result = store.reembed_document(doc_id, pairs)
+        assert result["updated"] == 1
+        assert result["failed"] == 1
+
+    def test_empty_input_returns_zeros(self, tmp_path):
+        store, doc_id = self._make_store_with_doc(tmp_path)
+        result = store.reembed_document(doc_id, [])
+        assert result == {"updated": 0, "failed": 0}
+
+
+# ---------------------------------------------------------------------------
+# _format_size helper
+# ---------------------------------------------------------------------------
+
+def test_format_size():
+    from modules.knowledge_base.router import _format_size
+    assert _format_size(None) == ""
+    assert _format_size(512) == "512 B"
+    assert _format_size(2048) == "2.0 KB"
+    assert _format_size(1536) == "1.5 KB"
+    assert _format_size(1_572_864) == "1.5 MB"
+
+
+# ---------------------------------------------------------------------------
+# Router reindex endpoint
+# ---------------------------------------------------------------------------
+
+class TestReindexEndpoint:
+    def test_reindex_success(self):
+        client = TestClient(app)
+        mock_doc = {"id": 1, "filename": "test.pdf", "file_type": "pdf",
+                    "page_count": 2, "chunk_count": 2, "created_at": "2024-01-01",
+                    "file_size": 1024}
+        mock_chunks = [
+            {"id": 10, "chunk_index": 0, "text": "hello world"},
+            {"id": 11, "chunk_index": 1, "text": "foo bar"},
+        ]
+        emb = np.ones(768, dtype="float32")
+        emb /= np.linalg.norm(emb)
+
+        with patch("modules.knowledge_base.router.document_store") as mock_store, \
+             patch("modules.knowledge_base.router.get_llm_bridge") as mock_bridge_dep:
+            mock_store.get_document.return_value = mock_doc
+            mock_store.get_document_chunks.return_value = mock_chunks
+            mock_store.reembed_document.return_value = {"updated": 2, "failed": 0}
+            mock_llm = AsyncMock()
+            mock_llm.get_embedding = AsyncMock(return_value=emb.tolist())
+            mock_bridge_dep.return_value = mock_llm
+
+            response = client.post("/knowledge_base/reindex/1")
+
+        assert response.status_code == 200
+        trigger = json.loads(response.headers["hx-trigger"])
+        assert "docsChanged" in trigger
+        assert trigger["showMessage"]["level"] == "success"
+        assert "Re-indexed" in trigger["showMessage"]["message"]
+
+    def test_reindex_not_found(self):
+        client = TestClient(app)
+        with patch("modules.knowledge_base.router.document_store") as mock_store, \
+             patch("modules.knowledge_base.router.get_llm_bridge"):
+            mock_store.get_document.return_value = None
+            response = client.post("/knowledge_base/reindex/999")
+
+        assert response.status_code == 200
+        trigger = json.loads(response.headers["hx-trigger"])
+        assert trigger["showMessage"]["level"] == "error"
+
+    def test_reindex_partial_failure(self):
+        client = TestClient(app)
+        mock_doc = {"id": 2, "filename": "partial.txt", "file_type": "txt",
+                    "page_count": None, "chunk_count": 3, "created_at": "2024-01-01",
+                    "file_size": None}
+        mock_chunks = [{"id": 20, "chunk_index": 0, "text": "some text"}]
+
+        with patch("modules.knowledge_base.router.document_store") as mock_store, \
+             patch("modules.knowledge_base.router.get_llm_bridge") as mock_bridge_dep:
+            mock_store.get_document.return_value = mock_doc
+            mock_store.get_document_chunks.return_value = mock_chunks
+            mock_store.reembed_document.return_value = {"updated": 0, "failed": 1}
+            mock_llm = AsyncMock()
+            mock_llm.get_embedding = AsyncMock(return_value=None)
+            mock_bridge_dep.return_value = mock_llm
+
+            response = client.post("/knowledge_base/reindex/2")
+
+        assert response.status_code == 200
+        trigger = json.loads(response.headers["hx-trigger"])
+        assert trigger["showMessage"]["level"] == "warning"
+        assert "failed" in trigger["showMessage"]["message"]

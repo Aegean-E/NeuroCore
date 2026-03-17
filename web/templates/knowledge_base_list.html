@@ -11,14 +11,26 @@
             <div class="font-bold text-slate-200">{{ doc.filename }}</div>
             <div class="text-xs text-slate-500 mt-1 flex space-x-3">
                 <span>{{ doc.chunks }} chunks</span>
+                {% if doc.pages %}<span>{{ doc.pages }}p</span>{% endif %}
+                {% if doc.type %}<span class="uppercase">{{ doc.type }}</span>{% endif %}
+                {% if doc.size %}<span>{{ doc.size }}</span>{% endif %}
                 <span>{{ doc.date }}</span>
             </div>
         </div>
-        <button hx-delete="/knowledge_base/delete/{{ doc.id }}" 
-                hx-target="#doc-list-container"
-                class="text-slate-600 hover:text-red-500 p-2 rounded hover:bg-slate-800 transition-colors opacity-0 group-hover:opacity-100">
-            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
-        </button>
+        <div class="flex items-center space-x-1 opacity-0 group-hover:opacity-100 transition-opacity">
+            <button hx-post="/knowledge_base/reindex/{{ doc.id }}"
+                    hx-swap="none"
+                    title="Re-embed all chunks with current model"
+                    class="text-slate-600 hover:text-blue-400 p-2 rounded hover:bg-slate-800 transition-colors">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
+            </button>
+            <button hx-delete="/knowledge_base/delete/{{ doc.id }}"
+                    hx-target="#doc-list-container"
+                    title="Delete document"
+                    class="text-slate-600 hover:text-red-500 p-2 rounded hover:bg-slate-800 transition-colors">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+            </button>
+        </div>
     </div>
     {% endfor %}
 </div>

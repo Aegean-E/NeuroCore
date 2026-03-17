@@ -885,12 +885,12 @@ class FaissDocumentStore(QueryExpansionMixin):
         """List all documents."""
         with self._connect() as con:
             rows = con.execute("""
-                SELECT id, filename, file_type, page_count, chunk_count, created_at
+                SELECT id, filename, file_type, page_count, chunk_count, created_at, file_size
                 FROM documents
                 ORDER BY created_at DESC
                 LIMIT ?
             """, (limit,)).fetchall()
-        
+
         return [
             {
                 "id": r[0],
@@ -898,7 +898,8 @@ class FaissDocumentStore(QueryExpansionMixin):
                 "file_type": r[2],
                 "page_count": r[3],
                 "chunk_count": r[4],
-                "created_at": r[5]
+                "created_at": r[5],
+                "file_size": r[6],
             }
             for r in rows
         ]
@@ -913,6 +914,56 @@ class FaissDocumentStore(QueryExpansionMixin):
             if row:
                 return {"id": row[0], "filename": row[1], "file_type": row[2], "page_count": row[3], "chunk_count": row[4], "created_at": row[5]}
         return None
+
+    def get_document_chunks(self, document_id: int) -> List[Dict]:
+        """Return all chunks for a document as {id, chunk_index, text} dicts."""
+        with self._connect() as con:
+            rows = con.execute(
+                "SELECT id, chunk_index, text FROM chunks WHERE document_id = ? ORDER BY chunk_index",
+                (document_id,),
+            ).fetchall()
+        return [{"id": r[0], "chunk_index": r[1], "text": r[2]} for r in rows]
+
+    def reembed_document(self, document_id: int, chunk_embeddings: List[tuple]) -> Dict:
+        """Replace embeddings for all chunks of a document in SQLite and FAISS.
+
+        chunk_embeddings: list of (chunk_id, np.ndarray | None) pairs.
+        Returns {'updated': int, 'failed': int}.
+        """
+        if not chunk_embeddings:
+            return {"updated": 0, "failed": 0}
+
+        all_chunk_ids = [cid for cid, _ in chunk_embeddings]
+
+        # Remove all current FAISS vectors for these chunks before re-adding
+        if self.faiss_index and all_chunk_ids:
+            with self.index_lock:
+                self.faiss_index.remove_ids(np.array(all_chunk_ids).astype("int64"))
+
+        valid_embs: List[np.ndarray] = []
+        valid_ids: List[int] = []
+        failed = 0
+
+        with self._connect() as con:
+            for chunk_id, emb in chunk_embeddings:
+                if emb is None:
+                    failed += 1
+                    continue
+                emb_arr = np.array(emb, dtype="float32") if not isinstance(emb, np.ndarray) else emb
+                emb_list = emb_arr.tolist()
+                con.execute(
+                    "UPDATE chunks SET embedding = ? WHERE id = ?",
+                    (json.dumps(emb_list), chunk_id),
+                )
+                valid_embs.append(emb_arr)
+                valid_ids.append(chunk_id)
+
+        if valid_embs:
+            self._add_embeddings_to_faiss(valid_embs, valid_ids, save_index=True)
+        else:
+            self._save_faiss_index()
+
+        return {"updated": len(valid_embs), "failed": failed}
 
     def delete_document(self, document_id: int) -> bool:
         """Delete document and all its chunks (and remove from FAISS)."""

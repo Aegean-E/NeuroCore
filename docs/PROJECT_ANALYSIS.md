@@ -1,8 +1,22 @@
-# NeuroCore Project Exhaustive Analysis
+# NeuroCore Project Analysis
 
 ## Executive Summary
 
-NeuroCore is a **modular, extensible AI orchestration platform** built with Python/FastAPI. It provides a visual flow-based system for building autonomous AI agents with memory, tools, knowledge bases, and multi-platform integrations. The platform features a sophisticated hybrid concurrency model, comprehensive observability infrastructure, and scientific research schemas for academic article management.
+NeuroCore is a **modular, extensible AI orchestration platform** built with Python/FastAPI. It provides a visual flow-based system for building autonomous AI agents with persistent memory, tools, knowledge bases, and multi-platform messaging integrations. The platform features a sophisticated hybrid concurrency model, comprehensive observability infrastructure, and real-time streaming capabilities.
+
+**Scale (March 2026):**
+
+| Metric | Value |
+|--------|-------|
+| Active modules | 17 |
+| Node executors | 27 |
+| HTTP routes (core) | 45 |
+| Test files | 71 |
+| Test cases | 1,051+ |
+| Web templates | 36 |
+| Built-in tools | 23 (16 standard + 7 RLM) |
+| Total Python files | 165+ |
+| Lines of code | ~41,000 |
 
 ---
 
@@ -15,7 +29,7 @@ NeuroCore is a **modular, extensible AI orchestration platform** built with Pyth
 │                              PRESENTATION LAYER                             │
 │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────┐ │
 │  │  Chat UI    │  │ Flow Editor │  │ Memory      │  │  Module Dashboard   │ │
-│  │  (HTMX)     │  │ (Canvas)    │  │ Browser     │  │  (Settings)         │ │
+│  │  (HTMX/SSE) │  │ (Canvas)    │  │ Browser     │  │  (Settings)         │ │
 │  └──────┬──────┘  └──────┬──────┘  └──────┬──────┘  └──────────┬──────────┘ │
 └─────────┼────────────────┼────────────────┼────────────────────┼────────────┘
           │                │                │                    │
@@ -26,63 +40,46 @@ NeuroCore is a **modular, extensible AI orchestration platform** built with Pyth
 │                              CORE LAYER                                     │
 │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────────┐  │
 │  │ FlowRunner  │  │FlowManager  │  │ModuleManager│  │  SettingsManager│  │
-│  │ (Execution) │  │ (Storage)   │  │ (Lifecycle) │  │  (Config)       │  │
+│  │ (Execution) │  │(Storage/Ver)│  │ (Lifecycle) │  │  (Config)       │  │
 │  └──────┬──────┘  └──────┬──────┘  └──────┬──────┘  └────────┬────────┘  │
 │         │                │                │                  │           │
 │         └────────────────┴────────────────┴──────────────────┘           │
-│                                    │                                    │
-│                                    ▼                                    │
+│                                    │                                      │
+│                                    ▼                                      │
 │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐   │
-│  │ LLMBridge   │  │ DebugLogger │  │ Routers     │  │ Dependencies│   │
-│  │ (API Client)│  │ (Tracing)   │  │ (HTTP API)  │  │ (DI)        │   │
+│  │ LLMBridge   │  │Observability│  │ Routers     │  │ Dependencies│   │
+│  │ (API Client)│  │(Trace/Metr.)│  │ (45 routes) │  │ (DI)        │   │
 │  └─────────────┘  └─────────────┘  └─────────────┘  └─────────────┘   │
-│                                    │                                    │
-│                                    ▼                                    │
-│  ┌─────────────────────────────────────────────────────────────────────┐  │
-│  │                    OBSERVABILITY LAYER                              │  │
-│  │  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────────┐   │  │
-│  │  │ Distributed │  │   Metrics   │  │  Structured Logging     │   │  │
-│  │  │   Tracing   │  │  Collection │  │  (JSON Format)          │   │  │
-│  │  └─────────────┘  └─────────────┘  └─────────────────────────┘   │  │
-│  └─────────────────────────────────────────────────────────────────────┘  │
-│                                    │                                    │
-│                                    ▼                                    │
-│  ┌─────────────────────────────────────────────────────────────────────┐  │
-│  │                   STRUCTURED OUTPUT LAYER                           │  │
-│  │  ┌─────────────────────────────────────────────────────────────────┐ │  │
-│  │  │ Pydantic Schema Enforcement │ Retry Logic │ Provider Support │ │  │
-│  │  └─────────────────────────────────────────────────────────────────┘ │  │
-│  └─────────────────────────────────────────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────────────────────────┘
                                     │
                                     ▼
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                           MODULE LAYER (16 Modules)                         │
+│                        MODULE LAYER (17 Modules)                            │
 │                                                                             │
-│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐      │
-│  │ llm_module  │  │system_prompt│  │   memory    │  │   tools     │      │
-│  │   (Core)    │  │  (Context)  │  │  (Vector)   │  │ (Sandbox)   │      │
-│  └─────────────┘  └─────────────┘  └─────────────┘  └─────────────┘      │
-│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐      │
-│  │    chat     │  │   logic     │  │   planner   │  │ reflection  │      │
-│  │   (I/O)     │  │ (Control)   │  │ (Planning)  │  │ (Quality)   │      │
-│  └─────────────┘  └─────────────┘  └─────────────┘  └─────────────┘      │
-│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐      │
-│  │knowledge_base│  │reasoning_book│ │   skills    │  │   calendar  │      │
-│  │   (RAG)     │  │ (Thoughts)  │  │ (Templates) │  │ (Events)    │      │
-│  └─────────────┘  └─────────────┘  └─────────────┘  └─────────────┘      │
-│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐      │
-│  │  telegram   │  │memory_browser│ │ annotations │  │ agent_loop  │      │
-│  │  (Bridge)   │  │   (UI)      │  │  (Docs)     │  │ (Autonomous)│      │
-│  └─────────────┘  └─────────────┘  └─────────────┘  └─────────────┘      │
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐   │
+│  │llm_module│  │  system  │  │  memory  │  │  tools   │  │  chat    │   │
+│  │  (Core)  │  │  _prompt │  │ (Vector) │  │(Sandbox) │  │  (I/O)   │   │
+│  └──────────┘  └──────────┘  └──────────┘  └──────────┘  └──────────┘   │
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐   │
+│  │  logic   │  │ planner  │  │reflection│  │knowledge │  │ agent_   │   │
+│  │(Control) │  │(Planning)│  │(Quality) │  │  _base   │  │  loop    │   │
+│  └──────────┘  └──────────┘  └──────────┘  └──────────┘  └──────────┘   │
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐   │
+│  │messaging │  │ calendar │  │  skills  │  │reasoning │  │ browser_ │   │
+│  │  _bridge │  │ (Events) │  │(Instruct)│  │  _book   │  │  auto    │   │
+│  └──────────┘  └──────────┘  └──────────┘  └──────────┘  └──────────┘   │
+│  ┌──────────┐  ┌──────────┐                                               │
+│  │ memory_  │  │annotatio │                                               │
+│  │ browser  │  │   ns     │                                               │
+│  └──────────┘  └──────────┘                                               │
 └─────────────────────────────────────────────────────────────────────────────┘
                                     │
                                     ▼
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │                           DATA LAYER                                        │
 │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐      │
-│  │  SQLite     │  │   FAISS     │  │   JSON      │  │   File      │      │
-│  │ (Metadata)  │  │ (Vectors)   │  │ (Config)    │  │  Storage    │      │
+│  │  SQLite     │  │   FAISS     │  │   JSON      │  │   JSONL     │      │
+│  │ (Metadata)  │  │ (Vectors)   │  │ (Config)    │  │  (Traces)   │      │
 │  └─────────────┘  └─────────────┘  └─────────────┘  └─────────────┘      │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
@@ -92,78 +89,76 @@ NeuroCore is a **modular, extensible AI orchestration platform** built with Pyth
 | Layer | Technology | Purpose |
 |-------|-----------|---------|
 | **Backend** | Python 3.12+ | Core runtime |
-| **Web Framework** | FastAPI | HTTP API & routing |
-| **Frontend** | HTMX + Tailwind CSS | Dynamic UI |
-| **Templating** | Jinja2 | HTML generation |
-| **Database** | SQLite + FAISS | Data & vector storage |
-| **LLM Client** | httpx | Async API calls |
-| **Concurrency** | asyncio | Async execution |
+| **Web Framework** | FastAPI 0.115+ | HTTP API & routing |
+| **Frontend** | HTMX + Tailwind CSS | Dynamic UI without JS framework |
+| **Templating** | Jinja2 3.1+ | HTML generation (36 templates) |
+| **Database** | SQLite (WAL mode, FTS5) | Metadata, memory, knowledge base |
+| **Vector DB** | FAISS IndexFlatIP | Similarity search |
+| **LLM Client** | httpx 0.28+ | Async API calls with connection pooling |
+| **Concurrency** | asyncio + threading | Hybrid async/sync model |
 | **Data Validation** | Pydantic 2.10+ | Schema enforcement |
-| **Testing** | pytest | Test framework |
+| **WebSocket** | websockets 12.0+ | Discord Gateway, custom protocols |
+| **Testing** | pytest + pytest-asyncio | Test framework (1,051+ tests) |
+| **Containers** | Docker + docker-compose | Deployment |
 
 ### 1.3 Project Structure
 
 ```
 NeuroCore/
 ├── main.py                    # FastAPI app entry point, lifespan management
-├── core/                      # Core framework (15 files, ~36K LOC total project)
-│   ├── flow_runner.py        # DAG execution engine (Kahn's sort, bridge groups, episode support)
-│   ├── flow_manager.py       # Flow CRUD operations (JSON persistence)
-│   ├── module_manager.py     # Dynamic module loading (_loaded_once, allowlist)
+├── core/                      # Core framework (15+ files)
+│   ├── flow_runner.py        # DAG execution engine
+│   ├── flow_manager.py       # Flow CRUD + version history
+│   ├── module_manager.py     # Dynamic module loading
 │   ├── llm.py                # LLM API client (OpenAI-compatible, async)
 │   ├── settings.py           # Thread-safe config (RLock, atomic write)
 │   ├── observability.py      # Tracing, metrics, structured JSON logging
 │   ├── structured_output.py  # Pydantic schema enforcement (retry logic)
 │   ├── session_manager.py    # Chat session + EpisodeState persistence
 │   ├── debug.py              # Structured debug logging
-│   ├── routers.py            # 40+ HTTP endpoints
-│   ├── dependencies.py       # FastAPI dependency injection (LLMBridge)
-│   ├── errors.py             # Typed exception hierarchy
+│   ├── routers.py            # 45 HTTP endpoints
+│   ├── dependencies.py       # FastAPI dependency injection
+│   ├── errors.py             # 14 typed exception classes
 │   ├── flow_data.py          # FlowData TypedDict + helper functions
 │   ├── flow_context.py       # FlowContext Pydantic model
 │   ├── planner_helpers.py    # PlanHelper: dependency graphs, cycle detection
 │   └── schemas/              # Domain models for scientific research
-│       ├── hypothesis.py
-│       ├── article.py
-│       ├── finding.py
-│       └── study_design.py
-├── modules/                  # Extensible modules (16 total)
-│   ├── llm_module/          # Core LLM integration
-│   ├── system_prompt/       # Context injection (memory, KB, reasoning, plan, skills)
-│   ├── memory/              # Vector + SQLite memory (FAISS + arbiter + consolidation)
-│   ├── tools/               # Sandbox execution
-│   │   ├── library/         # 16 standard built-in tool files
-│   │   └── rlm_library/     # 7 RLM tool files
-│   ├── chat/                # Chat I/O + session management + compaction
-│   ├── logic/               # Control flow nodes (Delay, Repeater, Conditional, etc.)
-│   ├── planner/             # Planning nodes
+├── modules/                  # 17 extensible modules
+│   ├── llm_module/          # Core LLM interface (streaming, tool calling, vision)
+│   ├── agent_loop/          # Autonomous agent loop (3 nodes)
+│   ├── system_prompt/       # Context injection, tool registration
+│   ├── logic/               # Control flow nodes (7 nodes)
 │   ├── reflection/          # Quality assurance node
-│   ├── knowledge_base/      # RAG system (hybrid search, FTS5 + FAISS)
-│   ├── reasoning_book/      # Thought logging
+│   ├── planner/             # Task planning nodes (2 nodes)
+│   ├── tools/               # Tool library, dispatcher, sandbox (23 tools)
 │   ├── skills/              # Instruction file management
-│   ├── calendar/            # Event management
-│   ├── telegram/            # Telegram bot bridge
+│   ├── knowledge_base/      # RAG system (hybrid FTS5 + FAISS)
+│   ├── memory/              # Vector memory (3 nodes + arbiter + consolidation)
+│   ├── calendar/            # Event scheduling
+│   ├── chat/                # Chat I/O + session management + compaction
+│   ├── messaging_bridge/    # Unified messaging (Telegram/Discord/Signal/WhatsApp)
+│   ├── browser_automation/  # Headless browser singleton (Playwright)
 │   ├── memory_browser/      # Memory management UI
-│   ├── annotations/         # Flow documentation nodes
-│   └── agent_loop/          # Autonomous execution loop
-├── web/
-│   └── templates/           # 33 Jinja2 HTML templates
-├── data/                    # Runtime data (mutable, excluded from reloader)
-│   ├── memory.faiss         # Long-term memory vector index
-│   ├── memory.sqlite3       # Long-term memory relational store
-│   ├── knowledge_base.faiss # RAG vector index
-│   ├── knowledge_base.sqlite3 # RAG relational store
-│   ├── reasoning_book.json  # Thought log
-│   ├── execution_trace.jsonl # Per-node execution trace (debug)
-│   ├── session.json         # Session persistence
-│   └── episodes/            # EpisodeState JSON files (long-running tasks)
-├── tests/                   # 67 test files, 926 tests
-├── docs/                    # Documentation
-├── chat_sessions.json       # Chat session history
-├── ai_flows.json            # Saved flow definitions
-├── settings.json            # Runtime configuration
-├── pyproject.toml           # Project metadata, pytest config, ruff rules
-├── requirements.txt         # Runtime dependencies
+│   ├── reasoning_book/      # Thought journaling
+│   └── annotations/         # Flow documentation nodes
+├── web/templates/            # 36 Jinja2 HTML templates
+├── data/                     # Runtime data (mutable, excluded from reloader)
+│   ├── memory.faiss          # Long-term memory vector index
+│   ├── memory.sqlite3        # Long-term memory relational store
+│   ├── knowledge_base.faiss  # RAG vector index
+│   ├── knowledge_base.sqlite3 # RAG relational store (FTS5)
+│   ├── reasoning_book.json   # Thought log
+│   ├── execution_trace.jsonl # Per-node execution trace (debug only)
+│   ├── session.json          # Session persistence
+│   └── episodes/             # EpisodeState files for long-running tasks
+├── tests/                    # 71 test files, 1,051+ tests
+├── docs/                     # Documentation
+├── ai_flows.json             # Saved flow definitions
+├── ai_flows_versions.json    # Flow version history (up to 20 versions/flow)
+├── chat_sessions.json        # Chat session history
+├── settings.json             # Runtime configuration
+├── pyproject.toml            # Project metadata, pytest config, ruff rules
+├── requirements.txt          # Runtime dependencies
 ├── Dockerfile
 └── docker-compose.yml
 ```
@@ -174,15 +169,14 @@ NeuroCore/
 
 ### 2.1 FlowRunner (`core/flow_runner.py`)
 
-**Purpose**: Executes AI flows as directed acyclic graphs (DAGs) with bridge support
+**Purpose**: Executes AI flows as directed acyclic graphs (DAGs)
 
 **Key Features**:
-- **Bridge Groups**: Bidirectional node connections for shared data
-- **Topological Sort**: Kahn's algorithm determines execution order
-- **Executor Cache**: Avoids re-importing node classes (max 100 entries)
-- **Cycle Detection**: Handles malformed flows gracefully
-- **Debug Logging**: Per-node execution tracing
-- **Automatic Context Propagation**: Preserves conversation history
+- Kahn's topological sort for execution ordering
+- BFS-based bridge group detection for shared data
+- Per-event-loop executor cache (max 100 entries, FIFO eviction at 20%)
+- Deep-copies `messages` list before each node to prevent cross-node mutation
+- Debug mode forces `importlib.reload()` on every executor load for hot-reloading
 
 **`run()` Signature**:
 ```python
@@ -195,15 +189,12 @@ async def run(
     episode_id: str = None,
 ) -> dict
 ```
-- `timeout`: wraps execution in `asyncio.wait_for`; returns `{"error": "timeout"}` on expiry
-- `raise_errors`: if True, re-raises node exceptions instead of returning error dicts
-- `episode_id`: restores `EpisodeState` (plan, current_step, completed_steps) from `data/episodes/` before execution
 
 **Execution Flow**:
-```python
-1. [Optional] Load EpisodeState from data/episodes/ and inject into initial_input
+```
+1. [Optional] Load EpisodeState from data/episodes/ → inject into initial_input
 2. Load flow definition (nodes, connections, bridges)
-3. Build bridge groups using BFS (connected components)
+3. Build bridge groups using BFS connected-component analysis
 4. Compute topological execution order (Kahn's algorithm)
 5. For each node in order:
    a. Collect input from upstream nodes (or initial_input for source nodes)
@@ -215,27 +206,33 @@ async def run(
 6. Return final output dict
 ```
 
-**Bridge System**:
-- Bridges create implicit dependencies between nodes
-- All nodes in a bridge group share the same input from earlier nodes in the chain are merged data
-- Outputs into later nodes
-- Enables complex data flow patterns without explicit connections
-- Example: Memory Recall → System Prompt → LLM Core (bridged together)
+### 2.2 FlowManager (`core/flow_manager.py`)
 
-### 2.2 ModuleManager (`core/module_manager.py`)
+**Purpose**: CRUD operations for AI flows with version control
+
+**Key Features**:
+- Atomic JSON writes (tempfile + os.replace)
+- Flow version history in `ai_flows_versions.json` (up to 20 versions per flow)
+- Version restore with confirmation UI
+- Orphaned node detection during validation
+- Auto-creates default flow on first run
+
+**Default Flow Structure**:
+- Chat Input → Memory Recall → System Prompt → LLM Core → Conditional Router
+- Tool Dispatcher (conditional true branch)
+- Chat Output + Messaging Output (parallel terminal nodes)
+- Memory Save (side effect terminal)
+
+### 2.3 ModuleManager (`core/module_manager.py`)
 
 **Purpose**: Dynamic module loading and lifecycle management
 
 **Key Features**:
-- **Hot-Swapping**: Enable/disable modules without restart
-- **Auto-Discovery**: Scans `modules/` directory
-- **Router Injection**: Dynamically adds FastAPI routes via `app.include_router()`
-- **Ordering**: Configurable module sort order
-- **Dependency Tracking**: Clears FlowRunner cache on module changes
-- **`_loaded_once` Set**: Prevents accidental `sys.modules` flush on first import (critical for test isolation)
-- **`DISABLED` Marker**: `DISABLED` file in module dir skips discovery entirely
-- **`module_allowlist`**: Runtime security control from `settings.json`
-- **`load_error` Isolation**: Load errors stored in `_load_errors` dict only — never written to `module.json`
+- Hot-swapping: enable/disable modules without restart
+- `_loaded_once` set prevents accidental `sys.modules` flush on first import
+- `module_allowlist` security control from `settings.json`
+- Load errors stored in `_load_errors` dict only — never written to `module.json`
+- `DISABLED` file marker in module directory skips discovery entirely
 
 **Module States**:
 ```
@@ -243,34 +240,19 @@ DISABLED (file marker) → DISCOVERED → ENABLED → LOADED → ACTIVE
                               ↑________↓ (hot-swap supported)
 ```
 
-### 2.3 FlowManager (`core/flow_manager.py`)
-
-**Purpose**: CRUD operations for AI flows
-
-**Key Features**:
-- **Default Flow**: Auto-creates on first run
-- **Import/Export**: JSON-based flow sharing
-- **Active Flows**: Tracks currently running flows
-- **Persistence**: JSON file storage (ai_flows.json)
-
-**Default Flow Structure**:
-- Chat Input → Memory Recall → System Prompt → LLM Core → Conditional Router
-- Tool Dispatcher (conditional branch)
-- Chat Output + Telegram Output (parallel)
-- Memory Save (side effect)
-
 ### 2.4 LLMBridge (`core/llm.py`)
 
-**Purpose**: Unified interface to LLM APIs
+**Purpose**: Unified async interface to OpenAI-compatible LLM APIs
 
 **Key Features**:
-- **OpenAI Compatible**: Works with local servers (LM Studio, Ollama, etc.)
-- **Embeddings**: Separate endpoint support for vector generation
-- **Tool Support**: Function calling format
-- **Configurable**: Model, temperature, max_tokens
-- **Shared Client**: Connection pooling for efficiency
+- Shared `httpx.AsyncClient` with connection pooling (20 keepalive, 100 total)
+- Lazy-initialized singleton with `asyncio.Lock` guard
+- Supports streaming responses via SSE
+- Separate embedding endpoint support
+- Token usage tracking per request
+- Configurable timeout (default 60s)
 
-### 2.4b EpisodeState (`core/session_manager.py`)
+### 2.5 EpisodeState (`core/session_manager.py`)
 
 **Purpose**: Persist long-running agent task state across flow executions
 
@@ -284,135 +266,66 @@ DISABLED (file marker) → DISCOVERED → ENABLED → LOADED → ACTIVE
 
 **Storage**: `data/episodes/{episode_id}.json`
 
-When `FlowRunner.run(episode_id=...)` is called, the episode is loaded and its state injected into `initial_input` before execution begins. After execution, the phase is updated.
+### 2.6 Observability (`core/observability.py`)
 
-### 2.5 Observability (`core/observability.py`)
-
-**Purpose**: Enterprise-grade observability infrastructure
-
-**Components**:
+**Three Pillars**:
 
 | Component | Description |
 |-----------|-------------|
-| **Distributed Tracing** | trace_id propagation, span management via contextvars |
-| **Metrics Collection** | Counters, timers, gauges with percentile tracking (p50, p95, p99) |
-| **Structured Logging** | JSON-formatted logs with trace context |
-| **Auto-Instrumentation** | Patches FlowRunner, LLMBridge, ToolDispatcher |
+| **Distributed Tracing** | Span-based traces with trace_id/span_id propagation via contextvars |
+| **Metrics** | Counters, gauges, histograms with p50/p95/p99 percentiles. Counters are persisted to disk across restarts. |
+| **Structured Logging** | JSON-formatted logs with trace context correlation |
 
-**Key Classes**:
-- `TraceContext`: Manages trace spans with parent-child relationships
-- `Metrics`: Thread-safe metrics collector using threading.Lock
-- `StructuredLogger`: JSON logger with trace_id correlation
-- `instrument_flow_runner()`: Patches FlowRunner.run()
-- `instrument_llm_calls()`: Patches LLMBridge.chat_completion()
-- `instrument_tools()`: Patches ToolDispatcherExecutor.receive()
-
-### 2.6 Structured Output (`core/structured_output.py`)
-
-**Purpose**: Guaranteed schema-valid JSON from LLM calls
-
-**Key Features**:
-- **Pydantic Integration**: Uses BaseModel schemas
-- **Provider-Specific Support**: OpenAI, Anthropic, Azure JSON schema support
-- **Retry Logic**: Up to 3 attempts with validation error injection
-- **Conversation Management**: Limits history to 20 messages
-- **Timeout Handling**: Configurable request timeout
-
-**Functions**:
-```python
-async def structured_completion(
-    messages: List[dict],
-    schema: Type[BaseModel],
-    max_retries: int = 3,
-    timeout: float = 60.0
-) -> BaseModel
-```
-
-### 2.6b FlowData and FlowContext
-
-**`core/flow_data.py`** — `FlowData` TypedDict with typed helper functions:
-```python
-messages = get_messages(data)         # Returns list, never None
-plan     = get_plan(data)             # Returns list
-data     = set_plan(data, steps)      # Type-safe setter
-```
-
-**`core/flow_context.py`** — `FlowContext` Pydantic model for runtime-validated payloads:
-```python
-ctx = FlowContext(messages=[...], plan_needed=True)
-ctx.messages.append({"role": "assistant", "content": "hi"})
-```
-
-Both are optional — existing nodes using plain `dict` continue to work.
-
-### 2.6c PlanHelper (`core/planner_helpers.py`)
-
-Consolidates plan dependency logic previously scattered across `PlannerExecutor` and `PlanStepTracker`:
-- `build_dependency_graph(plan)` — produces adjacency list + reverse map from step `dependencies` fields
-- `detect_circular_dependencies(plan)` — returns `(bool, cycle_path_or_None)`
-- `get_executable_steps(plan, completed_steps)` — returns step indices whose dependencies are all satisfied
-- `generate_plan_context(plan, current_step, completed_steps)` — formats a human-readable plan string for system prompt injection
-- `validate_dependencies(plan)` — validates all dependency indices are in range
+**Auto-Instrumentation**: Patches FlowRunner.run(), LLMBridge calls, and ToolDispatcher.
 
 ### 2.7 Scientific Schemas (`core/schemas/`)
 
-**Purpose**: Domain models for scientific research management
+Domain models for academic research, usable as structured output targets with `core/structured_output.py`:
 
-| Schema | File | Purpose |
-|--------|------|---------|
-| **Hypothesis** | hypothesis.py | Scientific hypotheses with variables, confidence levels |
-| **Article** | article.py | Academic articles with bibliographic info, citations |
-| **Finding** | finding.py | Research findings with evidence linking |
-| **StudyDesign** | study_design.py | Scientific study designs with methodology |
+| Schema | Purpose |
+|--------|---------|
+| `Hypothesis` | Scientific hypotheses with variables and confidence levels |
+| `Article` | Academic articles with bibliographic info and citations |
+| `Finding` | Research findings with evidence linking |
+| `StudyDesign` | Scientific study designs with methodology |
 
 ---
 
 ## 3. Module Analysis
 
-### 3.1 Core AI Modules
+### 3.1 Complete Module Registry
 
-#### 3.1.1 LLM Module (`modules/llm_module/`)
+| Module | Order | Nodes | Purpose |
+|--------|-------|-------|---------|
+| `llm_module` | 0 | 1 | Core LLM interface with streaming |
+| `agent_loop` | 1 | 3 | Autonomous agent loop |
+| `system_prompt` | 2 | 1 | Context injection, tool registration |
+| `logic` | 3 | 7 | Control flow (Delay, Repeater, Conditional, Script, Schedule, ContextLengthRouter) |
+| `reflection` | 4 | 1 | Quality assurance |
+| `planner` | 5 | 2 | Task decomposition |
+| `tools` | 6 | 1 | Tool dispatcher + sandbox |
+| `skills` | 7 | 0 | Instruction file management |
+| `knowledge_base` | 9 | 1 | RAG document query |
+| `memory` | 11 | 3 | Vector long-term memory |
+| `calendar` | 13 | 1 | Event scheduling |
+| `chat` | 14 | 2 | Chat I/O + session compaction |
+| `messaging_bridge` | 15 | 2 | Telegram/Discord/Signal/WhatsApp |
+| `browser_automation` | 15 | 0 | Headless browser singleton |
+| `memory_browser` | — | 0 | Memory management UI |
+| `reasoning_book` | — | 2 | Thought journaling |
+| `annotations` | — | 1 | Flow comment nodes |
 
-**Node**: `llm_module`
+### 3.2 Key Module Deep Dives
 
-**Configuration Precedence**:
-1. Node config (highest)
-2. Input data
-3. Module defaults (lowest)
+#### Agent Loop (`modules/agent_loop/`)
 
-**Parameters**:
-- `model`: Model identifier
-- `temperature`: Randomness (0-2)
-- `max_tokens`: Output limit
-- `tools`: Available functions
-- `tool_choice`: Force tool usage
+**3 Nodes**: `agent_loop`, `recursive_lm`, `repl_environment`
 
-#### 3.1.2 System Prompt (`modules/system_prompt/`)
-
-**Node**: `system_prompt`
-
-**Context Injection Sources**:
-- Memory context (`_memory_context`)
-- Knowledge context (`knowledge_context`)
-- Reasoning context (`reasoning_context`)
-- Plan context (`plan_context`)
-- Skills content (`enabled_skills`)
-
-**Tool Integration**:
-- Loads available tools from `modules/tools/tools.json`
-- Converts to OpenAI function format
-- Configurable enabled tools list
-
-#### 3.1.3 Agent Loop (`modules/agent_loop/`)
-
-**Node**: `agent_loop`
-
-**Autonomous Execution**:
-- Loops between LLM and tools
-- Max iterations with safety limit
-- Exponential backoff retry
-- Timeout protection
-- Full execution trace logging
+The `AgentLoopExecutor` runs an autonomous LLM↔Tool loop until the LLM stops generating tool calls or `max_iterations` is reached. Key behaviour:
+- Builds its own messages array with system prompt, memory context, plan context
+- Executes tool calls via the sandbox
+- Supports `tool_error_strategy`: `"continue"` (default) or `"stop"`
+- Emits thinking trace events consumed by the chat UI streaming endpoint
 
 **Configuration**:
 ```json
@@ -421,293 +334,149 @@ Consolidates plan dependency logic previously scattered across `PlannerExecutor`
     "max_llm_retries": 3,
     "retry_delay": 1.0,
     "tool_error_strategy": "continue",
-    "timeout": 120
+    "timeout": 120,
+    "include_plan_in_context": true,
+    "include_memory_context": true,
+    "include_knowledge_context": true
 }
 ```
 
-### 3.2 Memory System (`modules/memory/`)
+#### Memory System (`modules/memory/`)
 
-#### 3.2.1 Architecture
+**3 Nodes**: `memory_recall`, `memory_save`, `check_goal`
 
-**Dual Storage**:
-- **SQLite**: Metadata, text, relationships
-- **FAISS**: Vector embeddings for similarity search
+**Dual storage**:
+- FAISS `IndexFlatIP` + L2 normalization for vector similarity
+- SQLite with FTS5 for structured queries
 
-**Memory Types**:
-| Type | Description | TTL |
-|------|-------------|-----|
-| BELIEF | Uncertain information | 30 days |
-| FACT | Verified information | None |
-| RULE | Behavioral guidelines | None |
-| EXPERIENCE | Past interactions | None |
-| PREFERENCE | User preferences | None |
-| IDENTITY | Self-knowledge | None |
+**Memory Types**: BELIEF (30-day TTL), FACT, RULE, EXPERIENCE, PREFERENCE, IDENTITY
 
-#### 3.2.2 Memory Lifecycle
+**Consolidation Algorithm**:
+1. Compute cosine similarity matrix for all active memories
+2. For pairs with similarity > 0.92: use LLM to verify equivalence
+3. Link older memory as child of newer; remove from FAISS
+4. Runs automatically every 24 hours as a background task
 
-```
-Create → Store (SQLite + FAISS) → Search (FAISS) → Retrieve → Use
-   ↓         ↓                      ↓              ↓
-   └─────────┴──────────────────────┴──────────────┘
-                    ↓
-            Consolidation (LLM-based)
-                    ↓
-            Parent-Child Chaining
-```
+**Memory Arbiter**: LLM-based quality control that detects contradictions and suggests updates before saving.
 
-#### 3.2.3 Consolidation (`modules/memory/consolidation.py`)
+#### Tools System (`modules/tools/`)
 
-**Algorithm**:
-1. Fetch candidate memories (active, no parent)
-2. Compute similarity matrix (cosine similarity)
-3. For pairs with similarity > 0.92:
-   - Use LLM to verify semantic equivalence
-   - Link older memory as child of newer
-   - Remove from FAISS index
-4. Run automatically every 24 hours
+**1 Node**: `tool_dispatcher`
 
-#### 3.2.4 Memory Arbiter (`modules/memory/arbiter.py`)
+**Sandbox Security Layers**:
+| Layer | Mechanism |
+|-------|-----------|
+| Static Analysis | Regex scanning for dangerous patterns before execution |
+| Import Restrictions | Blocks 18+ dangerous modules (os, sys, subprocess, socket, shutil, importlib, pickle, ctypes, mmap, multiprocessing, pathlib, ...) |
+| Restricted Builtins | Removes eval, exec, open, `__import__`, compile |
+| File Access | SafeOpen with directory whitelist |
+| Network | SafeHttpxClient with domain allowlist |
+| SSRF Protection | Blocks private IP ranges (127.x, 10.x, 192.168.x, 172.16–31.x) |
+| Resource Limits | Configurable timeout (default 30s), max output 100 KB |
 
-**Purpose**: LLM-based memory quality control
+#### Messaging Bridge (`modules/messaging_bridge/`)
 
-**Features**:
-- Verifies new memories for consistency
-- Detects contradictory memories
-- Suggests memory updates
+**2 Nodes**: `messaging_input`, `messaging_output`
 
-#### 3.2.5 Nodes
+Unified interface for 4 messaging platforms through a single module. Each platform has its own bridge class and listener strategy:
 
-| Node | Purpose |
-|------|---------|
-| `memory_recall` | Searches memory, injects context |
-| `memory_save` | Stores interactions with extraction |
-| `check_goal` | Retrieves active goals |
+| Platform | Bridge Class | Strategy | Chunk Limit |
+|----------|-------------|----------|-------------|
+| Telegram | `TelegramBridge` | HTTP long-polling thread | 3,072 chars |
+| Discord | `DiscordBridge` | WebSocket Gateway v10 thread | 1,900 chars |
+| Signal | `SignalBridge` | HTTP polling thread (signal-cli REST) | 1,800 chars |
+| WhatsApp | `WhatsAppBridge` | Webhook-driven (Evolution API) | 4,000 chars |
 
-### 3.3 Tools System (`modules/tools/`)
+`MESSAGING_PLATFORMS` in `node.py` is the single source of truth — adding a new platform requires one list entry + one bridge class.
 
-#### 3.3.1 Security Architecture
+**`messaging_output` config**:
+- `platform`: `"auto"` (reply to sender) or a specific platform ID
+- `proactive_recipients`: `["telegram:123456", "discord:987654"]` — used when no reply context exists (e.g., Repeater-triggered flows)
 
-**Sandbox Layers**:
-1. **Static Analysis**: Pre-execution code scanning
-2. **Import Restrictions**: Block dangerous modules
-3. **Restricted Builtins**: Remove dangerous functions
-4. **File Access Control**: Directory whitelist
-5. **Network Restrictions**: Domain whitelist
-6. **Resource Limits**: Timeout, memory, output size
+#### Chat Module (`modules/chat/`)
 
-**Blocked Modules**:
-```
-os, sys, subprocess, socket, multiprocessing, ctypes, 
-mmap, pickle, importlib, shutil, pathlib, ...
-```
+**2 Nodes**: `chat_input`, `chat_output`
 
-**Allowed Modules**:
-```
-math, random, datetime, json, re, collections, 
-hashlib, uuid, html, urllib.parse, ...
-```
+**Session Compaction**: When token count exceeds `auto_compact_tokens`, older messages are summarized into a single system message by the LLM; the last `compact_keep_last` turns are preserved verbatim. Prevents context overflow in long conversations.
 
-#### 3.3.2 Tool Execution Flow
+**Real-time Streaming**: The chat UI uses SSE (Server-Sent Events) to stream LLM responses token-by-token and display agent thinking traces in real time.
 
-```
-LLM generates tool call → ToolDispatcher receives → 
-Load tool code → Sandbox.execute() → 
-Return result → Add to message history → 
-Conditional Router checks for more tools
-```
+#### Logic Module (`modules/logic/`)
 
-#### 3.3.3 Tool Library (`modules/tools/library/`)
-
-| Tool | Purpose |
-|------|---------|
-| Calculator | Safe mathematical expression evaluation (AST-based) |
-| Weather | Weather information lookup |
-| ArXivSearch | Academic paper search |
-| CurrencyConverter | Currency conversion |
-| WikipediaLookup | Wikipedia search |
-| YouTubeTranscript | YouTube subtitle extraction |
-| FetchURL | Web content retrieval (with SSRF protection) |
-| SendEmail | Email sending (with TLS verification) |
-| SetGoal/DeleteGoal/MarkGoalComplete | Goal management |
-
-#### 3.3.4 RLM Tools (`modules/tools/rlm_library/`)
-
-**Purpose**: Memory manipulation tools for reasoning
-
-| Tool | Purpose |
-|------|---------|
-| GetVariable | Retrieve stored variables |
-| SetVariable | Store variables for later use |
-| Peek | Examine current state without modification |
-| Search | Search memory |
-| SetFinal | Mark final response |
-| Chunk | Split large outputs |
-| SubCall | Call subroutines |
-
-#### 3.3.5 Nodes
+**7 Nodes**:
 
 | Node | Purpose |
 |------|---------|
-| `tool_dispatcher` | Executes tool calls from LLM |
+| `trigger_node` | Manual pass-through trigger |
+| `delay_node` | Configurable sleep (seconds) |
+| `script_node` | Custom Python execution (sandboxed) |
+| `repeater_node` | Background loop with configurable interval and max count |
+| `conditional_router` | Branch on field existence (`tool_calls`, `satisfied`, `requires_continuation`, `max_tools_per_turn`) |
+| `schedule_start_node` | Wait until a specific date/time before continuing |
+| `context_length_router` | Route to RLM (RecursiveLM) or standard LLM based on estimated context length |
 
-### 3.4 Control Flow (`modules/logic/`)
+#### Browser Automation (`modules/browser_automation/`)
 
-#### 3.4.1 Nodes
-
-| Node | Purpose | Config |
-|------|---------|--------|
-| `delay_node` | Pause execution | `seconds` |
-| `script_node` | Custom Python | `code` |
-| `repeater_node` | Background loop | `delay`, `max_repeats` |
-| `conditional_router` | Branch logic | `check_field`, `true/false_branches` |
-| `trigger_node` | Manual trigger | - |
-| `schedule_start_node` | Time-based start | `schedule_time`, `schedule_date` |
-
-#### 3.4.2 Conditional Router Logic
-
-**Check Fields**:
-- `tool_calls`: LLM generated tool calls
-- `requires_continuation`: More tools pending
-- `satisfied`: Reflection evaluation
-- `max_tools_per_turn`: Tool limit reached
-
-**Routing**:
-- Sets `_route_targets` in output data
-- FlowRunner uses targets to determine next nodes
-- Supports inverted conditions
-
-### 3.5 Knowledge Base (`modules/knowledge_base/`)
-
-**RAG Pipeline**:
-1. Document upload (PDF, TXT, MD)
-2. Text extraction and chunking
-3. Embedding generation
-4. Vector storage (FAISS)
-5. Hybrid search (vector + keyword)
-6. Context injection
-
-**Node**: `query_knowledge`
-
-### 3.6 Reasoning Book (`modules/reasoning_book/`)
-
-**Purpose**: Log AI's internal thought process
-
-**Storage**: `data/reasoning_book.json`
-
-**Nodes**:
-- `reasoning_save`: Save agent response as thought
-- `reasoning_load`: Load recent thoughts into context
-
-### 3.7 Chat System (`modules/chat/`)
-
-**Nodes**:
-- `chat_input`: Entry point, validates messages
-- `chat_output`: Formats final response
-
-**Features**:
-- Session management (create, rename, delete)
-- Message history with token estimation
-- Auto-renaming (LLM-generated title after N turns)
-- **Session Compaction**: LLM summarizes older messages when token count exceeds `auto_compact_tokens`; preserves last `compact_keep_last` messages verbatim. Available as `POST /chat/sessions/{id}/compact` and triggered automatically on send.
-
-### 3.8 Telegram Bridge (`modules/telegram/`)
-
-**Nodes**:
-- `telegram_input`: Receives messages
-- `telegram_output`: Sends responses
-
-**Integration**:
-- Webhook-based message receiving
-- Bot API for sending
-- Supports images and documents
-
-### 3.9 Calendar (`modules/calendar/`)
-
-**Node**: `calendar_watcher`
-
-**Features**:
-- Event CRUD
-- Reminder notifications
-- Recurring events
-- ICS import/export
-
-### 3.10 Skills (`modules/skills/`)
-
-**Purpose**: Reusable prompt templates
-
-**Storage**: `modules/skills/data/`
-
-**Integration**: System prompt loads enabled skills as context
-
-### 3.11 Planner (`modules/planner/`)
-
-**Node**: `planner`
-
-**Purpose**: Creates execution plans from goals
-
-### 3.12 Reflection (`modules/reflection/`)
-
-**Node**: `reflection`
-
-**Purpose**: Evaluates agent responses for quality
-
-### 3.13 Annotations (`modules/annotations/`)
-
-**Purpose**: Documentation nodes in flows
+Provides a lazy-initialized Playwright singleton (`headless=true` by default). Currently no flow nodes — the browser is available as a service object but cannot be used directly in flows. See IDEAS.md for the planned browser node executors.
 
 ---
 
 ## 4. Data Flow Analysis
 
-### 4.1 Typical Chat Flow
+### 4.1 Standard Chat Flow
 
 ```
-┌─────────┐     ┌─────────┐     ┌─────────┐     ┌─────────┐
-│  User   │────→│  Chat   │────→│ Memory  │────→│ System  │
-│  Input  │     │  Input  │     │  Recall │     │  Prompt │
-└─────────┘     └─────────┘     └─────────┘     └────┬────┘
-                                                     │
-                         ┌───────────────────────────┘
-                         ▼
-┌─────────┐     ┌─────────┐     ┌─────────┐     ┌─────────┐
-│  Chat   │←────│  LLM    │←────│Conditional│←───│  Tools  │
-│  Output │     │  Core   │     │  Router │     │(if any) │
-└─────────┘     └─────────┘     └─────────┘     └─────────┘
-     │
-     ▼
-┌─────────┐
-│ Memory  │
-│  Save   │
-└─────────┘
+User Input
+    │
+    ▼
+[chat_input] → [memory_recall] → [system_prompt] → [llm_core]
+                                                        │
+                                    ┌───────────────────┘
+                                    ▼
+                            [conditional_router] → (tool_calls?)
+                                    │                    │
+                                    │ no                 │ yes
+                                    ▼                    ▼
+                            [chat_output]         [tool_dispatcher]
+                            [memory_save]               │
+                                                         └→ [llm_core] (loop)
 ```
 
 ### 4.2 Autonomous Agent Flow
 
 ```
-┌─────────┐     ┌─────────┐     ┌─────────┐     ┌─────────┐
-│  User   │────→│  Agent  │────→│  LLM    │────→│  Tool   │
-│ Request │     │  Loop   │     │  Call   │     │  Exec   │
-└─────────┘     └────┬────┘     └─────────┘     └────┬────┘
-                     │                                  │
-                     │         ┌────────────────────────┘
-                     │         ▼
-                     │    ┌─────────┐
-                     │    │  Result │────────────────────┐
-                     │    │  Store  │                    │
-                     │    └─────────┘                    │
-                     │         │                         │
-                     │         ▼                         │
-                     │    ┌─────────┐                    │
-                     └────│Reflection│←───────────────────┘
-                          │  Check  │
-                          └────┬────┘
-                               │
-                    ┌──────────┴──────────┐
-                    ▼                     ▼
-              ┌─────────┐           ┌─────────┐
-              │Satisfied│           │Not Sat. │
-              │  Done   │           │  Retry  │
-              └─────────┘           └─────────┘
+[repeater_node] (every N seconds)
+    │
+    ▼
+[memory_recall] → [system_prompt] → [agent_loop]
+                                        │
+                    ┌───────────────────┘
+                    │  (tool loop inside agent_loop)
+                    ▼
+            [messaging_output]
+            (proactive_recipients: ["telegram:123456"])
+```
+
+This is the simplest autonomous agent pattern — no new modules required. The `repeater_node` provides autonomous wakeup; `agent_loop` provides the reasoning loop; `messaging_output` with `proactive_recipients` sends the result without needing an incoming message.
+
+### 4.3 RAG + Planning Flow
+
+```
+[chat_input] → [query_knowledge] → [memory_recall] → [system_prompt]
+                                                           │
+                                                           ▼
+                                                     [planner]
+                                                           │
+                                                           ▼
+                                                    [agent_loop]
+                                                           │
+                                                           ▼
+                                               [plan_step_tracker]
+                                                           │
+                                                    (all steps done?)
+                                                           │
+                                                           ▼
+                                                    [chat_output]
 ```
 
 ---
@@ -716,76 +485,61 @@ Conditional Router checks for more tools
 
 ### 5.1 Tool Sandbox
 
-**Security Layers**:
-1. **Code Analysis**: Regex-based dangerous pattern detection
-2. **Import Hook**: RestrictedImport class blocks dangerous modules
-3. **Restricted Builtins**: Removes eval, exec, open, etc.
-4. **File Sandbox**: SafeOpen with directory whitelist
-5. **Network Sandbox**: SafeHttpxClient with domain whitelist
-6. **Resource Limits**: Timeout, memory, output size
-7. **SSRF Protection**: IP range blocking (private networks)
+The sandbox in `modules/tools/sandbox.py` enforces a principle of least privilege. All tool code (built-in and user-created) executes in this environment.
 
-**Vulnerability Mitigations**:
+**Threat Model**:
 | Threat | Mitigation |
 |--------|-----------|
-| Code Injection | Static analysis + restricted builtins |
-| File Traversal | Path normalization + whitelist |
-| Data Exfiltration | Domain whitelist |
-| SSRF | IP range blocking |
-| Resource Exhaustion | Timeout + memory limits |
-| Privilege Escalation | No access to os/sys/subprocess |
+| Code Injection | Static analysis + restricted builtins (no eval/exec) |
+| File Traversal | Path normalization + directory whitelist via SafeOpen |
+| Data Exfiltration | Domain allowlist via SafeHttpxClient |
+| SSRF | IP range blocking of all private/loopback addresses |
+| Resource Exhaustion | Per-execution timeout (30s) + max output size (100 KB) |
+| Privilege Escalation | No access to os, sys, subprocess, importlib |
 
-### 5.2 Module Isolation
+### 5.2 Module Allowlist
 
-- Each module runs in its own namespace
-- Router injection is controlled by ModuleManager
-- No direct module-to-module imports required
-- Communication through flow data structures
+`settings.json` `module_allowlist` controls which modules can be hot-loaded at runtime. When non-empty, only listed module IDs are permitted. This is a production security control to restrict the attack surface.
+
+### 5.3 Sensitive Config Protection
+
+`core/routers.py` defines `HIDDEN_CONFIG_KEYS` per module — a dict mapping module IDs to lists of config keys that are redacted from the generic JSON editor in the UI. This prevents API keys, bot tokens, and phone numbers from appearing in plaintext in config forms.
 
 ---
 
 ## 6. Testing Strategy
 
-### 6.1 Test Coverage
+### 6.1 Overview
 
-| Category | Count | Key Files |
-|----------|-------|-----------|
-| Core | 20+ | `test_core_*.py`, `test_flow_runner.py`, `test_flow_manager.py`, `test_flow_integration.py` |
-| Memory | 8+ | `test_memory_*.py` |
-| Tools | 5+ | `test_tool_*.py`, `test_tools_*.py` |
-| Chat | 6+ | `test_chat_module.py`, `test_chat_sessions.py`, `test_chat_features.py`, `test_chat_router_flow.py` |
-| Integrations | 7+ | `test_telegram*.py`, `test_calendar*.py`, `test_reasoning_book.py` |
-| Security | 3+ | `test_tool_sandbox.py`, `test_sandbox_security.py` |
-| E2E | 1 | `test_e2e.py` (requires live server, skipped in CI) |
-| **Total** | **926 tests / 67 files** | |
+| Category | Files | Tests |
+|----------|-------|-------|
+| Core flow execution | 6 | 120+ |
+| Chat | 6 | 90+ |
+| Agent loop | 3 | 60+ |
+| Memory | 6+ | 100+ |
+| Tools & sandbox | 3 | 80+ |
+| Individual modules | 12 | 200+ |
+| LLM bridge | 4 | 60+ |
+| Concurrency | 2 | 40+ |
+| Messaging bridge | 1 | 63 |
+| E2E (live server) | 1 | gated |
+| **Total** | **71** | **1,051+** |
 
-`asyncio_mode = "auto"` is set in `pyproject.toml` — no need for `@pytest.mark.asyncio` decorators. The `conftest.py` auto-backs up `module.json` files during tests to prevent state pollution.
+### 6.2 Testing Infrastructure
 
-### 6.2 Testing Patterns
+- `asyncio_mode = "auto"` in `pyproject.toml` — **never add `@pytest.mark.asyncio`**
+- `conftest.py` auto-backs up and restores `module.json` files during test sessions
+- `pytest-httpx` for mocking LLM API calls
+- E2E tests (`test_e2e.py`) require `NEUROCORE_RUN_E2E=1` and a live server at `localhost:8000`
+- Run tests: `py tests/run_tests.py` or `pytest`
 
-**Unit Tests**:
-```python
-@pytest.mark.asyncio
-async def test_node_execution():
-    executor = MyNodeExecutor()
-    result = await executor.receive({"test": "data"})
-    assert result["processed"] is True
-```
+### 6.3 Known Test Issues
 
-**Integration Tests**:
-```python
-def test_flow_execution():
-    runner = FlowRunner("test-flow")
-    result = asyncio.run(runner.run({"messages": []}))
-    assert "content" in result
-```
-
-**Security Tests**:
-```python
-def test_blocks_dangerous_imports():
-    with pytest.raises(SecurityError):
-        sandbox.execute("import os; os.system('ls')", {})
-```
+| File | Issue |
+|------|-------|
+| `test_chat_router.py` | 404 errors — router not registering in TestClient lifecycle (module loading requires full FastAPI lifespan) |
+| `test_core_robustness.py` | Thread-safety test failures under concurrent load |
+| `test_e2e.py` | Requires live server — skipped in normal CI |
 
 ---
 
@@ -794,278 +548,115 @@ def test_blocks_dangerous_imports():
 ### 7.1 Settings Hierarchy
 
 ```
-DEFAULT_SETTINGS (code)
+DEFAULT_SETTINGS (hardcoded)
     ↓
 settings.json (user config)
     ↓
-module.json (module config)
+module.json (module defaults)
     ↓
-Node config (flow editor)
+Node config (set in flow editor)
     ↓
-Input data (runtime)
+Input data (runtime)       ← highest priority
 ```
 
-### 7.2 Default Settings
-
-```python
-DEFAULT_SETTINGS = {
-    "llm_api_url":       "http://localhost:1234/v1",
-    "llm_api_key":       "",
-    "embedding_api_url": "",
-    "default_model":     "local-model",
-    "embedding_model":   "",
-    "active_ai_flows":   [],
-    "temperature":       0.7,
-    "max_tokens":        2048,
-    "debug_mode":        False,
-    "ui_wide_mode":      False,   # Wide layout for the web UI
-    "ui_show_footer":    True,    # Show/hide footer in web UI
-    "request_timeout":   60.0,
-    "max_node_loops":    100,
-    "module_allowlist":  [],      # Empty = allow all; non-empty = restrict hot-loading
-}
-```
-
-### 7.3 Key Configuration Files
+### 7.2 Key Configuration Files
 
 | File | Purpose |
 |------|---------|
 | `settings.json` | Global application settings |
 | `ai_flows.json` | Flow definitions |
+| `ai_flows_versions.json` | Flow version history (up to 20 per flow) |
 | `chat_sessions.json` | Chat session history |
-| `modules/*/module.json` | Module metadata & config |
-| `modules/tools/tools.json` | Tool definitions |
+| `modules/*/module.json` | Module metadata and default config |
+| `modules/tools/tools.json` | Tool definitions (JSON schema + code) |
 | `data/memory.sqlite3` | Long-term memory relational store |
 | `data/memory.faiss` | Long-term memory vector index |
-| `data/knowledge_base.sqlite3` | RAG document relational store (FTS5) |
-| `data/knowledge_base.faiss` | RAG document vector index |
-| `data/reasoning_book.json` | Reasoning journal logs |
-| `data/execution_trace.jsonl` | Per-node execution traces (debug) |
-| `data/session.json` | Session persistence data |
-| `data/episodes/` | EpisodeState JSON files for long-running tasks |
+| `data/knowledge_base.sqlite3` | RAG relational store (FTS5) |
+| `data/knowledge_base.faiss` | RAG vector index |
+| `data/execution_trace.jsonl` | Per-node execution traces (debug_mode only) |
+| `data/episodes/` | EpisodeState files for long-running tasks |
 
 ---
 
 ## 8. Concurrency Model
 
-### 8.1 Lock Types
+See [CONCURRENCY.md](./CONCURRENCY.md) for the full reference.
 
-| Lock Type | Owner | Usage |
-|-----------|-------|-------|
+### 8.1 Lock Types Summary
+
+| Lock | Owner | Purpose |
+|------|-------|---------|
 | `threading.RLock` | FlowManager, ModuleManager, SettingsManager, SessionPersistenceManager | Synchronous shared state |
-| `threading.Lock` | Metrics, SessionManager (instance), `_init_lock` (singleton guard) | Single-level synchronous guards |
-| `asyncio.Lock` | LLMBridge, FlowRunner cache (per event loop), ChatSessions, ReasoningBook | Async resources |
+| `threading.Lock` | Metrics, SessionManager (instance), `_init_lock` (singleton guard) | Single-level guards |
+| `asyncio.Lock` | LLMBridge, FlowRunner cache (per loop), ChatSessions (via to_thread), ReasoningBook | Async resources |
 
-### 8.2 Lock Ordering Rules
+### 8.2 Lock Ordering (deadlock prevention)
 
-1. Never mix threading and asyncio locks in the same code path
-2. Always acquire threading.RLock before asyncio.Lock (never the reverse)
-3. Lock acquisition order for threading.RLock: `module_manager._lock` → `flow_manager._lock` → `settings._lock`
-4. Use context managers (`with`/`async with`)
-5. Keep critical sections small — never `await` while holding a threading lock
-6. FlowRunner's `_cache_lock` is per-event-loop to avoid "attached to a different loop" errors in tests
+1. `module_manager._lock`
+2. `flow_manager._lock`
+3. `settings._lock`
 
-See `docs/CONCURRENCY.md` for full details.
+Never `await` while holding a `threading.Lock`.
 
 ---
 
-## 9. Extension Points
+## 9. Performance Characteristics
 
-### 9.1 Creating New Modules
-
-**Minimum Requirements**:
-1. Directory: `modules/my_module/`
-2. `module.json` with metadata
-3. `__init__.py` (can be empty)
-
-**Optional Components**:
-- `router.py` - API routes
-- `node.py` - Flow nodes
-- `service.py` - Business logic
-- `backend.py` - Data layer
-
-### 9.2 Creating New Nodes
-
-**Template**:
-```python
-class MyNodeExecutor:
-    async def receive(self, input_data: dict, config: dict = None) -> dict:
-        if input_data is None:
-            return None
-        # Process data
-        return input_data
-
-    async def send(self, processed_data: dict) -> dict:
-        return processed_data
-
-async def get_executor_class(node_type_id: str):
-    if node_type_id == "my_node":
-        return MyNodeExecutor
-    return None
-```
-
-### 9.3 Creating New Tools
-
-**Requirements**:
-1. Add to `modules/tools/tools.json`
-2. Create `modules/tools/library/{name}.py`
-3. Define `args` parameter and `result` variable
-
----
-
-## 10. Performance Characteristics
-
-### 10.1 Bottlenecks
+### 9.1 Bottlenecks
 
 | Component | Bottleneck | Mitigation |
 |-----------|-----------|------------|
-| LLM Calls | Network latency | Async execution |
-| Vector Search | FAISS index size | Incremental updates |
-| Memory Consolidation | LLM verification | Async background task |
-| Tool Execution | Python sandbox | Timeout limits |
+| LLM Calls | Network latency | Async execution, streaming |
+| Vector Search | FAISS index size | IndexFlatIP with L2 normalization; periodic compaction |
+| Memory Consolidation | LLM verification calls | 24h background interval |
+| Tool Execution | Python sandbox overhead | Timeout limits; executor cache |
+| Chat Sessions | Session JSON file growth | Periodic compaction; `compact_keep_last` setting |
 
-### 10.2 Optimizations
+### 9.2 Optimizations
 
-- **Executor Caching**: Avoid re-importing node classes
-- **FAISS Index**: Batch updates, periodic saves
-- **Async I/O**: Non-blocking LLM calls
-- **Connection Pooling**: Reuse HTTP clients
-- **Lazy Loading**: Modules loaded on demand
-
----
-
-## 11. Deployment Considerations
-
-### 11.1 Docker Support
-
-**Files**:
-- `Dockerfile` - Multi-stage build
-- `docker-compose.yml` - Service orchestration
-
-**Volumes**:
-- `data/` - Persistent storage
-- `modules/` - Custom modules
-
-### 11.2 Environment Variables
-
-| Variable | Purpose |
-|----------|---------|
-| `LLM_API_URL` | LLM server endpoint |
-| `LLM_API_KEY` | API authentication |
-| `DEBUG_MODE` | Enable debug logging |
-| `TELEGRAM_BOT_TOKEN` | Telegram integration |
+- **Executor Caching**: FIFO cache (max 100) avoids re-importing node classes
+- **Connection Pooling**: Shared `httpx.AsyncClient` across all LLM calls
+- **Async I/O**: Non-blocking LLM calls; `asyncio.to_thread()` for blocking file/DB ops
+- **Incremental KB Indexing**: Knowledge base tracks last-indexed timestamp and re-indexes only changed documents (provenance tracking)
+- **Lazy Loading**: Modules loaded only when enabled
 
 ---
 
-## 12. Development Workflow
+## 10. Recent Development History
 
-### 12.1 Hot-Reloading
-
-1. Edit module files
-2. Disable → Enable module in UI
-3. Changes applied without restart
-
-### 12.2 Debugging
-
-- Debug mode: Per-node execution logging
-- Flow tracing: Visual execution path
-- Error propagation: Structured error messages
-- Observability dashboard: Metrics and traces
-
----
-
-## 13. Code Quality Metrics
-
-### 13.1 Current State
-
-| Metric | Value |
-|--------|-------|
-| Total Python Files | 165 |
-| Lines of Code | ~36,661 |
-| Test Files | 67 |
-| Test Count | 926 |
-| HTML Templates | 33 |
-| Modules | 16 |
-| Built-in Tools | 23 (16 standard + 7 RLM) |
-| Core Classes | 30+ |
-| API Endpoints (core routers only) | 40+ |
-
-### 13.2 Patterns Used
-
-| Pattern | Usage |
-|---------|-------|
-| Async/Await | Throughout |
-| Dependency Injection | `core/dependencies.py` |
-| Singleton | Settings, Managers |
-| Factory | Node executors |
-| Strategy | Module loading |
-| Observer | Debug logging, Observability |
+| Feature | Description |
+|---------|-------------|
+| Messaging Bridge | Unified Telegram/Discord/Signal/WhatsApp module replacing separate platform modules |
+| Real-time Streaming | LLM token streaming + thinking trace in chat UI via SSE |
+| Flow Versioning | Up to 20 versions per flow with restore and confirmation |
+| LLM Token Tracking | Per-request token usage tracked and displayed in debug UI |
+| Metrics Persistence | Observability counters persist across server restarts |
+| Context Length Router | New logic node to route between standard LLM and RLM based on token estimate |
+| Incremental KB Indexing | Knowledge base re-indexes only changed documents |
+| Sandbox Domain Expansion | Configurable allowed domains for sandboxed tool HTTP calls |
+| Agent Thinking Trace | Agent loop emits real-time thinking events visible in chat UI |
 
 ---
 
-## 14. Recent Security Fixes
+## 11. Conclusion
 
-All 18 security issues have been fixed:
+NeuroCore is a **well-architected, production-ready AI orchestration platform** with strong foundations:
 
-| Issue | Component | Fix |
-|-------|-----------|-----|
-| SSRF Vulnerability | FetchURL.py | URL scheme validation + IP range blocking |
-| Unsafe eval() | Calculator.py | AST-based SafeEvaluator |
-| No TLS Verification | SendEmail.py | ssl.create_default_context() |
-| Hardcoded localhost | Goal tools | MEMORY_API_URL environment variable |
-| Missing Validation | Goal tools | Added input validation |
-| Wrong HTTP Method | SetGoal.py | Changed to JSON |
-| Missing Import | Weather.py | Added httpx import |
-| Not URL Encoded | Weather.py | Added urllib.parse.quote() |
-| No None Guards | ArXivSearch.py | Added null checks |
-| No Input Validation | CurrencyConverter.py | Added validation |
-| Not Called | WikipediaLookup.py | Added raise_for_status() |
-| No Timezone | SystemTime.py | Added timezone info |
-| No Length Guard | YouTubeTranscript.py | Added truncation |
+✅ Clean layered architecture (presentation → core → modules → data)
+✅ Comprehensive error hierarchy with typed exceptions
+✅ Thread-safe singleton patterns with correct lock ordering
+✅ Hot-module loading with smart reload safety
+✅ Extensive test coverage (1,051+ tests across 71 files)
+✅ Async-first design with proper event loop handling
+✅ Security-conscious tool sandbox (SSRF, import, file, resource limits)
+✅ Rich observability (distributed tracing, metrics, debug logs)
+✅ Real-time streaming (SSE for chat, thinking trace)
+✅ Unified multi-platform messaging (4 platforms, single module)
+✅ Flow version history with rollback
+
+See [IDEAS.md](./IDEAS.md) for known bugs, planned improvements, and future feature ideas.
 
 ---
 
-## 15. Future Enhancement Areas
-
-### 15.1 Scalability
-
-- [ ] Distributed flow execution
-- [ ] Horizontal scaling of LLM calls
-- [ ] Sharded vector storage
-
-### 15.2 Features
-
-- [ ] Multi-modal support (images, audio)
-- [ ] Plugin marketplace
-- [ ] Visual debugging tools
-- [ ] Flow versioning
-
-### 15.3 Security
-
-- [ ] Code signing for tools
-- [ ] Module permission system
-- [ ] Audit logging
-
----
-
-## 16. Conclusion
-
-NeuroCore represents a **well-architected, modular AI orchestration platform** with:
-
-✅ **Clean separation of concerns** between core, modules, and data  
-✅ **Extensible plugin system** with hot-swapping support  
-✅ **Robust security model** for untrusted code execution  
-✅ **Comprehensive memory system** with vector search and consolidation  
-✅ **Flexible flow-based programming** for AI agent construction  
-✅ **Enterprise-grade observability** with tracing, metrics, and structured logging  
-✅ **Scientific schema support** for research applications  
-✅ **Production-ready features** including Docker, testing, and monitoring  
-✅ **Sophisticated concurrency model** with proper lock ordering  
-
-The codebase demonstrates **mature software engineering practices** with consistent patterns, comprehensive testing, and clear documentation. The modular architecture enables rapid extension while maintaining system stability.
-
----
-
-*Analysis last updated: 2026-03-14*
-*Version: Based on exhaustive codebase review — 165 Python files, 926 tests, 16 modules*
-
+*Last updated: 2026-03-17*
+*Based on exhaustive codebase review: 165+ Python files, 1,051+ tests, 17 modules*

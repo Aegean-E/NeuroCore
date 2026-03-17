@@ -56,12 +56,12 @@ A **Tool** is a bridge between your AI agent and the external world. It consists
 
 The Tool Library is built on these core components:
 
-- **🔧 Tool Definitions** (`modules/tools/tools.json`): Stores tool metadata and JSON schemas
-- **📁 Library Directory** (`modules/tools/library/`): Contains standard Python implementation files
-- **🧠 RLM Library** (`modules/tools/rlm_library/`): Contains Recursive Language Model tool implementations
-- **⚡ Tool Dispatcher Node**: Executes tool calls within AI Flows
-- **🎯 System Prompt Integration**: Injects available tools into LLM context
-- **🔒 Sandbox** (`modules/tools/sandbox.py`): Restricted execution environment for all tool code
+- **Tool Definitions** (`modules/tools/tools.json`): Stores tool metadata and JSON schemas. `tools.json.lock` is a runtime lock file used during concurrent writes — do not delete it manually.
+- **Library Directory** (`modules/tools/library/`): Contains standard Python implementation files (16 standard tools)
+- **RLM Library** (`modules/tools/rlm_library/`): Contains Recursive Language Model tool implementations (7 RLM tools)
+- **Tool Dispatcher Node** (`tool_dispatcher`): Executes tool calls within AI Flows
+- **System Prompt Integration**: Injects available tools into LLM context
+- **Sandbox** (`modules/tools/sandbox.py`): Restricted execution environment for all tool code
 
 ---
 
@@ -621,7 +621,7 @@ All tool code (standard and custom) executes in `modules/tools/sandbox.py` with 
 | Import Restrictions | `RestrictedImport` blocks `os`, `sys`, `subprocess`, `socket`, `shutil`, `importlib`, `pickle`, `ctypes`, `mmap`, `multiprocessing`, `pathlib`, and 10+ more |
 | Restricted Builtins | Removes `eval`, `exec`, `open`, `__import__`, `compile`, `globals`, `locals` |
 | File Access Control | `SafeOpen` with optional directory whitelist |
-| Network Restrictions | `SafeHttpxClient` with domain whitelist |
+| Network Restrictions | `SafeHttpxClient` with configurable domain allowlist (expanded set of public API domains; see `ALLOWED_DOMAINS` in `sandbox.py`) |
 | SSRF Protection | Blocks requests to private IP ranges (127.x, 10.x, 192.168.x, 172.16–31.x) |
 | Resource Limits | Configurable timeout (default 30s), max output size (100 KB) |
 
