@@ -100,6 +100,93 @@ class AgentLoopExecutor:
         
         return result
 
+    def _estimate_messages_tokens(self, messages: list) -> int:
+        """Estimate total token count across all messages."""
+        total = 0
+        for m in messages:
+            content = m.get("content", "")
+            if isinstance(content, list):
+                content = " ".join(
+                    p.get("text", "") for p in content if p.get("type") == "text"
+                )
+            total += self._estimate_tokens(str(content) if content else "")
+        return total
+
+    async def _compact_messages(self, messages: list, keep_last: int) -> list:
+        """LLM-summarize old agent messages to free up context window.
+
+        Preserves leading system messages verbatim.  Summarizes the oldest
+        non-system messages into a single system-level summary, then appends
+        the most recent ``keep_last`` non-system messages verbatim.
+
+        Returns the original list unchanged if compaction is unnecessary or
+        the LLM summarization fails (fail-safe: never discard context silently).
+        """
+        # Separate the leading system prefix from the conversation turns
+        system_prefix = []
+        conversation = []
+        for msg in messages:
+            if msg.get("role") == "system" and not conversation:
+                system_prefix.append(msg)
+            else:
+                conversation.append(msg)
+
+        # Not enough conversation turns to bother compacting
+        if len(conversation) <= keep_last + 2:
+            return messages
+
+        old_messages = conversation[:-keep_last]
+        recent_messages = conversation[-keep_last:]
+
+        # Build a readable transcript for the summarization prompt
+        lines = []
+        for m in old_messages:
+            role = m.get("role", "?").upper()
+            content = m.get("content", "")
+            if isinstance(content, list):
+                text_parts = [p.get("text", "") for p in content if p.get("type") == "text"]
+                content = " ".join(text_parts) or "[non-text content]"
+            lines.append(f"{role}: {str(content)[:600]}")
+
+        summary_prompt = [
+            {
+                "role": "user",
+                "content": (
+                    "Summarize the following agent reasoning steps, tool calls, and results "
+                    "concisely in 3-5 sentences. Preserve key facts, decisions, tool outcomes, "
+                    "and any information needed to continue the task:\n\n"
+                    + "\n".join(lines)
+                ),
+            }
+        ]
+
+        try:
+            result = await self.llm.chat_completion(
+                messages=summary_prompt,
+                max_tokens=400,
+                temperature=0.3,
+            )
+            summary_text = result["choices"][0]["message"]["content"].strip()
+        except Exception as e:
+            logger.warning(f"[AgentLoop] Context compaction LLM call failed: {e}")
+            return messages
+
+        compacted = (
+            system_prefix
+            + [
+                {
+                    "role": "system",
+                    "content": f"[Agent Reasoning Summary — earlier steps compacted]: {summary_text}",
+                }
+            ]
+            + recent_messages
+        )
+        logger.info(
+            f"[AgentLoop] Context compacted: {len(messages)} → {len(compacted)} messages "
+            f"({len(old_messages)} old turns summarized)"
+        )
+        return compacted
+
     def _load_tools(self):
         """Load tool definitions from tools.json with mtime-based caching."""
         try:
@@ -314,7 +401,9 @@ class AgentLoopExecutor:
         retry_delay: float,
         tool_error_strategy: str,
         trace: list,
-        stream_queue: asyncio.Queue = None
+        stream_queue: asyncio.Queue = None,
+        compact_threshold: int = 0,
+        compact_keep_last: int = 6,
     ) -> tuple:
         """
         Core agent loop: LLM ↔ Tool execution until no more tool calls or max_iterations.
@@ -347,6 +436,12 @@ class AgentLoopExecutor:
                 "tool_calls": [],
                 "errors": []
             }
+
+            # Context compaction: if enabled and messages exceed threshold, summarize old turns
+            if compact_threshold > 0:
+                current_tokens = self._estimate_messages_tokens(llm_messages)
+                if current_tokens > compact_threshold:
+                    llm_messages = await self._compact_messages(llm_messages, compact_keep_last)
 
             # Log LLM call event
             if self._session_manager:
@@ -553,6 +648,8 @@ class AgentLoopExecutor:
         timeout = float(config.get("timeout", 120))
         max_replan_depth = int(config.get("max_replan_depth", 3))
         max_context_tokens = int(config.get("max_context_tokens", 6000))  # Token budget for context
+        compact_threshold = int(config.get("compact_threshold", 0))       # 0 = disabled
+        compact_keep_last = int(config.get("compact_keep_last", 6))
         
         # --- Re-planning depth tracking ---
         replan_count = int(input_data.get("replan_count", 0))
@@ -700,7 +797,9 @@ class AgentLoopExecutor:
                 retry_delay=retry_delay,
                 tool_error_strategy=tool_error_strategy,
                 trace=agent_loop_trace,
-                stream_queue=config.get("_stream_queue") if config else None
+                stream_queue=config.get("_stream_queue") if config else None,
+                compact_threshold=compact_threshold,
+                compact_keep_last=compact_keep_last,
             )
 
             # --- Episode Checkpoint Saving ---

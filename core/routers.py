@@ -49,6 +49,7 @@ HIDDEN_CONFIG_KEYS = {
     'memory': ['save_default_confidence', 'save_confidence_threshold', 'recall_limit', 'recall_min_score', 'consolidation_threshold', 'auto_consolidation_hours', 'arbiter_model', 'arbiter_prompt', 'similarity_threshold', 'belief_ttl_days', 'recall_access_weight'],
     'llm_module': ['temperature', 'max_tokens'],
     'chat': ['auto_rename_turns', 'auto_compact_tokens', 'compact_keep_last'],
+    'agent_loop': ['max_iterations', 'max_tokens', 'temperature', 'max_llm_retries', 'retry_delay', 'timeout', 'tool_error_strategy', 'include_plan_in_context', 'include_memory_context', 'include_knowledge_context', 'include_reasoning_context', 'compact_threshold', 'compact_keep_last'],
     'telegram': ['bot_token', 'chat_id'],
     'messaging_bridge': [
         'telegram_bot_token', 'telegram_chat_id',
@@ -432,6 +433,19 @@ async def save_module_config(request: Request, module_id: str, module_manager: M
             # Update tool error strategy
             if "tool_error_strategy" in form_data:
                 new_config['tool_error_strategy'] = form_data["tool_error_strategy"]
+
+            # Context compaction settings
+            if "compact_threshold" in form_data:
+                try:
+                    new_config['compact_threshold'] = int(form_data["compact_threshold"])
+                except ValueError:
+                    pass
+
+            if "compact_keep_last" in form_data:
+                try:
+                    new_config['compact_keep_last'] = int(form_data["compact_keep_last"])
+                except ValueError:
+                    pass
         else:
 
             # Standard JSON config

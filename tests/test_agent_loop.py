@@ -886,5 +886,160 @@ class TestIntegration:
         assert result["custom_field"] == {"nested": True}
 
 
+# ---------------------------------------------------------------------------
+# Context compaction tests
+# ---------------------------------------------------------------------------
+
+class TestContextCompaction:
+    """Tests for _compact_messages and the compact_threshold config key."""
+
+    def _make_executor(self):
+        with patch("modules.agent_loop.node.LLMBridge"):
+            ex = AgentLoopExecutor()
+            ex.llm = AsyncMock()
+        return ex
+
+    def _make_messages(self, n_turns: int, system: bool = True) -> list:
+        msgs = []
+        if system:
+            msgs.append({"role": "system", "content": "You are a helpful agent."})
+        for i in range(n_turns):
+            msgs.append({"role": "user", "content": f"turn {i} user"})
+            msgs.append({"role": "assistant", "content": f"turn {i} assistant"})
+        return msgs
+
+    async def test_compact_messages_returns_original_when_short(self):
+        ex = self._make_executor()
+        msgs = self._make_messages(2)  # only 4 non-system turns — too few
+        result = await ex._compact_messages(msgs, keep_last=6)
+        assert result is msgs  # unchanged
+
+    async def test_compact_messages_summarizes_old_turns(self):
+        ex = self._make_executor()
+        ex.llm.chat_completion = AsyncMock(return_value={
+            "choices": [{"message": {"content": "Agent looked up weather and found it sunny."}}]
+        })
+        msgs = self._make_messages(8)  # 16 conversation turns + 1 system
+        result = await ex._compact_messages(msgs, keep_last=4)
+
+        # Should have compacted
+        assert len(result) < len(msgs)
+        # System prompt preserved
+        assert result[0]["role"] == "system"
+        assert "helpful agent" in result[0]["content"]
+        # Summary injected
+        summary_msgs = [m for m in result if "[Agent Reasoning Summary" in m.get("content", "")]
+        assert len(summary_msgs) == 1
+        assert "sunny" in summary_msgs[0]["content"]
+        # Last 4 non-system messages preserved verbatim
+        non_system = [m for m in result if "[Agent Reasoning Summary" not in m.get("content", "")
+                      and m.get("role") != "system"]
+        assert len(non_system) == 4
+
+    async def test_compact_messages_fails_gracefully_on_llm_error(self):
+        ex = self._make_executor()
+        ex.llm.chat_completion = AsyncMock(side_effect=Exception("LLM unavailable"))
+        msgs = self._make_messages(8)
+        result = await ex._compact_messages(msgs, keep_last=4)
+        # Must return original unchanged — never silently discard context
+        assert result is msgs
+
+    async def test_compact_messages_preserves_no_system(self):
+        ex = self._make_executor()
+        ex.llm.chat_completion = AsyncMock(return_value={
+            "choices": [{"message": {"content": "Summary of work done."}}]
+        })
+        msgs = self._make_messages(8, system=False)
+        result = await ex._compact_messages(msgs, keep_last=4)
+        assert len(result) < len(msgs)
+        # No original system message, so only the injected summary + recent turns
+        assert result[0]["role"] == "system"
+        assert "[Agent Reasoning Summary" in result[0]["content"]
+
+    async def test_estimate_messages_tokens(self):
+        ex = self._make_executor()
+        msgs = [
+            {"role": "system", "content": "A" * 400},   # 100 tokens
+            {"role": "user",   "content": "B" * 800},   # 200 tokens
+        ]
+        total = ex._estimate_messages_tokens(msgs)
+        assert total == 300
+
+    async def test_compact_threshold_triggers_in_loop(self):
+        """compact_threshold in config causes compaction during _run_agent_loop."""
+        ex = self._make_executor()
+
+        # LLM: first call returns no tool_calls (loop ends immediately)
+        final_resp = {"choices": [{"message": {"content": "Done", "tool_calls": []}}]}
+        compaction_resp = {"choices": [{"message": {"content": "Summary of earlier work."}}]}
+        call_count = {"n": 0}
+
+        async def mock_chat(**kwargs):
+            # First call is the compaction summary; second is the actual agent call
+            call_count["n"] += 1
+            if call_count["n"] == 1:
+                return compaction_resp
+            return final_resp
+
+        ex.llm.chat_completion = mock_chat
+
+        # Build a large message list that exceeds compact_threshold=10 tokens
+        big_msgs = [{"role": "system", "content": "sys"}]
+        for i in range(10):
+            big_msgs.append({"role": "user", "content": f"u{i}" * 5})
+            big_msgs.append({"role": "assistant", "content": f"a{i}" * 5})
+
+        result, iters, _ = await ex._run_agent_loop(
+            llm_messages=big_msgs,
+            tools_list=[],
+            tool_library={},
+            model="test",
+            temperature=0.7,
+            max_tokens=512,
+            max_iterations=3,
+            max_llm_retries=1,
+            retry_delay=0,
+            tool_error_strategy="continue",
+            trace=[],
+            compact_threshold=10,   # very low threshold to force compaction
+            compact_keep_last=2,
+        )
+        # Compaction triggered → summary LLM call happened
+        assert call_count["n"] >= 2
+
+    async def test_compact_threshold_zero_disables_compaction(self):
+        """compact_threshold=0 means no compaction ever fires."""
+        ex = self._make_executor()
+        compact_called = {"n": 0}
+        original_compact = ex._compact_messages
+
+        async def spy_compact(msgs, keep_last):
+            compact_called["n"] += 1
+            return await original_compact(msgs, keep_last)
+
+        ex._compact_messages = spy_compact
+
+        final_resp = {"choices": [{"message": {"content": "Done", "tool_calls": []}}]}
+        ex.llm.chat_completion = AsyncMock(return_value=final_resp)
+
+        big_msgs = [{"role": "user", "content": "x" * 10000}]
+        await ex._run_agent_loop(
+            llm_messages=big_msgs,
+            tools_list=[],
+            tool_library={},
+            model="test",
+            temperature=0.7,
+            max_tokens=512,
+            max_iterations=2,
+            max_llm_retries=1,
+            retry_delay=0,
+            tool_error_strategy="continue",
+            trace=[],
+            compact_threshold=0,  # disabled
+            compact_keep_last=4,
+        )
+        assert compact_called["n"] == 0
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

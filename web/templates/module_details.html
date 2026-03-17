@@ -120,6 +120,25 @@
                 </div>
 
                 <div class="bg-slate-950/50 rounded-xl border border-slate-800 p-6">
+                    <h4 class="text-sm font-semibold text-slate-300 mb-4 uppercase tracking-wider">Context Compaction</h4>
+                    <p class="text-xs text-slate-500 mb-4">Automatically summarize old reasoning steps when the context window fills up, preserving recent turns verbatim. Set threshold to 0 to disable.</p>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-sm font-medium text-slate-400 mb-2">Compact Threshold (tokens)</label>
+                            <input type="number" name="compact_threshold" value="{{ module.config.compact_threshold }}" min="0" max="128000" step="500"
+                                   class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all">
+                            <p class="text-xs text-slate-500 mt-2">Trigger compaction when estimated token count exceeds this value. 0 = disabled. Recommended: 4000 (≈80% of a 6k context). Default: 0</p>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-slate-400 mb-2">Keep Last (messages)</label>
+                            <input type="number" name="compact_keep_last" value="{{ module.config.compact_keep_last }}" min="2" max="50"
+                                   class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all">
+                            <p class="text-xs text-slate-500 mt-2">Number of most recent messages to preserve verbatim after compaction. Older messages are summarized. Default: 6</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="bg-slate-950/50 rounded-xl border border-slate-800 p-6">
                     <h4 class="text-sm font-semibold text-slate-300 mb-4 uppercase tracking-wider">Tool Error Strategy</h4>
                     <p class="text-xs text-slate-500 mb-4">How to handle errors when tool execution fails</p>
                     <div class="flex flex-col sm:flex-row gap-4">
@@ -942,7 +961,15 @@
                         const el = form.querySelector('[name="timeout"]');
                         if (el) el.value = data.timeout;
                     }
-                    
+                    if (data.compact_threshold !== undefined) {
+                        const el = form.querySelector('[name="compact_threshold"]');
+                        if (el) el.value = data.compact_threshold;
+                    }
+                    if (data.compact_keep_last !== undefined) {
+                        const el = form.querySelector('[name="compact_keep_last"]');
+                        if (el) el.value = data.compact_keep_last;
+                    }
+
                     // Update checkboxes
                     const checkboxes = ['include_plan_in_context', 'include_memory_context', 'include_knowledge_context', 'include_reasoning_context'];
                     checkboxes.forEach(name => {

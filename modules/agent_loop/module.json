@@ -17,7 +17,9 @@
         "include_plan_in_context": true,
         "include_memory_context": true,
         "include_knowledge_context": true,
-        "include_reasoning_context": true
+        "include_reasoning_context": true,
+        "compact_threshold": 0,
+        "compact_keep_last": 6
     },
     "provides_nodes": [
         {
