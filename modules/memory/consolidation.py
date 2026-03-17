@@ -1,7 +1,10 @@
 import numpy as np
 import json
 import logging
-from typing import List, Dict, Tuple, Set
+import time
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from typing import List, Dict, Tuple, Set, Optional
 from core.llm import LLMBridge
 from core.settings import settings
 from .backend import memory_store
@@ -11,6 +14,33 @@ from functools import partial
 logger = logging.getLogger(__name__)
 
 DEFAULT_ENTAILMENT_TIMEOUT = 10
+
+
+@dataclass
+class ConsolidationState:
+    """Tracks the state of the memory consolidation background task."""
+    is_running: bool = False
+    last_run: Optional[float] = None          # Unix timestamp of last completed run
+    last_error: Optional[str] = None          # Error message from last failed run, or None
+    memories_consolidated: int = 0            # Cumulative count across all runs
+
+    def last_run_iso(self) -> Optional[str]:
+        if self.last_run is None:
+            return None
+        return datetime.fromtimestamp(self.last_run, tz=timezone.utc).isoformat()
+
+    def to_dict(self) -> dict:
+        return {
+            "is_running": self.is_running,
+            "last_run": self.last_run,
+            "last_run_iso": self.last_run_iso(),
+            "memories_consolidated": self.memories_consolidated,
+            "last_error": self.last_error,
+        }
+
+
+# Module-level singleton — shared by router.py and node.py
+consolidation_state = ConsolidationState()
 
 
 class MemoryConsolidator:
@@ -124,6 +154,22 @@ class MemoryConsolidator:
 
     async def run(self) -> int:
         """Run consolidation process. Returns number of memories consolidated."""
+        consolidation_state.is_running = True
+        consolidation_state.last_error = None
+        try:
+            count = await self._run_inner()
+        except Exception as e:
+            consolidation_state.last_error = str(e)
+            consolidation_state.is_running = False
+            consolidation_state.last_run = time.time()
+            raise
+        consolidation_state.memories_consolidated += count
+        consolidation_state.last_run = time.time()
+        consolidation_state.is_running = False
+        return count
+
+    async def _run_inner(self) -> int:
+        """Internal consolidation logic. Returns number of memories consolidated."""
         THRESHOLD = float(self.config.get("consolidation_threshold", 0.92))
 
         processed_pairs = self._get_processed_pairs()
@@ -168,18 +214,18 @@ class MemoryConsolidator:
 
             # Check entailment with timeout
             is_equivalent = await self._check_entailment_with_timeout(
-                older_mem["text"], 
+                older_mem["text"],
                 newer_mem["text"]
             )
 
             if is_equivalent:
                 await loop.run_in_executor(
-                    self.store.executor, 
+                    self.store.executor,
                     partial(self.store.set_parent, child_id=older_mem["id"], parent_id=newer_mem["id"])
                 )
 
                 self._log_consolidation(
-                    older_mem["id"], 
+                    older_mem["id"],
                     newer_mem["id"],
                     older_mem["text"],
                     newer_mem["text"]

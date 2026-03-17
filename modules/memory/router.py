@@ -5,7 +5,7 @@ import json
 import time
 import asyncio
 from .backend import memory_store
-from .consolidation import MemoryConsolidator
+from .consolidation import MemoryConsolidator, consolidation_state
 
 router = APIRouter()
 templates = Jinja2Templates(directory="web/templates")
@@ -99,6 +99,11 @@ async def save_memory_settings(
     return Response(status_code=200, headers={"HX-Trigger": json.dumps({"showMessage": {"level": "success", "message": "Memory settings saved"}})})
 
 
+@router.get("/consolidation/status")
+async def consolidation_status(request: Request):
+    return JSONResponse(content=consolidation_state.to_dict())
+
+
 @router.post("/consolidate")
 async def consolidate_memories(request: Request):
     # Check if consolidation is already running
@@ -107,16 +112,16 @@ async def consolidate_memories(request: Request):
             status_code=409,
             headers={"HX-Trigger": json.dumps({"showMessage": {"level": "error", "message": "Consolidation already in progress"}})}
         )
-    
+
     async with _consolidation_lock:
         module_manager = request.app.state.module_manager
         memory_module = module_manager.modules.get("memory")
         config = memory_module.get("config", {}) if memory_module else {}
-        
+
         consolidator = MemoryConsolidator(config=config)
         count = await consolidator.run()
         memory_store.last_consolidation_ts = time.time()
-        
+
         return Response(status_code=200, headers={"HX-Trigger": json.dumps({"showMessage": {"level": "success", "message": f"Consolidated {count} redundant memories"}})})
 
 

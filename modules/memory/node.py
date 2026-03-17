@@ -8,7 +8,7 @@ from core.llm import LLMBridge
 from core.settings import settings
 from .backend import memory_store
 from .arbiter import MemoryArbiter
-from .consolidation import MemoryConsolidator
+from .consolidation import MemoryConsolidator, consolidation_state
 
 logger = logging.getLogger(__name__)
 
@@ -321,7 +321,7 @@ class MemorySaveExecutor:
                         consolidation_task = asyncio.create_task(
                             MemoryConsolidator(config=self.config).run()
                         )
-                        
+
                         # Wrap in timeout to prevent indefinite blocking
                         try:
                             self._consolidation_task = await asyncio.wait_for(
@@ -330,6 +330,9 @@ class MemorySaveExecutor:
                             )
                         except asyncio.TimeoutError:
                             logger.error("Memory consolidation timed out after 5 minutes")
+                            consolidation_state.last_error = "Auto-consolidation timed out after 5 minutes"
+                            consolidation_state.is_running = False
+                            consolidation_state.last_run = time.time()
                             consolidation_task.cancel()
                             try:
                                 await consolidation_task

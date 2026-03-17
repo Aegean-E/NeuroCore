@@ -226,7 +226,7 @@
             "type": "function",
             "function": {
                 "name": "SendEmail",
-                "description": "Sends an email to a specified recipient using the configured SMTP server.",
+                "description": "Proactively sends a new outbound email to any recipient. Use this only when the user explicitly asks to send an email to someone. Do NOT use this to reply to the current conversation — the flow's email_output node handles replies automatically.",
                 "parameters": {
                     "type": "object",
                     "properties": {
