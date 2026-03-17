@@ -25,7 +25,7 @@ import pytest
 import asyncio
 from unittest.mock import AsyncMock, MagicMock, call, patch
 
-from modules.agent_loop.node import AgentLoopExecutor, get_executor_class
+from modules.agent_loop.node import AgentLoopExecutor, HybridAgentExecutor, get_executor_class
 
 
 # ---------------------------------------------------------------------------
@@ -1007,6 +1007,113 @@ class TestContextCompaction:
         # Compaction triggered → summary LLM call happened
         assert call_count["n"] >= 2
 
+    async def test_estimate_tokens_counts_tool_calls_json(self):
+        """tool_calls JSON on assistant messages must be included in token estimate."""
+        ex = self._make_executor()
+        msgs = [
+            {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [
+                    {"function": {"name": "web_search", "arguments": '{"query": "' + "x" * 400 + '"}'}}
+                ],
+            }
+        ]
+        tokens = ex._estimate_messages_tokens(msgs)
+        # 400-char argument string alone should be ~100 tokens; total must be > 0
+        assert tokens > 50
+
+    async def test_estimate_tokens_none_content_does_not_crash(self):
+        """content=None (typical for tool-calling assistant turns) must not raise."""
+        ex = self._make_executor()
+        msgs = [{"role": "assistant", "content": None, "tool_calls": []}]
+        assert ex._estimate_messages_tokens(msgs) == 0
+
+    async def test_summary_budget_scales_with_message_count(self):
+        """More messages to summarize → larger max_tokens budget (up to 800)."""
+        ex = self._make_executor()
+        captured = {}
+
+        async def capture_call(**kwargs):
+            captured["max_tokens"] = kwargs.get("max_tokens")
+            return {"choices": [{"message": {"content": "Summary."}}]}
+
+        ex.llm.chat_completion = capture_call
+
+        # 20 old messages → budget = min(800, max(200, 20*60)) = 800
+        msgs = [{"role": "system", "content": "sys"}]
+        for i in range(22):
+            msgs.append({"role": "user", "content": f"u{i}"})
+            msgs.append({"role": "assistant", "content": f"a{i}"})
+
+        await ex._compact_messages(msgs, keep_last=4)
+        assert captured["max_tokens"] == 800
+
+    async def test_summary_budget_floors_at_200(self):
+        """Very few messages → budget floors at 200."""
+        ex = self._make_executor()
+        captured = {}
+
+        async def capture_call(**kwargs):
+            captured["max_tokens"] = kwargs.get("max_tokens")
+            return {"choices": [{"message": {"content": "Summary."}}]}
+
+        ex.llm.chat_completion = capture_call
+
+        # 4 old messages → min(800, max(200, 4*60=240)) = 240
+        msgs = [{"role": "system", "content": "sys"}]
+        for i in range(6):
+            msgs.append({"role": "user", "content": f"u{i}"})
+            msgs.append({"role": "assistant", "content": f"a{i}"})
+
+        await ex._compact_messages(msgs, keep_last=8)
+        assert captured["max_tokens"] >= 200
+
+    async def test_compaction_cooldown_prevents_immediate_refire(self):
+        """After a compaction, the loop must not compact again until compact_keep_last
+        new messages have been added — preventing a no-op LLM call every iteration."""
+        ex = self._make_executor()
+        compact_call_count = {"n": 0}
+
+        async def mock_chat(**kwargs):
+            # Distinguish compaction calls (no tools) from agent calls
+            msgs = kwargs.get("messages", [])
+            is_compaction = any(
+                "Summarize" in (m.get("content") or "") for m in msgs
+            )
+            if is_compaction:
+                compact_call_count["n"] += 1
+                return {"choices": [{"message": {"content": "Compact summary."}}]}
+            # Agent call — return no tool calls so loop ends
+            return {"choices": [{"message": {"content": "Done", "tool_calls": []}}]}
+
+        ex.llm.chat_completion = mock_chat
+
+        # Build a large message list that will trigger the threshold
+        big_msgs = [{"role": "system", "content": "sys"}]
+        for i in range(12):
+            big_msgs.append({"role": "user", "content": f"u{i}" * 8})
+            big_msgs.append({"role": "assistant", "content": f"a{i}" * 8})
+
+        await ex._run_agent_loop(
+            llm_messages=big_msgs,
+            tools_list=[],
+            tool_library={},
+            model="test",
+            temperature=0.7,
+            max_tokens=512,
+            max_iterations=5,
+            max_llm_retries=1,
+            retry_delay=0,
+            tool_error_strategy="continue",
+            trace=[],
+            compact_threshold=10,   # very low to force compaction
+            compact_keep_last=4,
+        )
+        # Compaction should fire exactly once — cooldown prevents re-firing
+        # on subsequent iterations (agent ends immediately with no tool calls)
+        assert compact_call_count["n"] == 1
+
     async def test_compact_threshold_zero_disables_compaction(self):
         """compact_threshold=0 means no compaction ever fires."""
         ex = self._make_executor()
@@ -1039,6 +1146,249 @@ class TestContextCompaction:
             compact_keep_last=4,
         )
         assert compact_called["n"] == 0
+
+
+# ---------------------------------------------------------------------------
+# HybridAgentExecutor tests
+# ---------------------------------------------------------------------------
+
+class TestHybridAgentExecutor:
+    """Tests for HybridAgentExecutor — adaptive output routing and combined tool library."""
+
+    def _make_executor(self):
+        ex = HybridAgentExecutor.__new__(HybridAgentExecutor)
+        ex.llm = AsyncMock()
+        ex._sandbox = MagicMock()
+        ex._session_manager = None
+        return ex
+
+    def _repl_state(self):
+        return {"variables": {}, "_var_counts": {}}
+
+    # --- excluded tools set ---
+
+    def test_excluded_tools_set(self):
+        """Peek/Search/Chunk/SubCall/SetFinal must be excluded (all need prompt_var)."""
+        excluded = HybridAgentExecutor._EXCLUDED_TOOLS
+        for name in ("Peek", "Search", "Chunk", "SubCall", "SetFinal"):
+            assert name in excluded, f"{name} should be in _EXCLUDED_TOOLS"
+
+    # --- system note is injected ---
+
+    def test_build_variable_system_note_contains_threshold(self):
+        note = HybridAgentExecutor._build_variable_system_note(3000)
+        assert "3,000" in note
+        assert "GetVariable" in note
+        assert "SetVariable" in note
+
+    # --- _execute_tool: small output stays inline ---
+
+    async def test_small_output_stays_inline(self):
+        ex = self._make_executor()
+        ex._sandbox.execute.return_value = {"result": "short result"}
+        rs = self._repl_state()
+        tool_call = {
+            "id": "c1",
+            "function": {"name": "Calculator", "arguments": '{"expression":"1+1"}'},
+        }
+        library = {"Calculator": "# stub"}
+        result = await ex._execute_tool(tool_call, library, rs, large_output_threshold=3000)
+        assert result["content"] == "short result"
+        assert rs["variables"] == {}
+
+    # --- _execute_tool: large output stored as variable ---
+
+    async def test_large_output_stored_as_variable(self):
+        ex = self._make_executor()
+        big_text = "x" * 4000
+        ex._sandbox.execute.return_value = {"result": big_text}
+        rs = self._repl_state()
+        tool_call = {
+            "id": "c2",
+            "function": {"name": "FetchURL", "arguments": '{"url":"http://example.com"}'},
+        }
+        library = {"FetchURL": "# stub"}
+        result = await ex._execute_tool(tool_call, library, rs, large_output_threshold=3000)
+        # Content should be a stub, not the full text
+        assert big_text not in result["content"]
+        assert "var_fetchurl_1" in result["content"]
+        assert rs["variables"]["var_fetchurl_1"] == big_text
+
+    # --- _execute_tool: variable counter increments per tool ---
+
+    async def test_variable_counter_increments(self):
+        ex = self._make_executor()
+        ex._sandbox.execute.return_value = {"result": "y" * 4000}
+        rs = self._repl_state()
+        library = {"WikipediaLookup": "# stub"}
+
+        for expected_n in (1, 2, 3):
+            tool_call = {
+                "id": f"c{expected_n}",
+                "function": {"name": "WikipediaLookup", "arguments": '{"query":"q"}'},
+            }
+            await ex._execute_tool(tool_call, library, rs, large_output_threshold=3000)
+        assert "var_wikipedialookup_3" in rs["variables"]
+        assert len(rs["variables"]) == 3
+
+    # --- _variable_inventory_msg: empty when no variables ---
+
+    def test_variable_inventory_msg_empty(self):
+        ex = self._make_executor()
+        assert ex._variable_inventory_msg(self._repl_state()) is None
+
+    # --- _variable_inventory_msg: lists stored variables ---
+
+    def test_variable_inventory_msg_lists_vars(self):
+        ex = self._make_executor()
+        rs = self._repl_state()
+        rs["variables"]["var_fetch_1"] = "a" * 500
+        rs["variables"]["var_search_1"] = "b" * 200
+        msg = ex._variable_inventory_msg(rs)
+        assert msg is not None
+        assert msg["role"] == "system"
+        assert "var_fetch_1" in msg["content"]
+        assert "var_search_1" in msg["content"]
+
+    # --- receive: no messages guard ---
+
+    async def test_receive_no_messages_returns_error(self):
+        ex = self._make_executor()
+        result = await ex.receive({})
+        assert result["agent_loop_error"] == "No messages provided"
+        assert result["content"] == ""
+
+    # --- receive: no tool calls → terminates cleanly ---
+
+    async def test_receive_no_tool_calls_terminates(self):
+        ex = self._make_executor()
+        ex.llm.chat_completion = AsyncMock(
+            return_value=make_llm_response("final answer")
+        )
+        ex._sandbox.execute.return_value = {"result": "ok"}
+
+        with patch.object(HybridAgentExecutor, "_load_tools", return_value={}), \
+             patch.object(HybridAgentExecutor, "_load_tool_library", return_value={}):
+            result = await ex.receive(
+                {"messages": [{"role": "user", "content": "hello"}]},
+                config={"max_iterations": 3, "timeout": 0},
+            )
+
+        assert result["content"] == "final answer"
+        assert result["iterations"] == 1
+        assert result["repl_state"]["variable_count"] == 0
+
+    # --- receive: large tool output routed to repl_state ---
+
+    async def test_receive_large_output_routed_to_variable(self):
+        ex = self._make_executor()
+        big_output = "data " * 1000  # 5000 chars
+
+        responses = [
+            make_llm_response(
+                content=None,
+                tool_calls=[{
+                    "id": "tc1",
+                    "type": "function",
+                    "function": {"name": "FetchURL", "arguments": '{"url":"http://x.com"}'},
+                }],
+            ),
+            make_llm_response("done"),
+        ]
+        ex.llm.chat_completion = AsyncMock(side_effect=responses)
+        ex._sandbox.execute.return_value = {"result": big_output}
+
+        with patch.object(HybridAgentExecutor, "_load_tools", return_value={}), \
+             patch.object(HybridAgentExecutor, "_load_tool_library", return_value={"FetchURL": "# stub"}):
+            result = await ex.receive(
+                {"messages": [{"role": "user", "content": "fetch it"}]},
+                config={"max_iterations": 5, "timeout": 0, "large_output_threshold": 3000},
+            )
+
+        assert result["repl_state"]["variable_count"] == 1
+        assert result["repl_state"]["variables"][0] == "var_fetchurl_1"
+
+    # --- receive: timeout path ---
+
+    async def test_receive_timeout(self):
+        ex = self._make_executor()
+
+        async def slow(*args, **kwargs):
+            await asyncio.sleep(10)
+            return make_llm_response("too late")
+
+        ex.llm.chat_completion = slow
+
+        with patch.object(HybridAgentExecutor, "_load_tools", return_value={}), \
+             patch.object(HybridAgentExecutor, "_load_tool_library", return_value={}):
+            result = await ex.receive(
+                {"messages": [{"role": "user", "content": "slow task"}]},
+                config={"timeout": 0.05},
+            )
+
+        assert "timed out" in result["agent_loop_error"]
+
+    # --- system note is present in messages ---
+
+    async def test_receive_injects_system_note(self):
+        ex = self._make_executor()
+        ex.llm.chat_completion = AsyncMock(return_value=make_llm_response("ok"))
+
+        with patch.object(HybridAgentExecutor, "_load_tools", return_value={}), \
+             patch.object(HybridAgentExecutor, "_load_tool_library", return_value={}):
+            result = await ex.receive(
+                {"messages": [{"role": "user", "content": "hi"}]},
+                config={"timeout": 0},
+            )
+
+        system_msg = next(
+            (m for m in result["messages"] if m.get("role") == "system"), None
+        )
+        assert system_msg is not None
+        assert "GetVariable" in system_msg["content"]
+        assert "Variable Storage" in system_msg["content"]
+
+    # --- thinking steps populated during tool calls ---
+
+    async def test_thinking_steps_populated(self):
+        ex = self._make_executor()
+        responses = [
+            make_llm_response(
+                content=None,
+                tool_calls=[{
+                    "id": "t1",
+                    "type": "function",
+                    "function": {"name": "Calculator", "arguments": '{"expression":"2+2"}'},
+                }],
+            ),
+            make_llm_response("4"),
+        ]
+        ex.llm.chat_completion = AsyncMock(side_effect=responses)
+        ex._sandbox.execute.return_value = {"result": "4"}
+
+        with patch.object(HybridAgentExecutor, "_load_tools", return_value={}), \
+             patch.object(HybridAgentExecutor, "_load_tool_library", return_value={"Calculator": "# stub"}):
+            await ex.receive(
+                {"messages": [{"role": "user", "content": "2+2"}]},
+                config={"timeout": 0},
+            )
+
+        assert any(s["type"] == "tool_call" for s in ex._thinking_steps)
+        assert any(s["type"] == "tool_result" for s in ex._thinking_steps)
+
+    # --- get_executor_class dispatcher ---
+
+    async def test_get_executor_class_hybrid(self):
+        from modules.agent_loop.node import get_executor_class
+        cls = await get_executor_class("hybrid_agent")
+        assert cls is HybridAgentExecutor
+
+    # --- send passthrough ---
+
+    async def test_send_passthrough(self):
+        ex = self._make_executor()
+        data = {"messages": [], "content": "hi"}
+        assert await ex.send(data) is data
 
 
 if __name__ == "__main__":

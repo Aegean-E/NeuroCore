@@ -101,15 +101,30 @@ class AgentLoopExecutor:
         return result
 
     def _estimate_messages_tokens(self, messages: list) -> int:
-        """Estimate total token count across all messages."""
+        """Estimate total token count across all messages.
+
+        Accounts for:
+        - text content (str or multimodal list)
+        - tool_calls JSON on assistant messages (often the largest cost)
+        - tool result content (always a string, but may be JSON)
+        """
         total = 0
         for m in messages:
-            content = m.get("content", "")
+            # Text content
+            content = m.get("content") or ""
             if isinstance(content, list):
                 content = " ".join(
                     p.get("text", "") for p in content if p.get("type") == "text"
                 )
-            total += self._estimate_tokens(str(content) if content else "")
+            total += self._estimate_tokens(str(content))
+
+            # tool_calls array on assistant messages — serialize to get byte count
+            tool_calls = m.get("tool_calls")
+            if tool_calls:
+                try:
+                    total += self._estimate_tokens(json.dumps(tool_calls))
+                except (TypeError, ValueError):
+                    pass
         return total
 
     async def _compact_messages(self, messages: list, keep_last: int) -> list:
@@ -118,6 +133,9 @@ class AgentLoopExecutor:
         Preserves leading system messages verbatim.  Summarizes the oldest
         non-system messages into a single system-level summary, then appends
         the most recent ``keep_last`` non-system messages verbatim.
+
+        Summary budget scales with the number of messages being summarized so
+        that long agent runs don't lose critical facts.
 
         Returns the original list unchanged if compaction is unnecessary or
         the LLM summarization fails (fail-safe: never discard context silently).
@@ -138,23 +156,35 @@ class AgentLoopExecutor:
         old_messages = conversation[:-keep_last]
         recent_messages = conversation[-keep_last:]
 
-        # Build a readable transcript for the summarization prompt
+        # Build a readable transcript for the summarization prompt.
+        # Include tool_calls names so the summary captures what tools were used.
         lines = []
         for m in old_messages:
             role = m.get("role", "?").upper()
-            content = m.get("content", "")
+            content = m.get("content") or ""
             if isinstance(content, list):
                 text_parts = [p.get("text", "") for p in content if p.get("type") == "text"]
                 content = " ".join(text_parts) or "[non-text content]"
-            lines.append(f"{role}: {str(content)[:600]}")
+            content_str = str(content)[:600]
+
+            # For assistant messages, also note which tools were called
+            tool_calls = m.get("tool_calls")
+            if tool_calls:
+                names = [tc.get("function", {}).get("name", "?") for tc in tool_calls]
+                content_str = f"[called tools: {', '.join(names)}] {content_str}".strip()
+
+            lines.append(f"{role}: {content_str}")
+
+        # Scale summary budget: 60 tokens per message summarized, capped at 800
+        summary_max_tokens = min(800, max(200, len(old_messages) * 60))
 
         summary_prompt = [
             {
                 "role": "user",
                 "content": (
-                    "Summarize the following agent reasoning steps, tool calls, and results "
-                    "concisely in 3-5 sentences. Preserve key facts, decisions, tool outcomes, "
-                    "and any information needed to continue the task:\n\n"
+                    "Summarize the following agent reasoning steps, tool calls, and results. "
+                    "Preserve key facts, decisions, tool outcomes, errors encountered, and any "
+                    "information needed to continue the task. Be concise but complete:\n\n"
                     + "\n".join(lines)
                 ),
             }
@@ -163,7 +193,7 @@ class AgentLoopExecutor:
         try:
             result = await self.llm.chat_completion(
                 messages=summary_prompt,
-                max_tokens=400,
+                max_tokens=summary_max_tokens,
                 temperature=0.3,
             )
             summary_text = result["choices"][0]["message"]["content"].strip()
@@ -183,7 +213,7 @@ class AgentLoopExecutor:
         )
         logger.info(
             f"[AgentLoop] Context compacted: {len(messages)} → {len(compacted)} messages "
-            f"({len(old_messages)} old turns summarized)"
+            f"({len(old_messages)} old turns summarized, summary budget: {summary_max_tokens} tokens)"
         )
         return compacted
 
@@ -428,6 +458,10 @@ class AgentLoopExecutor:
         final_response = None
         had_tool_error = False
         seen_calls = set()  # Track tool call signatures to detect loops
+        # Cooldown: record message count after last compaction.
+        # Only compact again once at least compact_keep_last new messages have
+        # been appended, preventing a no-op re-compaction every iteration.
+        _compacted_at_len = 0
 
         for iteration in range(max_iterations):
             iterations += 1
@@ -437,11 +471,15 @@ class AgentLoopExecutor:
                 "errors": []
             }
 
-            # Context compaction: if enabled and messages exceed threshold, summarize old turns
+            # Context compaction: if enabled, threshold exceeded, and enough new
+            # messages have accumulated since the last compaction.
             if compact_threshold > 0:
-                current_tokens = self._estimate_messages_tokens(llm_messages)
-                if current_tokens > compact_threshold:
-                    llm_messages = await self._compact_messages(llm_messages, compact_keep_last)
+                new_since_compact = len(llm_messages) - _compacted_at_len
+                if new_since_compact >= compact_keep_last:
+                    current_tokens = self._estimate_messages_tokens(llm_messages)
+                    if current_tokens > compact_threshold:
+                        llm_messages = await self._compact_messages(llm_messages, compact_keep_last)
+                        _compacted_at_len = len(llm_messages)
 
             # Log LLM call event
             if self._session_manager:
@@ -991,6 +1029,8 @@ async def get_executor_class(node_type_id: str):
         return RLMAgentLoopExecutor
     if node_type_id == "repl_environment":
         return REPLEnvironmentExecutor
+    if node_type_id == "hybrid_agent":
+        return HybridAgentExecutor
     return None
 
 
@@ -1719,3 +1759,549 @@ Call set_final() when complete."""
     async def send(self, processed_data: dict) -> dict:
         return processed_data
 
+
+class HybridAgentExecutor:
+    """
+    Hybrid Agent Loop — standard tool calling combined with RLM-style adaptive output routing.
+
+    Small tool outputs (≤ large_output_threshold chars) are placed inline in messages so the
+    LLM can read them directly.  Large tool outputs are automatically stored in
+    repl_state["variables"] and only a compact metadata stub (variable name + preview) enters
+    the conversation history.  The LLM retrieves stored data on demand via GetVariable and
+    SetVariable, which are available alongside the full standard tool library.
+
+    RLM tools that operate on prompt_var (Peek, Search, Chunk, SubCall, SetFinal) are excluded
+    because prompt_var is not initialised in this executor — those tools would silently return
+    empty results and confuse the LLM.
+
+    Benefits over the standard AgentLoopExecutor:
+    - Context never grows unboundedly — no compaction pass needed.
+    - Standard tools and RLM variable-access tools (GetVariable, SetVariable) coexist.
+    - Handles tool outputs of arbitrary size without truncation.
+    """
+
+    # Tools from the RLM library that require prompt_var or async LLM calls — exclude from hybrid
+    _EXCLUDED_TOOLS: frozenset = frozenset({"SetFinal", "Peek", "Search", "Chunk", "SubCall"})
+
+    _tools_cache: dict = {"mtime": 0.0, "data": {}}
+    _library_cache: dict = {"mtime": 0.0, "data": {}, "file_mtimes": {}}
+
+    def __init__(self):
+        self.llm = LLMBridge(
+            base_url=settings.get("llm_api_url"),
+            api_key=settings.get("llm_api_key"),
+        )
+        self._sandbox = ToolSandbox(timeout=30.0)
+        try:
+            self._session_manager = get_session_manager()
+        except Exception:
+            self._session_manager = None
+
+    # ------------------------------------------------------------------
+    # Shared helpers
+    # ------------------------------------------------------------------
+
+    def _build_system_prompt(self, input_data: dict, config: dict) -> str:
+        parts = []
+        if config.get("include_plan_in_context", True):
+            v = input_data.get("plan_context")
+            if v:
+                parts.append(v)
+        if config.get("include_memory_context", True):
+            v = input_data.get("_memory_context")
+            if v:
+                parts.append(f"## User Memories\n{v}")
+        if config.get("include_knowledge_context", True):
+            v = input_data.get("knowledge_context")
+            if v:
+                parts.append(f"## Relevant Knowledge\n{v}")
+        if config.get("include_reasoning_context", True):
+            v = input_data.get("reasoning_context")
+            if v:
+                parts.append(f"## Previous Reasoning\n{v}")
+        return "\n\n".join(parts) if parts else ""
+
+    @staticmethod
+    def _build_variable_system_note(threshold: int) -> str:
+        """Return a brief system-level instruction explaining the variable storage system.
+
+        Injected once at the start of every hybrid run so the LLM knows what to
+        do when it sees a stub instead of inline tool output.
+        """
+        return (
+            "## Variable Storage\n"
+            f"Tool outputs longer than {threshold:,} characters are stored as named variables "
+            "instead of being placed inline. When a tool result shows "
+            "\"[Output stored as 'var_name': N chars | preview: ...]\", "
+            "call GetVariable(\"var_name\") to read the full content.\n"
+            "You can also store your own intermediate results with "
+            "SetVariable(name, value) and retrieve them with GetVariable(name)."
+        )
+
+    def _load_tools(self):
+        """Load tool schemas from tools.json (includes both standard + RLM schemas)."""
+        try:
+            if os.path.exists(TOOLS_FILE):
+                mtime = os.path.getmtime(TOOLS_FILE)
+                if mtime > self.__class__._tools_cache["mtime"]:
+                    with open(TOOLS_FILE, "r") as f:
+                        self.__class__._tools_cache["data"] = json.load(f)
+                    self.__class__._tools_cache["mtime"] = mtime
+                return self.__class__._tools_cache["data"]
+        except (json.JSONDecodeError, OSError, KeyError) as e:
+            logger.warning(f"[HybridAgent] Failed to load tools: {e}")
+        return {}
+
+    def _load_tool_library(self):
+        """Load implementations from both LIBRARY_DIR and RLM_LIBRARY_DIR.
+
+        Standard tools are loaded first; RLM tools (Peek, GetVariable, …) override
+        any name conflict so variable-access tools are always the RLM versions.
+        """
+        try:
+            current_files: dict = {}
+            for lib_dir in (LIBRARY_DIR, RLM_LIBRARY_DIR):
+                if not os.path.exists(lib_dir):
+                    continue
+                for filename in os.listdir(lib_dir):
+                    if filename.endswith(".py"):
+                        tool_name = filename[:-3]
+                        code_path = os.path.join(lib_dir, filename)
+                        try:
+                            current_files[tool_name] = os.path.getmtime(code_path)
+                        except OSError:
+                            pass
+
+            cache_mtimes = self.__class__._library_cache.get("file_mtimes", {})
+            needs_reload = (
+                set(current_files) != set(cache_mtimes)
+                or any(current_files[n] != cache_mtimes.get(n) for n in current_files)
+            )
+
+            if needs_reload or not self.__class__._library_cache.get("data"):
+                library: dict = {}
+                if os.path.exists(LIBRARY_DIR):
+                    for filename in os.listdir(LIBRARY_DIR):
+                        if filename.endswith(".py"):
+                            tool_name = filename[:-3]
+                            with open(os.path.join(LIBRARY_DIR, filename), "r") as f:
+                                library[tool_name] = f.read()
+                # RLM tools override to ensure variable-access tools are correct versions
+                if os.path.exists(RLM_LIBRARY_DIR):
+                    for filename in os.listdir(RLM_LIBRARY_DIR):
+                        if filename.endswith(".py"):
+                            tool_name = filename[:-3]
+                            with open(os.path.join(RLM_LIBRARY_DIR, filename), "r") as f:
+                                library[tool_name] = f.read()
+                self.__class__._library_cache["data"] = library
+                self.__class__._library_cache["file_mtimes"] = current_files
+
+            return self.__class__._library_cache.get("data", {})
+        except OSError as e:
+            logger.warning(f"[HybridAgent] Failed to load tool library: {e}")
+        return {}
+
+    async def _llm_with_retry(
+        self,
+        messages: list,
+        model: str,
+        temperature: float,
+        max_tokens: int,
+        tools: list,
+        max_retries: int,
+        retry_delay: float,
+    ) -> dict:
+        last_error = "Unknown error"
+        for attempt in range(max_retries + 1):
+            if attempt > 0:
+                await asyncio.sleep(retry_delay * (2 ** (attempt - 1)))
+            try:
+                response = await self.llm.chat_completion(
+                    messages=messages,
+                    model=model,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                    tools=tools if tools else None,
+                )
+                if response and "choices" in response and not response.get("error"):
+                    return response
+                last_error = (
+                    response.get("error", "Response missing 'choices' key")
+                    if response
+                    else "LLM returned None"
+                )
+            except Exception as e:
+                last_error = str(e)
+        logger.warning(
+            f"[HybridAgent] LLM failed after {max_retries + 1} attempts: {last_error}"
+        )
+        return None
+
+    # ------------------------------------------------------------------
+    # Core: adaptive tool execution
+    # ------------------------------------------------------------------
+
+    async def _execute_tool(
+        self,
+        tool_call: dict,
+        tool_library: dict,
+        repl_state: dict,
+        large_output_threshold: int,
+    ) -> dict:
+        """Execute one tool call with adaptive output routing.
+
+        If the output exceeds *large_output_threshold* characters it is stored
+        in repl_state["variables"] and a compact stub is returned to the LLM.
+        The LLM can retrieve the full content via GetVariable("<var_name>").
+        """
+        func_name = tool_call["function"]["name"]
+        try:
+            args = json.loads(tool_call["function"]["arguments"])
+        except (json.JSONDecodeError, KeyError):
+            args = {}
+
+        # Pass repl_state so RLM-library tools (Peek, GetVariable, …) work correctly
+        args["_repl_state"] = repl_state
+
+        success = False
+        output = f"Error: Tool '{func_name}' not found in library."
+
+        if func_name in tool_library:
+            code = tool_library[func_name]
+            try:
+                loop = asyncio.get_running_loop()
+                result = await loop.run_in_executor(
+                    None,
+                    self._sandbox.execute,
+                    code,
+                    {"args": args},
+                )
+                output = result.get("result", "Success (no result returned)")
+                success = True
+                # Honour state updates from SetVariable and similar tools
+                if isinstance(result.get("_repl_state_update"), dict):
+                    repl_state.update(result["_repl_state_update"])
+            except Exception as e:
+                output = f"Error executing '{func_name}': {e}"
+
+        output_str = str(output)
+
+        # Adaptive routing: store large outputs as named variables
+        if success and len(output_str) > large_output_threshold:
+            count = repl_state["_var_counts"].get(func_name, 0) + 1
+            repl_state["_var_counts"][func_name] = count
+            var_name = f"var_{func_name.lower()}_{count}"
+            repl_state["variables"][var_name] = output_str
+            preview = output_str[:200].replace("\n", " ")
+            content = (
+                f"[Output stored as '{var_name}': {len(output_str):,} chars | "
+                f"preview: {preview!r}]\n"
+                f"Call GetVariable(\"{var_name}\") to read the full content."
+            )
+        else:
+            content = output_str
+
+        return {
+            "tool_call_id": tool_call.get("id", ""),
+            "role": "tool",
+            "name": func_name,
+            "content": content,
+            "success": success,
+        }
+
+    def _variable_inventory_msg(self, repl_state: dict) -> dict | None:
+        """Return an ephemeral system message listing currently stored variables.
+
+        Injected before each LLM call but never persisted in llm_messages, so
+        it adds zero tokens to the running context history.
+        """
+        variables = repl_state.get("variables", {})
+        if not variables:
+            return None
+        lines = [f"  • {name}: {len(str(v)):,} chars" for name, v in variables.items()]
+        return {
+            "role": "system",
+            "content": (
+                "Stored variables (use GetVariable(name) to retrieve full content):\n"
+                + "\n".join(lines)
+            ),
+        }
+
+    # ------------------------------------------------------------------
+    # Main loop
+    # ------------------------------------------------------------------
+
+    async def _run_hybrid_loop(
+        self,
+        llm_messages: list,
+        tools_list: list,
+        tool_library: dict,
+        repl_state: dict,
+        model: str,
+        temperature: float,
+        max_tokens: int,
+        max_iterations: int,
+        max_llm_retries: int,
+        retry_delay: float,
+        tool_error_strategy: str,
+        large_output_threshold: int,
+        trace: list,
+        stream_queue: asyncio.Queue = None,
+    ) -> tuple:
+        """Core hybrid loop.  Returns (final_response, iterations, had_tool_error)."""
+        iterations = 0
+        final_response = None
+        had_tool_error = False
+        seen_calls: set = set()
+
+        for iteration in range(max_iterations):
+            iterations += 1
+            iteration_trace = {"iteration": iterations, "tool_calls": [], "errors": []}
+
+            # Ephemeral variable inventory — not stored in history
+            var_msg = self._variable_inventory_msg(repl_state)
+            messages_for_llm = llm_messages + ([var_msg] if var_msg else [])
+
+            response = await self._llm_with_retry(
+                messages=messages_for_llm,
+                model=model,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                tools=tools_list,
+                max_retries=max_llm_retries,
+                retry_delay=retry_delay,
+            )
+
+            if not response or "choices" not in response:
+                error_msg = (
+                    response.get("error", "LLM returned no choices")
+                    if response
+                    else "LLM returned None"
+                )
+                iteration_trace["errors"].append(error_msg)
+                trace.append(iteration_trace)
+                break
+
+            final_response = response
+            assistant_message = response["choices"][0]["message"]
+            tool_calls = assistant_message.get("tool_calls", [])
+            llm_messages.append(assistant_message)
+
+            # Accumulate thinking steps for real-time streaming
+            if tool_calls:
+                for tc in tool_calls:
+                    fn = tc.get("function", {})
+                    name = fn.get("name", "?")
+                    args_raw = fn.get("arguments", "{}")
+                    try:
+                        args_dict = json.loads(args_raw)
+                        args_display = ", ".join(
+                            f"{k}={repr(v)[:80]}" for k, v in args_dict.items()
+                            if k != "_repl_state"
+                        )
+                    except Exception:
+                        args_display = args_raw[:160]
+                    self._thinking_steps.append({
+                        "type": "tool_call",
+                        "name": name,
+                        "content": f"{name}({args_display})",
+                    })
+                if stream_queue:
+                    await stream_queue.put(
+                        {"type": "thinking", "content": list(self._thinking_steps)}
+                    )
+
+            if not tool_calls:
+                trace.append(iteration_trace)
+                break
+
+            tool_error_occurred = False
+            for tool_call in tool_calls:
+                tool_name = tool_call.get("function", {}).get("name", "unknown")
+                tool_args = tool_call.get("function", {}).get("arguments", "{}")
+
+                # Deduplication guard
+                try:
+                    normalized_args = json.dumps(json.loads(tool_args), sort_keys=True)
+                except (json.JSONDecodeError, TypeError):
+                    normalized_args = tool_args
+                call_sig = f"{tool_name}:{normalized_args}"
+                if call_sig in seen_calls:
+                    iteration_trace["errors"].append(
+                        f"Loop detected: '{tool_name}' called with identical args"
+                    )
+                    break
+                seen_calls.add(call_sig)
+
+                iteration_trace["tool_calls"].append(tool_name)
+
+                tool_result = await self._execute_tool(
+                    tool_call, tool_library, repl_state, large_output_threshold
+                )
+
+                # Append tool result to thinking trace
+                success = tool_result.get("success", False)
+                display = (tool_result.get("content") or "").strip()[:400]
+                self._thinking_steps.append({
+                    "type": "tool_result",
+                    "name": tool_name,
+                    "content": display,
+                    "success": success,
+                })
+                if stream_queue:
+                    await stream_queue.put(
+                        {"type": "thinking", "content": list(self._thinking_steps)}
+                    )
+
+                if not success:
+                    had_tool_error = True
+                    tool_error_occurred = True
+                    iteration_trace["errors"].append(
+                        f"Tool '{tool_name}': {tool_result['content']}"
+                    )
+
+                llm_messages.append(tool_result)
+
+            trace.append(iteration_trace)
+
+            if tool_error_occurred and tool_error_strategy == "stop":
+                break
+
+        return final_response, iterations, had_tool_error
+
+    # ------------------------------------------------------------------
+    # Node executor contract
+    # ------------------------------------------------------------------
+
+    async def receive(self, input_data: dict, config: dict = None) -> dict:
+        """Hybrid Agent Loop node executor.
+
+        Behaves like the standard agent loop but automatically offloads large
+        tool outputs into a side-store (repl_state["variables"]) instead of
+        injecting the full text into message history.  The LLM has access to
+        both the standard tool library and the RLM variable-access tools
+        (GetVariable, Peek, Search, Chunk, SetVariable) so it can retrieve
+        stored data on demand.  Context stays bounded — no compaction needed.
+
+        Config:
+            large_output_threshold (int, default 800):
+                Outputs longer than this many characters are stored as variables
+                instead of being placed inline in messages.
+            max_iterations (int, default 15), max_tokens (int, default 4096),
+            temperature (float, default 0.7), max_llm_retries (int, default 3),
+            retry_delay (float, default 1.0), tool_error_strategy (str, default "continue"),
+            timeout (float, default 120), include_plan_in_context (bool, default True),
+            include_memory_context (bool, default True),
+            include_knowledge_context (bool, default True),
+            include_reasoning_context (bool, default True).
+        """
+        if input_data is None:
+            input_data = {}
+        config = config or {}
+
+        max_iterations = int(config.get("max_iterations", 15))
+        max_tokens = int(config.get("max_tokens", 4096))
+        temperature = float(config.get("temperature", 0.7))
+        max_llm_retries = int(config.get("max_llm_retries", 3))
+        retry_delay = float(config.get("retry_delay", 1.0))
+        tool_error_strategy = str(config.get("tool_error_strategy", "continue"))
+        timeout = float(config.get("timeout", 120))
+        large_output_threshold = int(config.get("large_output_threshold", 3000))
+        stream_queue = config.get("_stream_queue")
+        model = config.get("model") or settings.get("default_model")
+
+        messages = input_data.get("messages", [])
+        if not messages:
+            result = input_data.copy()
+            result["content"] = ""
+            result["agent_loop_error"] = "No messages provided"
+            return result
+
+        # Build system prompt: context fields + variable storage instruction
+        system_prompt_parts = []
+        context_prompt = self._build_system_prompt(input_data, config)
+        if context_prompt:
+            system_prompt_parts.append(context_prompt)
+        system_prompt_parts.append(self._build_variable_system_note(large_output_threshold))
+        system_prompt = "\n\n".join(system_prompt_parts)
+
+        llm_messages = list(messages)
+        llm_messages = [{"role": "system", "content": system_prompt}] + [
+            m for m in llm_messages if m.get("role") != "system"
+        ]
+
+        # Load tools — exclude RLM tools that require prompt_var or async LLM calls
+        tools_def = self._load_tools()
+        tools_list = []
+        for tool_name, tool_data in (tools_def or {}).items():
+            if not isinstance(tool_data, dict) or not tool_data.get("enabled", True):
+                continue
+            if tool_name in self._EXCLUDED_TOOLS:
+                continue
+            definition = tool_data.get("definition")
+            if definition:
+                tools_list.append(definition)
+
+        tool_library = self._load_tool_library()
+
+        repl_state: dict = {
+            "variables": {},
+            "_var_counts": {},  # per-tool call counter for unique variable naming
+        }
+        trace: list = []
+
+        self._thinking_steps = []
+
+        async def _run():
+            return await self._run_hybrid_loop(
+                llm_messages=llm_messages,
+                tools_list=tools_list,
+                tool_library=tool_library,
+                repl_state=repl_state,
+                model=model,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                max_iterations=max_iterations,
+                max_llm_retries=max_llm_retries,
+                retry_delay=retry_delay,
+                tool_error_strategy=tool_error_strategy,
+                large_output_threshold=large_output_threshold,
+                stream_queue=stream_queue,
+                trace=trace,
+            )
+
+        try:
+            if timeout > 0:
+                final_response, iterations, had_tool_error = await asyncio.wait_for(
+                    _run(), timeout=timeout
+                )
+            else:
+                final_response, iterations, had_tool_error = await _run()
+        except asyncio.TimeoutError:
+            result = input_data.copy()
+            result["messages"] = llm_messages
+            result["content"] = ""
+            result["agent_loop_error"] = f"Hybrid agent timed out after {timeout}s"
+            result["iterations"] = 0
+            result["hybrid_trace"] = trace
+            return result
+
+        content = ""
+        if final_response:
+            content = final_response["choices"][0]["message"].get("content") or ""
+
+        result = input_data.copy()
+        result["messages"] = llm_messages
+        result["content"] = content
+        result["iterations"] = iterations
+        result["hybrid_trace"] = trace
+        result["repl_state"] = {
+            "variables": list(repl_state["variables"].keys()),
+            "variable_count": len(repl_state["variables"]),
+        }
+        if had_tool_error:
+            result["agent_loop_error"] = "One or more tools encountered errors"
+        return result
+
+    async def send(self, processed_data: dict) -> dict:
+        return processed_data

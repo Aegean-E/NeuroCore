@@ -42,6 +42,23 @@
             "description": "Initializes a persistent REPL state for RLM processing. Extracts user input and stores it as a variable outside the context window.",
             "singleton": false,
             "configurable": true
+        },
+        {
+            "id": "hybrid_agent",
+            "name": "Hybrid Agent Loop",
+            "description": "Agent loop that combines standard tool calling with RLM-style adaptive output routing. Large tool outputs are stored as named variables instead of bloating the context window. Provides access to both standard and RLM variable-access tools (GetVariable, Peek, Search, Chunk).",
+            "singleton": false,
+            "configurable": true
         }
-    ]
+    ],
+    "hybrid_agent_config": {
+        "max_iterations": 15,
+        "max_tokens": 4096,
+        "temperature": 0.7,
+        "max_llm_retries": 3,
+        "retry_delay": 1.0,
+        "tool_error_strategy": "continue",
+        "timeout": 120,
+        "large_output_threshold": 3000
+    }
 }
