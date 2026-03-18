@@ -16,109 +16,57 @@ LIBRARY_DIR = os.path.join(os.path.dirname(__file__), "..", "tools", "library")
 RLM_LIBRARY_DIR = os.path.join(os.path.dirname(__file__), "..", "tools", "rlm_library")
 
 
-class AgentLoopExecutor:
-    # Class-level cache: avoids re-reading tools.json and library on every receive() call
-    _tools_cache = {"mtime": 0.0, "data": {}}
-    _library_cache = {"mtime": 0.0, "data": {}}
+# ---------------------------------------------------------------------------
+# Shared base class
+# ---------------------------------------------------------------------------
+
+class AgentBaseExecutor:
+    """Shared infrastructure for all agent loop variants.
+
+    Provides: LLM bridge, sandbox, session manager, token estimation,
+    message truncation, context compaction, tool schema loading, system
+    prompt assembly, LLM retry wrapper, and async SubCall execution.
+    """
+
+    # Shared tool-schema cache.  All variants read the same tools.json so
+    # sharing the cache eliminates redundant file reads.
+    _tools_cache: dict = {"mtime": 0.0, "data": {}}
 
     def __init__(self):
         self.llm = LLMBridge(
             base_url=settings.get("llm_api_url"),
-            api_key=settings.get("llm_api_key")
+            api_key=settings.get("llm_api_key"),
         )
-        # Create sandbox instance for secure tool execution
         self._sandbox = ToolSandbox(timeout=30.0)
-        # Initialize session manager for tracing
         try:
             self._session_manager = get_session_manager()
         except Exception:
             self._session_manager = None
 
+    # ------------------------------------------------------------------
+    # Token helpers
+    # ------------------------------------------------------------------
+
     def _estimate_tokens(self, text: str) -> int:
-        """
-        Estimate token count for a given text.
-        Uses a rough approximation: ~4 characters per token.
-        """
+        """Rough token estimate: ~4 characters per token."""
         if not text:
             return 0
         return len(text) // 4
 
-    def _truncate_messages(
-        self,
-        messages: list,
-        max_context_tokens: int,
-        preserve_system: bool = True
-    ) -> list:
-        """
-        Truncate messages to fit within token budget.
-        Preserves system message and last N turns.
-        """
-        if not messages:
-            return messages
-            
-        # Calculate current token count
-        total_tokens = 0
-        for msg in messages:
-            content = msg.get("content", "")
-            total_tokens += self._estimate_tokens(content)
-        
-        # If under limit, no truncation needed
-        if total_tokens <= max_context_tokens:
-            return messages
-        
-        # Find system message if present
-        system_msg = None
-        non_system_messages = []
-        for msg in messages:
-            if msg.get("role") == "system" and preserve_system:
-                system_msg = msg
-            else:
-                non_system_messages.append(msg)
-        
-        # Keep last N non-system messages that fit in budget
-        system_tokens = self._estimate_tokens(system_msg.get("content", "")) if system_msg else 0
-        available_tokens = max_context_tokens - system_tokens
-        
-        result = []
-        
-        # Add from end until we hit limit
-        tokens_used = 0
-        for msg in reversed(non_system_messages):
-            msg_tokens = self._estimate_tokens(msg.get("content", ""))
-            if tokens_used + msg_tokens <= available_tokens:
-                result.append(msg)  # Append to end (chronologically later)
-                tokens_used += msg_tokens
-            else:
-                break
-        
-        # Reverse to restore chronological order (oldest first)
-        result.reverse()
-        
-        # Add system message at the beginning if present
-        if system_msg:
-            result.insert(0, system_msg)
-        
-        return result
-
     def _estimate_messages_tokens(self, messages: list) -> int:
         """Estimate total token count across all messages.
 
-        Accounts for:
-        - text content (str or multimodal list)
-        - tool_calls JSON on assistant messages (often the largest cost)
-        - tool result content (always a string, but may be JSON)
+        Accounts for text content, tool_calls JSON on assistant messages,
+        and tool result content (always a string, but may be JSON).
         """
         total = 0
         for m in messages:
-            # Text content
             content = m.get("content") or ""
             if isinstance(content, list):
                 content = " ".join(
                     p.get("text", "") for p in content if p.get("type") == "text"
                 )
             total += self._estimate_tokens(str(content))
-
-            # tool_calls array on assistant messages — serialize to get byte count
             tool_calls = m.get("tool_calls")
             if tool_calls:
                 try:
@@ -127,20 +75,64 @@ class AgentLoopExecutor:
                     pass
         return total
 
+    def _truncate_messages(
+        self,
+        messages: list,
+        max_context_tokens: int,
+        preserve_system: bool = True,
+    ) -> list:
+        """Truncate messages to fit within token budget.
+
+        Preserves the system message and as many recent turns as fit.
+        """
+        if not messages:
+            return messages
+
+        total_tokens = sum(
+            self._estimate_tokens(m.get("content", "")) for m in messages
+        )
+        if total_tokens <= max_context_tokens:
+            return messages
+
+        system_msg = None
+        non_system = []
+        for msg in messages:
+            if msg.get("role") == "system" and preserve_system:
+                system_msg = msg
+            else:
+                non_system.append(msg)
+
+        system_tokens = (
+            self._estimate_tokens(system_msg.get("content", "")) if system_msg else 0
+        )
+        available = max_context_tokens - system_tokens
+
+        result = []
+        used = 0
+        for msg in reversed(non_system):
+            t = self._estimate_tokens(msg.get("content", ""))
+            if used + t <= available:
+                result.append(msg)
+                used += t
+            else:
+                break
+        result.reverse()
+        if system_msg:
+            result.insert(0, system_msg)
+        return result
+
     async def _compact_messages(self, messages: list, keep_last: int) -> list:
         """LLM-summarize old agent messages to free up context window.
 
-        Preserves leading system messages verbatim.  Summarizes the oldest
+        Preserves leading system messages verbatim.  Summarises the oldest
         non-system messages into a single system-level summary, then appends
-        the most recent ``keep_last`` non-system messages verbatim.
+        the most recent *keep_last* turns verbatim.  Returns the original list
+        unchanged if compaction is unnecessary or the LLM call fails (fail-safe:
+        never discard context silently).
 
         Summary budget scales with the number of messages being summarized so
         that long agent runs don't lose critical facts.
-
-        Returns the original list unchanged if compaction is unnecessary or
-        the LLM summarization fails (fail-safe: never discard context silently).
         """
-        # Separate the leading system prefix from the conversation turns
         system_prefix = []
         conversation = []
         for msg in messages:
@@ -149,35 +141,28 @@ class AgentLoopExecutor:
             else:
                 conversation.append(msg)
 
-        # Not enough conversation turns to bother compacting
         if len(conversation) <= keep_last + 2:
             return messages
 
         old_messages = conversation[:-keep_last]
         recent_messages = conversation[-keep_last:]
 
-        # Build a readable transcript for the summarization prompt.
-        # Include tool_calls names so the summary captures what tools were used.
         lines = []
         for m in old_messages:
             role = m.get("role", "?").upper()
             content = m.get("content") or ""
             if isinstance(content, list):
-                text_parts = [p.get("text", "") for p in content if p.get("type") == "text"]
-                content = " ".join(text_parts) or "[non-text content]"
+                content = " ".join(
+                    p.get("text", "") for p in content if p.get("type") == "text"
+                ) or "[non-text content]"
             content_str = str(content)[:600]
-
-            # For assistant messages, also note which tools were called
             tool_calls = m.get("tool_calls")
             if tool_calls:
                 names = [tc.get("function", {}).get("name", "?") for tc in tool_calls]
                 content_str = f"[called tools: {', '.join(names)}] {content_str}".strip()
-
             lines.append(f"{role}: {content_str}")
 
-        # Scale summary budget: 60 tokens per message summarized, capped at 800
         summary_max_tokens = min(800, max(200, len(old_messages) * 60))
-
         summary_prompt = [
             {
                 "role": "user",
@@ -217,6 +202,10 @@ class AgentLoopExecutor:
         )
         return compacted
 
+    # ------------------------------------------------------------------
+    # Tool schema loading
+    # ------------------------------------------------------------------
+
     def _load_tools(self):
         """Load tool definitions from tools.json with mtime-based caching."""
         try:
@@ -231,39 +220,207 @@ class AgentLoopExecutor:
             logger.warning(f"Failed to load tools: {e}")
         return {}
 
+    # ------------------------------------------------------------------
+    # System prompt assembly
+    # ------------------------------------------------------------------
+
+    def _build_system_prompt(self, input_data: dict, config: dict) -> str:
+        """Build system prompt from upstream context fields."""
+        parts = []
+        if config.get("include_plan_in_context", True):
+            v = input_data.get("plan_context")
+            if v:
+                parts.append(v)
+        if config.get("include_memory_context", True):
+            v = input_data.get("_memory_context")
+            if v:
+                parts.append(f"## User Memories\n{v}")
+        if config.get("include_knowledge_context", True):
+            v = input_data.get("knowledge_context")
+            if v:
+                parts.append(f"## Relevant Knowledge\n{v}")
+        if config.get("include_reasoning_context", True):
+            v = input_data.get("reasoning_context")
+            if v:
+                parts.append(f"## Previous Reasoning\n{v}")
+        return "\n\n".join(parts) if parts else ""
+
+    # ------------------------------------------------------------------
+    # LLM retry wrapper
+    # ------------------------------------------------------------------
+
+    async def _llm_with_retry(
+        self,
+        messages: list,
+        model: str,
+        temperature: float,
+        max_tokens: int,
+        tools: list,
+        max_retries: int,
+        retry_delay: float,
+    ) -> dict:
+        """Call LLM with exponential backoff retry on failure.
+
+        Retries when the response is None/empty, contains an 'error' key, or
+        is missing 'choices'.  Returns None after all retries are exhausted.
+        """
+        last_error = "Unknown error"
+        for attempt in range(max_retries + 1):
+            if attempt > 0:
+                await asyncio.sleep(retry_delay * (2 ** (attempt - 1)))
+            try:
+                response = await self.llm.chat_completion(
+                    messages=messages,
+                    model=model,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                    tools=tools if tools else None,
+                )
+                if response and "choices" in response and not response.get("error"):
+                    return response
+                last_error = (
+                    response.get("error", "Response missing 'choices' key")
+                    if response
+                    else "LLM returned None"
+                )
+            except Exception as e:
+                last_error = str(e)
+        logger.warning(
+            f"[{self.__class__.__name__}] LLM failed after {max_retries + 1} attempts: {last_error}"
+        )
+        return None
+
+    # ------------------------------------------------------------------
+    # Async SubCall — shared by RLM and Hybrid executors
+    # ------------------------------------------------------------------
+
+    async def _execute_sub_call(self, args: dict, repl_state: dict) -> dict:
+        """Execute SubCall as an async built-in (not via sandbox exec).
+
+        Cannot run inside the sandbox because it requires an awaited LLM call.
+        Guardrails (max_sub_calls, max_recursion_depth, max_cost_usd) are read
+        from *repl_state* so each executor can configure its own limits.
+        """
+        if repl_state.get("sub_call_count", 0) >= repl_state.get("max_sub_calls", 50):
+            return {
+                "tool_call_id": "",
+                "role": "tool",
+                "name": "sub_call",
+                "content": "Error: max_sub_calls limit reached",
+                "success": False,
+            }
+        if repl_state.get("recursion_depth", 0) >= repl_state.get("max_recursion_depth", 3):
+            return {
+                "tool_call_id": "",
+                "role": "tool",
+                "name": "sub_call",
+                "content": "Error: max_recursion_depth limit reached",
+                "success": False,
+            }
+        if repl_state.get("estimated_cost", 0.0) >= repl_state.get("max_cost_usd", 1.0):
+            return {
+                "tool_call_id": "",
+                "role": "tool",
+                "name": "sub_call",
+                "content": "Error: max_cost_usd limit reached",
+                "success": False,
+            }
+
+        prompt = args.get("prompt", "")
+        if not prompt:
+            return {
+                "tool_call_id": "",
+                "role": "tool",
+                "name": "sub_call",
+                "content": "Error: No prompt provided for SubCall",
+                "success": False,
+            }
+
+        model = (
+            args.get("model")
+            or repl_state.get("sub_call_model")
+            or settings.get("default_model")
+        )
+        max_tokens = int(args.get("max_tokens", 2000))
+
+        repl_state["sub_call_count"] = repl_state.get("sub_call_count", 0) + 1
+        old_depth = repl_state.get("recursion_depth", 0)
+        repl_state["recursion_depth"] = old_depth + 1
+        try:
+            response = await self.llm.chat_completion(
+                messages=[{"role": "user", "content": prompt}],
+                model=model,
+                max_tokens=max_tokens,
+            )
+            repl_state["recursion_depth"] = old_depth
+            if response and "choices" in response:
+                content = response["choices"][0]["message"].get("content", "")
+                estimated_tokens = len(prompt) // 4 + max_tokens
+                repl_state["estimated_cost"] = (
+                    repl_state.get("estimated_cost", 0.0)
+                    + (estimated_tokens / 1000) * 0.001
+                )
+                return {
+                    "tool_call_id": "",
+                    "role": "tool",
+                    "name": "sub_call",
+                    "content": content,
+                    "success": True,
+                    "model_used": model,
+                    "sub_call_count": repl_state["sub_call_count"],
+                    "estimated_cost": repl_state["estimated_cost"],
+                }
+            return {
+                "tool_call_id": "",
+                "role": "tool",
+                "name": "sub_call",
+                "content": (
+                    f"Error in SubCall: "
+                    f"{response.get('error', 'Unknown error') if response else 'No response'}"
+                ),
+                "success": False,
+            }
+        except Exception as e:
+            repl_state["recursion_depth"] = old_depth
+            return {
+                "tool_call_id": "",
+                "role": "tool",
+                "name": "sub_call",
+                "content": f"Error in SubCall: {e}",
+                "success": False,
+            }
+
+
+# ---------------------------------------------------------------------------
+# Standard Agent Loop
+# ---------------------------------------------------------------------------
+
+class AgentLoopExecutor(AgentBaseExecutor):
+    # Class-level library cache: per-subclass so each executor loads its own tools
+    _library_cache: dict = {"mtime": 0.0, "data": {}, "file_mtimes": {}}
+
     def _load_tool_library(self):
-        """Load tool implementations from library directory with file-level mtime-based caching."""
+        """Load tool implementations from library directory with file-level mtime caching."""
         try:
             if os.path.exists(LIBRARY_DIR):
-                # Use file-level fingerprints for cache invalidation
-                # This catches file content edits that may not update directory mtime
                 current_files = {}
                 for filename in os.listdir(LIBRARY_DIR):
                     if filename.endswith(".py"):
                         tool_name = filename[:-3]
                         code_path = os.path.join(LIBRARY_DIR, filename)
                         try:
-                            # Store file mtime for each file as fingerprint
                             current_files[tool_name] = os.path.getmtime(code_path)
                         except OSError:
                             pass
-                
-                # Check if any file has changed by comparing fingerprints
+
                 cache_data = self.__class__._library_cache.get("data", {})
                 cache_mtimes = self.__class__._library_cache.get("file_mtimes", {})
-                
-                needs_reload = False
-                # Check for new or modified files
-                for tool_name, mtime in current_files.items():
-                    if tool_name not in cache_mtimes or cache_mtimes[tool_name] != mtime:
-                        needs_reload = True
-                        break
-                # Check for deleted files
-                for tool_name in cache_mtimes:
-                    if tool_name not in current_files:
-                        needs_reload = True
-                        break
-                
+
+                needs_reload = (
+                    set(current_files) != set(cache_mtimes)
+                    or any(current_files[n] != cache_mtimes.get(n) for n in current_files)
+                )
+
                 if needs_reload or not cache_data:
                     library = {}
                     for filename in os.listdir(LIBRARY_DIR):
@@ -280,32 +437,30 @@ class AgentLoopExecutor:
         return {}
 
     async def _execute_tool(self, tool_call: dict, tool_library: dict) -> dict:
-        """Execute a single tool call in sandbox and return the tool result message."""
+        """Execute a single tool call in the sandbox and return a tool result message."""
         func_name = tool_call["function"]["name"]
         try:
             args = json.loads(tool_call["function"]["arguments"])
         except (json.JSONDecodeError, KeyError):
             args = {}
 
-        # Log tool call event
         if self._session_manager:
             try:
                 self._session_manager.log_tool_call(func_name, args)
             except Exception:
-                pass  # Don't fail if logging fails
+                pass
 
         start_time = time.time()
         success = False
         if func_name in tool_library:
             code = tool_library[func_name]
             try:
-                # Run in executor to avoid blocking the event loop
                 loop = asyncio.get_running_loop()
                 result = await loop.run_in_executor(
                     None,
                     self._sandbox.execute,
                     code,
-                    {"args": args}
+                    {"args": args},
                 )
                 output = result.get("result", "Success (no result returned)")
                 success = True
@@ -314,109 +469,26 @@ class AgentLoopExecutor:
         else:
             output = f"Error: Tool {func_name} not found in library."
 
-        # Calculate duration
         duration_ms = (time.time() - start_time) * 1000
 
-        # Log tool result event
         if self._session_manager:
             try:
                 self._session_manager.log_tool_result(
                     func_name,
                     output,
                     success=success,
-                    duration_ms=duration_ms
+                    duration_ms=duration_ms,
                 )
             except Exception:
-                pass  # Don't fail if logging fails
+                pass
 
         return {
             "tool_call_id": tool_call.get("id", ""),
             "role": "tool",
             "name": func_name,
             "content": str(output),
-            "success": success
+            "success": success,
         }
-
-    def _build_system_prompt(self, input_data: dict, config: dict) -> str:
-        """Build system prompt with context from previous nodes."""
-        prompt_parts = []
-
-        if config.get("include_plan_in_context", True):
-            plan_context = input_data.get("plan_context")
-            if plan_context:
-                prompt_parts.append(plan_context)
-
-        if config.get("include_memory_context", True):
-            memory_context = input_data.get("_memory_context")
-            if memory_context:
-                prompt_parts.append(f"## User Memories\n{memory_context}")
-
-        if config.get("include_knowledge_context", True):
-            knowledge_context = input_data.get("knowledge_context")
-            if knowledge_context:
-                prompt_parts.append(f"## Relevant Knowledge\n{knowledge_context}")
-
-        if config.get("include_reasoning_context", True):
-            reasoning_context = input_data.get("reasoning_context")
-            if reasoning_context:
-                prompt_parts.append(f"## Previous Reasoning\n{reasoning_context}")
-
-        return "\n\n".join(prompt_parts) if prompt_parts else ""
-
-    async def _llm_with_retry(
-        self,
-        messages: list,
-        model: str,
-        temperature: float,
-        max_tokens: int,
-        tools: list,
-        max_retries: int,
-        retry_delay: float
-    ) -> dict:
-        """
-        Call LLM with exponential backoff retry on failure.
-
-        Retries when:
-        - Response is None or empty
-        - Response contains an 'error' key
-        - Response has no 'choices' key
-
-        Backoff formula: retry_delay * 2^(attempt - 1)
-
-        Returns the response dict, or an error dict after all retries exhausted.
-        """
-        last_error = "Unknown error"
-
-        for attempt in range(max_retries + 1):
-            if attempt > 0:
-                # Exponential backoff: delay doubles with each retry
-                delay = retry_delay * (2 ** (attempt - 1))
-                await asyncio.sleep(delay)
-
-            try:
-                response = await self.llm.chat_completion(
-                    messages=messages,
-                    model=model,
-                    temperature=temperature,
-                    max_tokens=max_tokens,
-                    tools=tools if tools else None
-                )
-
-                # Valid response: has choices and no error
-                if response and "choices" in response and not response.get("error"):
-                    return response
-
-                # Extract error for logging
-                if response:
-                    last_error = response.get("error", "Response missing 'choices' key")
-                else:
-                    last_error = "LLM returned None"
-
-            except Exception as e:
-                last_error = str(e)
-
-        # Return None instead of error dict so caller can handle gracefully
-        return None
 
     async def _run_agent_loop(
         self,
@@ -434,61 +506,45 @@ class AgentLoopExecutor:
         stream_queue: asyncio.Queue = None,
         compact_threshold: int = 0,
         compact_keep_last: int = 6,
+        max_tool_output_chars: int = 0,
+        thinking_steps: list = None,
     ) -> tuple:
-        """
-        Core agent loop: LLM ↔ Tool execution until no more tool calls or max_iterations.
+        """Core agent loop: LLM ↔ Tool execution until no more tool calls or max_iterations.
 
-        Args:
-            llm_messages:       Mutable message list (modified in-place with assistant + tool messages)
-            tools_list:         List of tool definitions to pass to LLM
-            tool_library:       Dict of tool_name -> source code
-            model:              LLM model name
-            temperature:        Sampling temperature
-            max_tokens:         Max tokens per LLM call
-            max_iterations:     Maximum number of LLM ↔ Tool loops
-            max_llm_retries:    Max retries per LLM call on failure
-            retry_delay:        Base delay (seconds) for exponential backoff
-            tool_error_strategy: "continue" (skip failed tools) or "stop" (abort on error)
-            trace:              List to append per-iteration trace dicts to
-
-        Returns:
-            (final_response, iterations, had_tool_error)
+        Returns (final_response, iterations, had_tool_error).
         """
+        # Fix 2: use local thinking_steps instead of instance-level state
+        if thinking_steps is None:
+            thinking_steps = []
+
         iterations = 0
         final_response = None
         had_tool_error = False
-        seen_calls = set()  # Track tool call signatures to detect loops
-        # Cooldown: record message count after last compaction.
-        # Only compact again once at least compact_keep_last new messages have
-        # been appended, preventing a no-op re-compaction every iteration.
+        seen_calls: set = set()
+        # Only compact again once enough new messages have accumulated since
+        # the last compaction, preventing a no-op re-compaction every iteration.
         _compacted_at_len = 0
 
         for iteration in range(max_iterations):
             iterations += 1
-            iteration_trace = {
-                "iteration": iterations,
-                "tool_calls": [],
-                "errors": []
-            }
+            iteration_trace = {"iteration": iterations, "tool_calls": [], "errors": []}
 
-            # Context compaction: if enabled, threshold exceeded, and enough new
-            # messages have accumulated since the last compaction.
             if compact_threshold > 0:
                 new_since_compact = len(llm_messages) - _compacted_at_len
                 if new_since_compact >= compact_keep_last:
                     current_tokens = self._estimate_messages_tokens(llm_messages)
                     if current_tokens > compact_threshold:
-                        llm_messages = await self._compact_messages(llm_messages, compact_keep_last)
+                        llm_messages = await self._compact_messages(
+                            llm_messages, compact_keep_last
+                        )
                         _compacted_at_len = len(llm_messages)
 
-            # Log LLM call event
             if self._session_manager:
                 try:
                     self._session_manager.log_llm_call(model, tokens=None)
                 except Exception:
-                    pass  # Don't fail if logging fails
+                    pass
 
-            # Call LLM with retry logic
             response = await self._llm_with_retry(
                 messages=llm_messages,
                 model=model,
@@ -496,14 +552,14 @@ class AgentLoopExecutor:
                 max_tokens=max_tokens,
                 tools=tools_list,
                 max_retries=max_llm_retries,
-                retry_delay=retry_delay
+                retry_delay=retry_delay,
             )
 
-            # Check for LLM error after all retries exhausted
             if not response or "choices" not in response:
                 error_msg = (
                     response.get("error", "LLM returned no choices")
-                    if response else "LLM returned None"
+                    if response
+                    else "LLM returned None"
                 )
                 iteration_trace["errors"].append(error_msg)
                 trace.append(iteration_trace)
@@ -511,12 +567,7 @@ class AgentLoopExecutor:
 
             final_response = response
             assistant_message = response["choices"][0]["message"]
-            
-            # --- Accumulate thinking steps in real-time ---
-            if not hasattr(self, '_thinking_steps'):
-                self._thinking_steps = []
-            
-            content = assistant_message.get("content") or ""
+
             tool_calls = assistant_message.get("tool_calls", [])
             if tool_calls:
                 for tc in tool_calls:
@@ -525,39 +576,30 @@ class AgentLoopExecutor:
                     args = fn.get("arguments", "{}")
                     try:
                         args_dict = json.loads(args)
-                        args_display = ", ".join(f"{k}={repr(v)[:80]}" for k, v in args_dict.items())
+                        args_display = ", ".join(
+                            f"{k}={repr(v)[:80]}" for k, v in args_dict.items()
+                        )
                     except Exception:
                         args_display = args[:160]
-                    self._thinking_steps.append({
-                        "type": "tool_call",
-                        "name": name,
-                        "content": f"{name}({args_display})"
-                    })
-            elif content.strip() and iteration < max_iterations - 1:
-                # Intermediate text response (not final, since iteration continues)
-                # But wait, it hits break below if no tool calls!
-                # If no tool calls, it breaks, so this ONLY triggers if there ARE tool calls 
-                # or if some other logic continues. 
-                pass
+                    thinking_steps.append(
+                        {"type": "tool_call", "name": name, "content": f"{name}({args_display})"}
+                    )
+                if stream_queue:
+                    await stream_queue.put(
+                        {"type": "thinking", "content": list(thinking_steps)}
+                    )
 
-            if stream_queue and tool_calls:
-                await stream_queue.put({"type": "thinking", "content": list(self._thinking_steps)})
-
-            # Append assistant message to conversation
             llm_messages.append(assistant_message)
 
             if not tool_calls:
-                # No more tool calls — agent has finished
                 trace.append(iteration_trace)
                 break
 
-            # Execute all tool calls in this turn
             tool_error_occurred = False
             for tool_call in tool_calls:
                 tool_name = tool_call.get("function", {}).get("name", "unknown")
                 tool_args = tool_call.get("function", {}).get("arguments", "{}")
-                
-                # ... [Existing Deduplication Logic] ...
+
                 try:
                     args_dict = json.loads(tool_args)
                     normalized_args = json.dumps(args_dict, sort_keys=True)
@@ -570,22 +612,31 @@ class AgentLoopExecutor:
                     )
                     break
                 seen_calls.add(call_signature)
-                
-                iteration_trace["tool_calls"].append(tool_name)
 
+                iteration_trace["tool_calls"].append(tool_name)
                 tool_result = await self._execute_tool(tool_call, tool_library)
 
-                # Append tool result to real-time thinking trace
-                success = tool_result.get("success", False if not tool_result.get("content") else True)
+                # Fix 1: truncate large tool outputs at the source
+                if max_tool_output_chars > 0:
+                    raw = tool_result.get("content", "")
+                    if len(raw) > max_tool_output_chars:
+                        tool_result["content"] = (
+                            f"[Output truncated: {len(raw):,} chars total, "
+                            f"showing first {max_tool_output_chars:,}]\n"
+                            + raw[:max_tool_output_chars]
+                        )
+
+                success = tool_result.get(
+                    "success", False if not tool_result.get("content") else True
+                )
                 display = (tool_result.get("content") or "").strip()[:400]
-                self._thinking_steps.append({
-                    "type": "tool_result",
-                    "name": tool_name,
-                    "content": display,
-                    "success": success
-                })
+                thinking_steps.append(
+                    {"type": "tool_result", "name": tool_name, "content": display, "success": success}
+                )
                 if stream_queue:
-                    await stream_queue.put({"type": "thinking", "content": list(self._thinking_steps)})
+                    await stream_queue.put(
+                        {"type": "thinking", "content": list(thinking_steps)}
+                    )
 
                 if not tool_result.get("success", False):
                     had_tool_error = True
@@ -598,7 +649,6 @@ class AgentLoopExecutor:
 
             trace.append(iteration_trace)
 
-            # Apply tool error strategy
             if tool_error_occurred and tool_error_strategy == "stop":
                 break
 
@@ -614,67 +664,39 @@ class AgentLoopExecutor:
               knowledge_context, reasoning_context
 
         Config:
-            - max_iterations (int, default 10):
-                Maximum number of LLM ↔ Tool loops per run.
-            - max_tokens (int, default 2048):
-                Max tokens per LLM call.
-            - temperature (float, default 0.7):
-                Sampling temperature.
-            - max_llm_retries (int, default 3):
-                Number of retries on LLM failure (exponential backoff).
-            - retry_delay (float, default 1.0):
-                Base delay in seconds for exponential backoff between retries.
-            - tool_error_strategy (str, default "continue"):
-                "continue" — skip failed tools and keep looping.
-                "stop"     — abort the loop on the first tool error.
-            - timeout (float, default 120):
-                Total timeout in seconds for the entire agent loop (0 = disabled).
-            - max_replan_depth (int, default 3):
-                Maximum number of re-planning cycles allowed before hard-stopping.
+            - max_iterations (int, default 10)
+            - max_tokens (int, default 2048)
+            - temperature (float, default 0.7)
+            - max_llm_retries (int, default 3)
+            - retry_delay (float, default 1.0)
+            - tool_error_strategy (str, default "continue"): "continue" or "stop"
+            - timeout (float, default 120): 0 = disabled
+            - max_replan_depth (int, default 3)
             - include_plan_in_context (bool, default True)
             - include_memory_context (bool, default True)
             - include_knowledge_context (bool, default True)
             - include_reasoning_context (bool, default True)
 
         Output:
-            - messages (list):          Full conversation including tool results.
-            - response (dict):          Raw final LLM response.
-            - content (str):            Extracted text content from final response.
-            - iterations (int):         Total number of LLM ↔ Tool loops executed.
-            - agent_loop_trace (list):  Per-iteration details (tool_calls, errors).
-            - agent_loop_error (str):   Error message if the loop failed or timed out.
-            - replan_needed (bool):     True if execution failed and re-planning is recommended.
-            - replan_reason (str):      Explanation of why re-planning is needed.
-            - suggested_approach (str): Suggestion for how to re-plan.
-            - replan_count (int):        Current re-planning depth counter (increments each re-plan).
-
-        Reflection-driven retry is handled externally by wiring:
-            [Agent Loop] → [Reflection] → [Conditional Router (satisfied)] → [Agent Loop]
-        
-        Re-planning depth protection:
-            - Tracks replan_count across iterations
-            - Hard-stops when replan_count >= max_replan_depth
-            - Surfaces degraded result with error rather than infinite looping
+            - messages, response, content, iterations, agent_loop_trace,
+              agent_loop_error, replan_needed, replan_reason, suggested_approach,
+              replan_count, episode_id (when episode persistence is enabled)
         """
         if input_data is None:
             input_data = {}
-
         config = config or {}
 
         # --- Session initialization ---
-        # Load or create session for tracing
         try:
             sm = get_session_manager()
-            session_id = sm.load_or_create_session()
-            # Log agent start event
+            sm.load_or_create_session()
             sm.log_agent_event("agent_start", {
                 "input_keys": list(input_data.keys()),
-                "config_keys": list(config.keys())
+                "config_keys": list(config.keys()),
             })
         except Exception as e:
             logger.warning(f"Failed to initialize session manager: {e}")
             sm = None
-            session_id = None
 
         # --- Read configuration ---
         max_iterations = int(config.get("max_iterations", 10))
@@ -685,99 +707,85 @@ class AgentLoopExecutor:
         tool_error_strategy = str(config.get("tool_error_strategy", "continue"))
         timeout = float(config.get("timeout", 120))
         max_replan_depth = int(config.get("max_replan_depth", 3))
-        max_context_tokens = int(config.get("max_context_tokens", 6000))  # Token budget for context
-        compact_threshold = int(config.get("compact_threshold", 0))       # 0 = disabled
+        max_context_tokens = int(config.get("max_context_tokens", 6000))
+        compact_threshold = int(config.get("compact_threshold", 0))
         compact_keep_last = int(config.get("compact_keep_last", 6))
-        
+        # Fix 1: read max_tool_output_chars from config
+        max_tool_output_chars = int(config.get("max_tool_output_chars", 0))
+
         # --- Re-planning depth tracking ---
         replan_count = int(input_data.get("replan_count", 0))
-        
+
         # --- Episode Persistence Support ---
-        # Check if episode persistence is enabled
         enable_episode = config.get("enable_episode_persistence", False)
-        episode_id = config.get("episode_id")  # Optional custom episode ID
-        checkpoint_interval = config.get("checkpoint_interval", 1)  # Save checkpoint every N iterations
-        
-        # Issue 6: Guard against checkpoint_interval = 0 crash (division by zero)
+        episode_id = config.get("episode_id")
+        checkpoint_interval = config.get("checkpoint_interval", 1)
         if checkpoint_interval <= 0:
             logger.warning("checkpoint_interval must be >= 1, defaulting to 1")
             checkpoint_interval = 1
-        
+
         episode = None
-        iteration_count = 0  # Track iterations for checkpoint saving
-        
+        iteration_count = 0
+
         if enable_episode and sm:
             try:
-                # Try to load existing episode state for resume
                 existing_episode = sm.load_episode_state()
-                
-                # Check if we should resume or create new episode
                 should_resume = (
-                    existing_episode and 
-                    existing_episode.phase not in [
-                        EpisodeState.PHASE_COMPLETED, 
-                        EpisodeState.PHASE_FAILED
-                    ] and
-                    # Only resume if episode_id matches or no episode_id specified
-                    (episode_id is None or existing_episode.episode_id == episode_id)
+                    existing_episode
+                    and existing_episode.phase not in [
+                        EpisodeState.PHASE_COMPLETED,
+                        EpisodeState.PHASE_FAILED,
+                    ]
+                    and (episode_id is None or existing_episode.episode_id == episode_id)
                 )
-                
                 if should_resume:
-                    # Resume from existing episode
                     episode = existing_episode
-                    # Restore state from episode
                     replan_count = episode.replan_count
                     input_data.setdefault("plan", episode.plan)
                     input_data.setdefault("completed_steps", episode.completed_steps)
                     input_data.setdefault("current_step", episode.current_step)
-                    # Restore iteration count for checkpoint tracking
                     iteration_count = len(episode.checkpoints)
-                    # Optionally restore messages for resume
                     if episode.messages and config.get("resume_from_episode_messages", True):
                         input_data.setdefault("messages", episode.messages)
-                    
-                    # Update phase to executing
                     episode.update_phase(EpisodeState.PHASE_EXECUTING)
-                    
-                    logger.info(f"Resuming episode {episode.episode_id} from phase {episode.phase}")
+                    logger.info(f"Resuming episode {episode.episode_id}")
                 elif episode_id or config.get("auto_create_episode", True):
-                    # Create new episode
                     budgets = {
                         "max_iterations": max_iterations,
                         "max_replan_depth": max_replan_depth,
                         "timeout": timeout,
                         "max_context_tokens": max_context_tokens,
                     }
-                    # FIX: episode_id already passed in metadata above - no need to overwrite
                     episode = sm.create_episode(
                         input_data={"initial_input": list(input_data.keys())},
                         budgets=budgets,
-                        metadata={"episode_id": episode_id} if episode_id else {}
+                        metadata={"episode_id": episode_id} if episode_id else {},
                     )
                     logger.info(f"Created new episode {episode.episode_id}")
             except Exception as e:
                 logger.warning(f"Failed to load episode state: {e}")
-        
-        # Check if we've exceeded max re-planning depth (only if max_replan_depth > 0)
+
+        # --- Re-planning depth guard ---
         if max_replan_depth > 0 and replan_count >= max_replan_depth:
             result = input_data.copy()
             result["replan_needed"] = False
             result["replan_depth_exceeded"] = True
-            result["agent_loop_error"] = f"Max re-planning depth ({max_replan_depth}) exceeded. Unable to complete task."
-            result["content"] = f"[Error: Task failed after {replan_count} re-planning attempts. Unable to find viable execution path.]"
+            result["agent_loop_error"] = (
+                f"Max re-planning depth ({max_replan_depth}) exceeded. Unable to complete task."
+            )
+            result["content"] = (
+                f"[Error: Task failed after {replan_count} re-planning attempts. "
+                "Unable to find viable execution path.]"
+            )
             result["iterations"] = 0
             result["agent_loop_trace"] = []
             return result
 
-        # Guard: no messages → return input unchanged
         messages = input_data.get("messages", [])
         if not messages:
             return input_data
 
-        # Build system prompt from context fields
         system_prompt = self._build_system_prompt(input_data, config)
-
-        # Load tools
         tools_def = self._load_tools()
         tools_list = []
         if tools_def:
@@ -789,33 +797,30 @@ class AgentLoopExecutor:
 
         tool_library = self._load_tool_library()
         model = config.get("model") or settings.get("default_model")
+        agent_loop_trace: list = []
 
-        # Shared trace list (populated by _run_agent_loop)
-        agent_loop_trace = []
+        # Fix 2: create thinking_steps locally before _execute()
+        thinking_steps: list = []
 
         async def _execute():
-            """Inner coroutine — wrapped with optional timeout."""
-            # Build initial message list
-            llm_messages = messages.copy()
+            nonlocal iteration_count
 
-            # Apply token budget truncation to prevent context overflow
+            llm_messages = messages.copy()
             if max_context_tokens > 0:
                 llm_messages = self._truncate_messages(llm_messages, max_context_tokens)
 
-            # Inject system prompt if context is available
-            # Skip if context is already present (avoid duplication from SystemPromptExecutor)
+            # Inject context into system prompt without clobbering existing content
             if system_prompt:
                 has_system = any(m.get("role") == "system" for m in llm_messages)
                 if has_system:
-                    # Check if any of the context keys are already in the system message
-                    system_msg = next((m for m in llm_messages if m.get("role") == "system"), {})
-                    existing_content = system_msg.get("content", "")
-                    
-                    # Check if context markers already exist to avoid duplication
-                    context_markers = ["## Execution Plan", "## User Memories", "## Relevant Knowledge", "## Previous Reasoning"]
-                    context_already_present = any(marker in existing_content for marker in context_markers)
-                    
-                    if not context_already_present:
+                    context_markers = [
+                        "## Execution Plan", "## User Memories",
+                        "## Relevant Knowledge", "## Previous Reasoning",
+                    ]
+                    sys_content = next(
+                        m.get("content", "") for m in llm_messages if m.get("role") == "system"
+                    )
+                    if not any(marker in sys_content for marker in context_markers):
                         for m in llm_messages:
                             if m.get("role") == "system":
                                 m["content"] = m["content"] + "\n\n" + system_prompt
@@ -835,20 +840,18 @@ class AgentLoopExecutor:
                 retry_delay=retry_delay,
                 tool_error_strategy=tool_error_strategy,
                 trace=agent_loop_trace,
-                stream_queue=config.get("_stream_queue") if config else None,
+                stream_queue=config.get("_stream_queue"),
                 compact_threshold=compact_threshold,
                 compact_keep_last=compact_keep_last,
+                max_tool_output_chars=max_tool_output_chars,
+                thinking_steps=thinking_steps,
             )
 
-            # --- Episode Checkpoint Saving ---
-            # Save checkpoint after each iteration if enabled
-            # FIX: Use local variables instead of result (which isn't defined yet)
+            # Episode checkpoint
             if episode is not None and sm is not None:
                 iteration_count += iterations
-                # Save checkpoint at configured intervals or on completion
                 if iteration_count % checkpoint_interval == 0 or iterations == 0:
                     try:
-                        # Use local variables since result isn't defined yet
                         sm.save_episode_state(
                             phase=EpisodeState.PHASE_EXECUTING,
                             replan_count=replan_count,
@@ -869,38 +872,23 @@ class AgentLoopExecutor:
             if final_response and "choices" in final_response:
                 result["content"] = final_response["choices"][0]["message"].get("content", "")
 
-            # Issue 5: Re-planning detection - use structured error flags instead of naive text matching
-            # Check if the agent actually failed to produce a useful response
-            # Don't trigger re-planning just because max_iterations was reached
+            # Re-planning detection — use structured flags, not text matching
             content = result.get("content", "")
-            response_text = str(final_response) if final_response else ""
-            
-            # Use structured error detection instead of naive substring matching
-            # This prevents false-positive replanning on benign text like "error handling best practices"
             has_error_flag = final_response.get("error") is not None if final_response else False
-            has_tool_failure = had_tool_error
-            has_no_content = not content
-            
-            # Only trigger replan if there's a structured error, tool failure, or no content
-            actually_failed = has_tool_failure or has_no_content or has_error_flag
-            
+            actually_failed = had_tool_error or not content or has_error_flag
+
             plan = input_data.get("plan", [])
             current_step = input_data.get("current_step", 0)
-            
-            # Check if re-planning is needed
+
             if actually_failed:
                 result["replan_needed"] = True
-                # Increment replan count for depth tracking
                 result["replan_count"] = replan_count + 1
-                
                 if had_tool_error:
                     result["replan_reason"] = "Tool execution errors occurred during plan execution"
                 elif not content:
                     result["replan_reason"] = "Agent produced no content response"
                 else:
                     result["replan_reason"] = "Agent response contained error indicators"
-                
-                # Suggest simpler approach if plan has multiple steps
                 if plan and len(plan) > 1:
                     result["suggested_approach"] = (
                         f"Current plan has {len(plan)} steps. "
@@ -911,24 +899,22 @@ class AgentLoopExecutor:
                         "Single-step plan failed. Consider using different tools or approach."
                     )
                 else:
-                    result["suggested_approach"] = "No plan exists. Consider creating a step-by-step plan."
+                    result["suggested_approach"] = (
+                        "No plan exists. Consider creating a step-by-step plan."
+                    )
             else:
                 result["replan_needed"] = False
-                # Reset replan count on successful execution
                 result["replan_count"] = 0
 
-            # --- Episode Finalization ---
-            # Save final episode state after execution completes
+            # Episode finalization
             if episode is not None and sm is not None:
                 try:
-                    # Determine final phase based on execution result
                     if result.get("agent_loop_error"):
                         final_phase = EpisodeState.PHASE_FAILED
                     elif result.get("replan_needed"):
                         final_phase = EpisodeState.PHASE_REPLANNING
                     else:
                         final_phase = EpisodeState.PHASE_COMPLETED
-                    
                     sm.save_episode_state(
                         phase=final_phase,
                         replan_count=result.get("replan_count", 0),
@@ -938,84 +924,49 @@ class AgentLoopExecutor:
                         messages=llm_messages if config.get("save_messages_in_episode", False) else None,
                         add_checkpoint=True,
                     )
-                    # Add episode info to result for reference
                     result["episode_id"] = episode.episode_id
                 except Exception as e:
                     logger.warning(f"Failed to save final episode state: {e}")
 
             return result
 
-        # --- Execute with optional timeout ---
         try:
             if timeout > 0:
                 result = await asyncio.wait_for(_execute(), timeout=timeout)
             else:
                 result = await _execute()
-
         except asyncio.TimeoutError:
             result = input_data.copy()
             result["agent_loop_error"] = f"Agent loop timed out after {timeout}s"
             result["iterations"] = 0
             result["agent_loop_trace"] = agent_loop_trace
-            
-            # Re-planning needed due to timeout
             plan = input_data.get("plan", [])
             result["replan_needed"] = True
             result["replan_count"] = replan_count + 1
             result["replan_reason"] = f"Execution timed out after {timeout} seconds"
-            if plan and len(plan) > 1:
-                result["suggested_approach"] = (
-                    f"Plan with {len(plan)} steps took too long. "
-                    "Consider breaking into smaller chunks with shorter timeout."
-                )
-            else:
-                result["suggested_approach"] = "Execution timed out. Consider simplifying the approach."
-            
+            result["suggested_approach"] = (
+                f"Plan with {len(plan)} steps took too long. "
+                "Consider breaking into smaller chunks with shorter timeout."
+                if plan and len(plan) > 1
+                else "Execution timed out. Consider simplifying the approach."
+            )
+            self._thinking_steps = thinking_steps
             return result
-
         except Exception as e:
             result = input_data.copy()
             result["agent_loop_error"] = str(e)
             result["iterations"] = 0
             result["agent_loop_trace"] = agent_loop_trace
-            
-            # Re-planning needed due to error
-            plan = input_data.get("plan", [])
             result["replan_needed"] = True
             result["replan_count"] = replan_count + 1
             result["replan_reason"] = f"Unexpected error: {str(e)}"
             result["suggested_approach"] = "Review plan and try alternative approach."
-            
+            self._thinking_steps = thinking_steps
             return result
 
-        # --- Episode Finalization ---
-        # Save final episode state after execution completes
-        if episode is not None and sm is not None:
-            try:
-                # Determine final phase based on execution result
-                if result.get("agent_loop_error"):
-                    final_phase = EpisodeState.PHASE_FAILED
-                elif result.get("replan_needed"):
-                    final_phase = EpisodeState.PHASE_REPLANNING
-                else:
-                    final_phase = EpisodeState.PHASE_COMPLETED
-                
-                sm.save_episode_state(
-                    phase=final_phase,
-                    replan_count=result.get("replan_count", 0),
-                    completed_steps=result.get("completed_steps", []),
-                    current_step=result.get("current_step", 0),
-                    plan=result.get("plan", []),
-                    messages=llm_messages if config.get("save_messages_in_episode", False) else None,
-                    add_checkpoint=True,
-                )
-                # Add episode info to result for reference
-                result["episode_id"] = episode.episode_id
-            except Exception as e:
-                logger.warning(f"Failed to save final episode state: {e}")
-
-        # Attach trace to final result
         result["agent_loop_trace"] = agent_loop_trace
+        # Fix 2: assign thinking_steps to instance attr at the end of all exit paths
+        self._thinking_steps = thinking_steps
         return result
 
     async def send(self, processed_data: dict) -> dict:
@@ -1034,34 +985,35 @@ async def get_executor_class(node_type_id: str):
     return None
 
 
+# ---------------------------------------------------------------------------
+# REPL Environment (setup node for RLM processing)
+# ---------------------------------------------------------------------------
+
 class REPLEnvironmentExecutor:
     """
-    REPL Environment Node - Initializes a persistent REPL state.
-    
-    This is the foundation of RLM processing. It:
-    1. Extracts user input from messages
-    2. Stores it as prompt_var in repl_state (NOT in context window)
-    3. Builds metadata-only system prompt
-    4. Initializes full repl_state structure including recursion tracking
-    
+    REPL Environment Node — initializes a persistent REPL state.
+
+    1. Extracts user input from messages.
+    2. Stores it as prompt_var in repl_state (NOT in context window).
+    3. Builds a metadata-only system prompt.
+    4. Initializes full repl_state including recursion tracking.
+
     Config:
-        - max_recursion_depth (int, default 3): Max sub-call depth
-        - max_cost_usd (float, default 1.0): Hard cost stop
-        - max_sub_calls (int, default 50): Max total sub-calls
-        - sub_call_model (str): Model for sub-calls (defaults to root model)
+        - max_recursion_depth (int, default 3)
+        - max_cost_usd (float, default 1.0)
+        - max_sub_calls (int, default 50)
+        - sub_call_model (str): model for sub-calls (defaults to root model)
     """
-    
+
     async def receive(self, input_data: dict, config: dict = None) -> dict:
         if input_data is None:
             return None
-            
+
         config = config or {}
         messages = input_data.get("messages", [])
-        
-        # Extract user content
+
         user_content = self._extract_user_content(messages)
-        
-        # Build comprehensive repl_state
+
         repl_state = {
             "prompt_var": user_content,
             "prompt_length": len(user_content),
@@ -1078,8 +1030,7 @@ class REPLEnvironmentExecutor:
             "root_model": config.get("model") or config.get("root_model"),
             "sub_call_model": config.get("sub_call_model") or config.get("model"),
         }
-        
-        # Build metadata-only system prompt
+
         preview = user_content[:200] + "..." if len(user_content) > 200 else user_content
         system_content = self._build_repl_system_prompt({
             "prompt_length": len(user_content),
@@ -1088,21 +1039,17 @@ class REPLEnvironmentExecutor:
             "max_recursion_depth": repl_state["max_recursion_depth"],
             "max_sub_calls": repl_state["max_sub_calls"],
         })
-        
+
         result = input_data.copy()
         result["repl_state"] = repl_state
         result["_repl_initialized"] = True
-        
-        # Replace messages with metadata-only context
         result["messages"] = [
             {"role": "system", "content": system_content},
-            {"role": "user", "content": "Process the input using the REPL environment."}
+            {"role": "user", "content": "Process the input using the REPL environment."},
         ]
-        
         return result
-    
+
     def _extract_user_content(self, messages: list) -> str:
-        """Extract the actual user content from messages."""
         for msg in messages:
             if msg.get("role") == "user":
                 content = msg.get("content", "")
@@ -1111,7 +1058,6 @@ class REPLEnvironmentExecutor:
         return " ".join(m.get("content", "") for m in messages if m.get("role") == "user")
 
     def _classify_content(self, content: str) -> str:
-        """Classify the type of content for metadata."""
         content_lower = content.lower()
         if "code" in content_lower or "def " in content_lower:
             return "code"
@@ -1122,7 +1068,6 @@ class REPLEnvironmentExecutor:
         return "standard"
 
     def _build_repl_system_prompt(self, metadata: dict) -> str:
-        """Build the system prompt for REPL mode - metadata only, no actual content."""
         return f"""You are operating in a REPL environment.
 
 The user's input has been loaded as a variable. DO NOT try to process it all at once.
@@ -1136,7 +1081,7 @@ Environment state:
 
 Available functions:
 - peek(start, end): View a slice of the prompt by character position
-- search(pattern): Find regex matches in the prompt  
+- search(pattern): Find regex matches in the prompt
 - chunk(size, overlap): Split prompt into chunks of given size
 - sub_call(prompt): Recursively call an LLM on any string
 - set_variable(name, value): Store intermediate results
@@ -1153,82 +1098,49 @@ WARNING: Do not exceed max_recursion_depth or max_sub_calls or execution will be
         return processed_data
 
 
-class RLMAgentLoopExecutor:
+# ---------------------------------------------------------------------------
+# RLM Agent Loop
+# ---------------------------------------------------------------------------
+
+class RLMAgentLoopExecutor(AgentBaseExecutor):
     """
     RLM (Recursive Language Model) variant of the agent loop.
-    
+
     Key differences from standard AgentLoopExecutor:
-    1. REPL state is maintained across iterations - input stored as variable, not in context
-    2. Tool outputs are stored as variables in repl_state, NOT injected into messages
-    3. Only metadata about stdout goes back into LLM history (constant size)
-    4. Terminates when set_final() is called
-    
-    This architecture enables processing arbitrarily long inputs (10M+ tokens) by:
-    - Storing the actual content in repl_state, not in messages
-    - Only passing constant-size metadata to the LLM
-    - Allowing the LLM to write code to examine/decompose content via tools
+    1. REPL state is maintained across iterations — input stored as variable, not in context.
+    2. Tool outputs are stored as variables in repl_state, NOT injected into messages.
+    3. Only metadata about stdout goes back into LLM history (constant size).
+    4. Terminates when set_final() is called.
+
+    This architecture enables processing arbitrarily long inputs by keeping the
+    LLM context window at constant size regardless of input or output length.
     """
-    
-    # Class-level cache for tools
-    _tools_cache = {"mtime": 0.0, "data": {}}
-    _library_cache = {"mtime": 0.0, "data": {}}
 
-    def __init__(self):
-        self.llm = LLMBridge(
-            base_url=settings.get("llm_api_url"),
-            api_key=settings.get("llm_api_key")
-        )
-        from modules.tools.sandbox import ToolSandbox
-        self._sandbox = ToolSandbox(timeout=30.0)
-        # Initialize session manager for tracing
-        try:
-            self._session_manager = get_session_manager()
-        except Exception:
-            self._session_manager = None
-
-    def _estimate_tokens(self, text: str) -> int:
-        """Estimate token count: ~4 characters per token."""
-        if not text:
-            return 0
-        return len(text) // 4
-
-    def _load_tools(self):
-        """Load tool definitions from tools.json with mtime-based caching."""
-        try:
-            if os.path.exists(TOOLS_FILE):
-                mtime = os.path.getmtime(TOOLS_FILE)
-                if mtime > self.__class__._tools_cache["mtime"]:
-                    with open(TOOLS_FILE, "r") as f:
-                        self.__class__._tools_cache["data"] = json.load(f)
-                    self.__class__._tools_cache["mtime"] = mtime
-                return self.__class__._tools_cache["data"]
-        except (json.JSONDecodeError, OSError, KeyError) as e:
-            logger.warning(f"Failed to load tools: {e}")
-        return {}
+    _library_cache: dict = {"mtime": 0.0, "data": {}}
 
     def _load_tool_library(self):
-        """Load tool implementations from RLM library directory with mtime-based caching."""
+        """Load RLM tool implementations from both LIBRARY_DIR and RLM_LIBRARY_DIR.
+
+        RLM tools take priority over standard tools on name collision.
+        Uses directory mtime for cache invalidation.
+        """
         try:
-            # Load from RLM library directory (RLM-specific tools: Peek, Search, Chunk, etc.)
             if os.path.exists(RLM_LIBRARY_DIR):
                 dir_mtime = os.path.getmtime(RLM_LIBRARY_DIR)
-                # Check if cache needs refresh (compare with RLM library mtime)
-                cache_key = f"{RLM_LIBRARY_DIR}|{LIBRARY_DIR}"
                 if dir_mtime > self.__class__._library_cache.get("mtime", 0):
-                    library = {}
-                    # First load RLM-specific tools
+                    library: dict = {}
+                    # RLM-specific tools first
                     for filename in os.listdir(RLM_LIBRARY_DIR):
                         if filename.endswith(".py"):
                             tool_name = filename[:-3]
                             code_path = os.path.join(RLM_LIBRARY_DIR, filename)
                             with open(code_path, "r") as f:
                                 library[tool_name] = f.read()
-                    # Then load common tools from library (like SubCall)
+                    # Common tools from standard library (don't override RLM tools)
                     if os.path.exists(LIBRARY_DIR):
                         for filename in os.listdir(LIBRARY_DIR):
                             if filename.endswith(".py"):
                                 tool_name = filename[:-3]
-                                # Don't override RLM-specific tools
                                 if tool_name not in library:
                                     code_path = os.path.join(LIBRARY_DIR, filename)
                                     with open(code_path, "r") as f:
@@ -1239,51 +1151,42 @@ class RLMAgentLoopExecutor:
         except OSError as e:
             logger.warning(f"Failed to load RLM tool library: {e}")
         return {}
-    
+
     def _resolve_tool_name(self, func_name: str, tool_library: dict) -> str:
-        """
-        Resolve tool name with case-insensitive matching.
-        Returns the actual tool name from the library if found.
-        """
-        # Direct match
+        """Resolve tool name with case-insensitive and camelCase↔snake_case matching."""
         if func_name in tool_library:
             return func_name
-        
-        # Case-insensitive match
+
         func_lower = func_name.lower()
         for tool_name in tool_library:
             if tool_name.lower() == func_lower:
                 return tool_name
-        
-        # Snake case to CamelCase conversion (e.g., set_variable -> SetVariable)
-        parts = func_name.split('_')
-        camel_case = ''.join(p.capitalize() for p in parts)
-        if camel_case in tool_library:
-            return camel_case
-        
-        # Reverse: CamelCase to snake_case
-        snake_case = ''
+
+        # snake_case → CamelCase
+        camel = "".join(p.capitalize() for p in func_name.split("_"))
+        if camel in tool_library:
+            return camel
+
+        # CamelCase → snake_case
+        snake = ""
         for i, char in enumerate(func_name):
             if char.isupper() and i > 0:
-                snake_case += '_'
-            snake_case += char.lower()
-        if snake_case in tool_library:
-            return snake_case
-        
-        return func_name  # Return original if not found
+                snake += "_"
+            snake += char.lower()
+        if snake in tool_library:
+            return snake
+
+        return func_name
 
     def _extract_user_content(self, messages: list) -> str:
-        """Extract the actual user content from messages."""
         for msg in messages:
             if msg.get("role") == "user":
                 content = msg.get("content", "")
                 if content:
                     return content
-        # Fallback: concatenate all user messages
         return " ".join(m.get("content", "") for m in messages if m.get("role") == "user")
 
     def _classify_content(self, content: str) -> str:
-        """Classify the type of content for metadata."""
         content_lower = content.lower()
         if "code" in content_lower or "def " in content_lower or "function" in content_lower:
             return "code"
@@ -1291,11 +1194,9 @@ class RLMAgentLoopExecutor:
             return "large_document"
         elif len(content) > 10000:
             return "long_text"
-        else:
-            return "standard"
+        return "standard"
 
     def _build_repl_system_prompt(self, metadata: dict) -> str:
-        """Build the system prompt for REPL mode - metadata only, no actual content."""
         return f"""You are operating in a REPL environment.
 
 The user's input has been loaded as a variable. DO NOT try to process it all at once.
@@ -1307,7 +1208,7 @@ Environment state:
 
 Available functions:
 - peek(start, end): View a slice of the prompt by character position
-- search(pattern): Find regex matches in the prompt  
+- search(pattern): Find regex matches in the prompt
 - chunk(size, overlap): Split prompt into chunks of given size
 - sub_call(prompt): Recursively call an LLM on any string
 - set_variable(name, value): Store intermediate results
@@ -1319,61 +1220,58 @@ Store intermediate results in variables using set_variable().
 Call set_final() when complete."""
 
     def _init_repl_state(self, messages: list) -> tuple:
-        """
-        Initialize REPL state from messages.
-        
-        Returns (repl_state, metadata, new_messages)
+        """Initialize REPL state from messages.
+
+        Returns (repl_state, metadata, new_messages).
         """
         user_content = self._extract_user_content(messages)
-        
-        # Store content as environment variable, NOT in context
+
         repl_state = {
             "prompt_var": user_content,
             "variables": {},
             "stdout_history": [],
             "final": None,
-            "iteration": 0
+            "iteration": 0,
         }
-        
-        # Metadata that the LLM actually sees
+
         preview = user_content[:200] + "..." if len(user_content) > 200 else user_content
         metadata = {
             "prompt_length": len(user_content),
             "prompt_preview": preview,
             "prompt_type": self._classify_content(user_content),
         }
-        
-        # Build new messages with REPL system prompt only
+
         system_content = self._build_repl_system_prompt(metadata)
         new_messages = [
             {"role": "system", "content": system_content},
-            {"role": "user", "content": "Process the input using the REPL environment. Use tools to examine the content incrementally and call set_final() when done."}
+            {
+                "role": "user",
+                "content": (
+                    "Process the input using the REPL environment. "
+                    "Use tools to examine the content incrementally and call set_final() when done."
+                ),
+            },
         ]
-        
         return repl_state, metadata, new_messages
 
-    async def _execute_tool(self, tool_call: dict, tool_library: dict, repl_state: dict) -> dict:
-        """Execute a tool call - sub_call is handled specially as a built-in."""
+    async def _execute_tool(
+        self, tool_call: dict, tool_library: dict, repl_state: dict
+    ) -> dict:
+        """Execute a tool call — SubCall is intercepted as an async built-in."""
         func_name = tool_call["function"]["name"]
         try:
             args = json.loads(tool_call["function"]["arguments"])
         except (json.JSONDecodeError, KeyError):
             args = {}
 
-        success = False
-        
-        # CRITICAL: sub_call is a built-in, NOT a library tool
-        # It cannot be executed via exec() because it requires async LLM calls
-        # Using run_until_complete inside an already-running event loop causes deadlock
-        if func_name.lower() == "subcall" or func_name.lower() == "sub_call":
+        # SubCall requires an async LLM call — cannot go through sandbox exec()
+        if func_name.lower() in ("subcall", "sub_call"):
             return await self._execute_sub_call(args, repl_state)
-        
-        # Resolve tool name with case-insensitive matching
+
         actual_tool_name = self._resolve_tool_name(func_name, tool_library)
-        
-        # For all other tools, use sandbox execution
         args["_repl_state"] = repl_state
-        
+
+        success = False
         if actual_tool_name in tool_library:
             code = tool_library[actual_tool_name]
             try:
@@ -1382,12 +1280,10 @@ Call set_final() when complete."""
                     None,
                     self._sandbox.execute,
                     code,
-                    {"args": args}
+                    {"args": args},
                 )
                 output = result.get("result", "Success (no result returned)")
                 success = True
-                
-                # Update repl_state if tool returned state update
                 if isinstance(result.get("_repl_state_update"), dict):
                     repl_state.update(result["_repl_state_update"])
             except Exception as e:
@@ -1400,150 +1296,8 @@ Call set_final() when complete."""
             "role": "tool",
             "name": func_name,
             "content": str(output),
-            "success": success
+            "success": success,
         }
-    
-    async def _execute_sub_call(self, args: dict, repl_state: dict) -> dict:
-        """
-        Execute sub_call as a built-in - NOT via exec().
-        
-        This is the KEY RLM feature that enables recursive processing.
-        Must be async to avoid deadlock from run_until_complete in running loop.
-        """
-        # Check guardrails first
-        if repl_state.get("sub_call_count", 0) >= repl_state.get("max_sub_calls", 50):
-            return {
-                "tool_call_id": "",
-                "role": "tool",
-                "name": "sub_call",
-                "content": "Error: max_sub_calls limit reached",
-                "success": False
-            }
-        
-        if repl_state.get("recursion_depth", 0) >= repl_state.get("max_recursion_depth", 3):
-            return {
-                "tool_call_id": "",
-                "role": "tool",
-                "name": "sub_call",
-                "content": "Error: max_recursion_depth limit reached",
-                "success": False
-            }
-        
-        # Check cost limit
-        if repl_state.get("estimated_cost", 0) >= repl_state.get("max_cost_usd", 1.0):
-            return {
-                "tool_call_id": "",
-                "role": "tool",
-                "name": "sub_call",
-                "content": "Error: max_cost_usd limit reached",
-                "success": False
-            }
-        
-        prompt = args.get("prompt", "")
-        model = args.get("model") or repl_state.get("sub_call_model") or settings.get("default_model")
-        max_tokens = args.get("max_tokens", 2000)
-        
-        if not prompt:
-            return {
-                "tool_call_id": "",
-                "role": "tool",
-                "name": "sub_call",
-                "content": "Error: No prompt provided for sub_call",
-                "success": False
-            }
-        
-        try:
-            # Increment counters BEFORE the call
-            repl_state["sub_call_count"] = repl_state.get("sub_call_count", 0) + 1
-            old_depth = repl_state.get("recursion_depth", 0)
-            repl_state["recursion_depth"] = old_depth + 1
-            
-            # Make the async LLM call properly (not via run_until_complete)
-            response = await self.llm.chat_completion(
-                messages=[{"role": "user", "content": prompt}],
-                model=model,
-                max_tokens=max_tokens
-            )
-            
-            # Restore depth after call
-            repl_state["recursion_depth"] = old_depth
-            
-            if response and "choices" in response:
-                content = response["choices"][0]["message"].get("content", "")
-                
-                # Estimate cost (rough: ~4 chars per token, $0.001 per 1K tokens)
-                estimated_tokens = len(prompt) // 4 + max_tokens
-                cost = (estimated_tokens / 1000) * 0.001
-                repl_state["estimated_cost"] = repl_state.get("estimated_cost", 0) + cost
-                
-                return {
-                    "tool_call_id": "",
-                    "role": "tool",
-                    "name": "sub_call",
-                    "content": content,
-                    "success": True,
-                    "model_used": model,
-                    "sub_call_count": repl_state["sub_call_count"],
-                    "estimated_cost": repl_state["estimated_cost"]
-                }
-            else:
-                return {
-                    "tool_call_id": "",
-                    "role": "tool",
-                    "name": "sub_call",
-                    "content": f"Error in sub_call: {response.get('error', 'Unknown error') if response else 'No response'}",
-                    "success": False
-                }
-        except Exception as e:
-            repl_state["recursion_depth"] = old_depth  # Restore on error
-            return {
-                "tool_call_id": "",
-                "role": "tool",
-                "name": "sub_call",
-                "content": f"Error in sub_call: {str(e)}",
-                "success": False
-            }
-
-    async def _llm_with_retry(
-        self,
-        messages: list,
-        model: str,
-        temperature: float,
-        max_tokens: int,
-        tools: list,
-        max_retries: int,
-        retry_delay: float
-    ) -> dict:
-        """Call LLM with exponential backoff retry."""
-        last_error = "Unknown error"
-
-        for attempt in range(max_retries + 1):
-            if attempt > 0:
-                delay = retry_delay * (2 ** (attempt - 1))
-                await asyncio.sleep(delay)
-
-            try:
-                response = await self.llm.chat_completion(
-                    messages=messages,
-                    model=model,
-                    temperature=temperature,
-                    max_tokens=max_tokens,
-                    tools=tools if tools else None
-                )
-
-                if response and "choices" in response and not response.get("error"):
-                    return response
-
-                if response:
-                    last_error = response.get("error", "Response missing 'choices' key")
-                else:
-                    last_error = "LLM returned None"
-
-            except Exception as e:
-                last_error = str(e)
-
-        # Return None instead of error dict so caller can handle gracefully
-        return None
 
     async def _run_rlm_loop(
         self,
@@ -1553,53 +1307,45 @@ Call set_final() when complete."""
         tool_library: dict,
         model: str,
         config: dict,
-        trace: list
+        trace: list,
     ) -> tuple:
-        """
-        Core RLM loop: LLM generates code → executes tools → only metadata goes back.
-        
-        Key difference from standard loop:
-        - Tool outputs stored in repl_state["variables"], NOT in messages
-        - Only constant-size metadata appended to messages
-        - Terminates when repl_state["final"] is set
+        """Core RLM loop: LLM generates code → executes tools → only metadata goes back.
+
+        Key difference from the standard loop: tool outputs are stored in
+        repl_state["variables"], NOT injected into messages.  Terminates when
+        repl_state["final"] is set via set_final().
+
+        Returns (final_answer, final_repl_state).
         """
         max_iterations = config.get("max_iterations", 20)
         stdout_preview_length = config.get("stdout_preview_length", 500)
         max_llm_retries = config.get("max_llm_retries", 3)
         retry_delay = config.get("retry_delay", 1.0)
-        temperature = config.get("temperature", 0.1)  # Low temp for code generation
+        temperature = config.get("temperature", 0.1)
         max_tokens = config.get("max_tokens", 2000)
 
-        # Build initial LLM messages
         llm_messages = initial_messages.copy()
 
         for iteration in range(max_iterations):
             repl_state["iteration"] = iteration
-            iteration_trace = {
-                "iteration": iteration,
-                "tool_calls": [],
-                "errors": []
-            }
+            iteration_trace = {"iteration": iteration, "tool_calls": [], "errors": []}
 
-            # Inject current REPL state as metadata (small, constant-size)
             state_metadata = {
                 "iteration": iteration,
                 "variables_set": list(repl_state["variables"].keys()),
                 "stdout_entries": len(repl_state["stdout_history"]),
                 "last_stdout_preview": (
                     repl_state["stdout_history"][-1][:stdout_preview_length]
-                    if repl_state["stdout_history"] else "none"
+                    if repl_state["stdout_history"]
+                    else "none"
                 ),
-                "final_set": repl_state["final"] is not None
+                "final_set": repl_state["final"] is not None,
             }
 
-            # Add state metadata to messages (NOT the actual content)
-            messages_with_state = llm_messages + [{
-                "role": "system",
-                "content": f"REPL state: {json.dumps(state_metadata)}"
-            }]
+            messages_with_state = llm_messages + [
+                {"role": "system", "content": f"REPL state: {json.dumps(state_metadata)}"}
+            ]
 
-            # LLM generates code
             response = await self._llm_with_retry(
                 messages=messages_with_state,
                 model=model,
@@ -1607,11 +1353,15 @@ Call set_final() when complete."""
                 max_tokens=max_tokens,
                 tools=tools_list,
                 max_retries=max_llm_retries,
-                retry_delay=retry_delay
+                retry_delay=retry_delay,
             )
 
             if not response or "choices" not in response:
-                error_msg = response.get("error", "LLM returned no choices") if response else "LLM returned None"
+                error_msg = (
+                    response.get("error", "LLM returned no choices")
+                    if response
+                    else "LLM returned None"
+                )
                 iteration_trace["errors"].append(error_msg)
                 trace.append(iteration_trace)
                 break
@@ -1620,21 +1370,17 @@ Call set_final() when complete."""
             tool_calls = assistant_message.get("tool_calls", [])
 
             if not tool_calls:
-                # LLM returned text instead of code — capture as stdout
                 content = assistant_message.get("content", "")
                 if content:
                     repl_state["stdout_history"].append(content)
-                    # Only metadata goes back, NOT the full content
                     llm_messages.append({
-                        "role": "assistant", 
-                        "content": f"[stdout: {len(content)} chars, preview: {content[:100]}...]"
+                        "role": "assistant",
+                        "content": f"[stdout: {len(content)} chars, preview: {content[:100]}...]",
                     })
-                # Check if final was set in the text response
                 if repl_state.get("final") is not None:
                     break
                 break
 
-            # Execute tool calls, pass repl_state through
             for tool_call in tool_calls:
                 tool_name = tool_call.get("function", {}).get("name", "unknown")
                 iteration_trace["tool_calls"].append(tool_name)
@@ -1644,8 +1390,7 @@ Call set_final() when complete."""
                 output_content = tool_result["content"]
                 repl_state["stdout_history"].append(str(output_content))
 
-                # CRITICAL: Only metadata goes into LLM history
-                # This is what prevents context rot!
+                # Only metadata enters LLM history — prevents context growth
                 stdout_metadata = (
                     f"[stdout: {len(str(output_content))} chars, "
                     f"preview: {str(output_content)[:stdout_preview_length]}...]"
@@ -1653,14 +1398,13 @@ Call set_final() when complete."""
                 llm_messages.append({
                     "role": "tool",
                     "tool_call_id": tool_call.get("id", ""),
-                    "content": stdout_metadata  # NOT the full output
+                    "content": stdout_metadata,
                 })
 
-            # Check if final answer has been set
             if repl_state.get("final") is not None:
                 trace.append(iteration_trace)
                 break
-                
+
             trace.append(iteration_trace)
 
         return repl_state.get("final"), repl_state
@@ -1668,32 +1412,44 @@ Call set_final() when complete."""
     async def receive(self, input_data: dict, config: dict = None) -> dict:
         """
         RLM Agent Loop: processes arbitrarily long inputs via REPL environment.
-        
+
         Input:
             - messages: conversation history (must include at least one user message)
-            
+
         Config:
-            - max_iterations (int, default 20): Maximum RLM iterations
-            - max_tokens (int, default 2000): Max tokens per LLM call
-            - temperature (float, default 0.1): Low temp for code generation
-            - max_llm_retries (int, default 3): Retries on LLM failure
-            - retry_delay (float, default 1.0): Base delay for backoff
-            - stdout_preview_length (int, default 500): Preview size in metadata
-            - sub_call_model (str, optional): Model for sub_call tool
-            - model (str, optional): Main model (defaults to settings.get("default_model"))
+            - max_iterations (int, default 20)
+            - max_tokens (int, default 2000)
+            - temperature (float, default 0.1): low temp for code generation
+            - max_llm_retries (int, default 3)
+            - retry_delay (float, default 1.0)
+            - stdout_preview_length (int, default 500)
+            - sub_call_model (str, optional)
+            - model (str, optional)
 
         Output:
-            - content: The final answer from set_final()
-            - repl_state: Final REPL state for debugging
-            - iterations: Number of iterations executed
-            - rlm_trace: Per-iteration details
+            - content: final answer from set_final()
+            - repl_state: final REPL state summary (for debugging)
+            - iterations: number of iterations executed
+            - rlm_trace: per-iteration details
+            - agent_loop_trace: same as rlm_trace (for API consistency)
         """
         if input_data is None:
             input_data = {}
-
         config = config or {}
 
-        # Configuration
+        # --- Session initialization ---
+        try:
+            sm = get_session_manager()
+            sm.load_or_create_session()
+            sm.log_agent_event("agent_start", {
+                "input_keys": list(input_data.keys()),
+                "config_keys": list(config.keys()),
+            })
+        except Exception as e:
+            logger.warning(f"[RLMAgent] Failed to initialize session manager: {e}")
+            sm = None
+
+        # --- Read configuration ---
         max_iterations = int(config.get("max_iterations", 20))
         max_tokens = int(config.get("max_tokens", 2000))
         temperature = float(config.get("temperature", 0.1))
@@ -1701,8 +1457,76 @@ Call set_final() when complete."""
         retry_delay = float(config.get("retry_delay", 1.0))
         stdout_preview_length = int(config.get("stdout_preview_length", 500))
         model = config.get("model") or settings.get("default_model")
+        timeout = float(config.get("timeout", 120))
+        max_replan_depth = int(config.get("max_replan_depth", 3))
+        enable_episode = config.get("enable_episode_persistence", False)
+        episode_id = config.get("episode_id")
+        checkpoint_interval = config.get("checkpoint_interval", 1)
+        if checkpoint_interval <= 0:
+            logger.warning("[RLMAgent] checkpoint_interval must be >= 1, defaulting to 1")
+            checkpoint_interval = 1
 
-        # Guard: no messages → return input unchanged
+        # --- Re-planning depth tracking ---
+        replan_count = int(input_data.get("replan_count", 0))
+
+        # --- Episode Persistence Support ---
+        episode = None
+        iteration_count = 0
+
+        if enable_episode and sm:
+            try:
+                existing_episode = sm.load_episode_state()
+                should_resume = (
+                    existing_episode
+                    and existing_episode.phase not in [
+                        EpisodeState.PHASE_COMPLETED,
+                        EpisodeState.PHASE_FAILED,
+                    ]
+                    and (episode_id is None or existing_episode.episode_id == episode_id)
+                )
+                if should_resume:
+                    episode = existing_episode
+                    replan_count = episode.replan_count
+                    input_data.setdefault("plan", episode.plan)
+                    input_data.setdefault("completed_steps", episode.completed_steps)
+                    input_data.setdefault("current_step", episode.current_step)
+                    iteration_count = len(episode.checkpoints)
+                    if episode.messages and config.get("resume_from_episode_messages", True):
+                        input_data.setdefault("messages", episode.messages)
+                    episode.update_phase(EpisodeState.PHASE_EXECUTING)
+                    logger.info(f"[RLMAgent] Resuming episode {episode.episode_id}")
+                elif episode_id or config.get("auto_create_episode", True):
+                    budgets = {
+                        "max_iterations": max_iterations,
+                        "max_replan_depth": max_replan_depth,
+                        "timeout": timeout,
+                    }
+                    episode = sm.create_episode(
+                        input_data={"initial_input": list(input_data.keys())},
+                        budgets=budgets,
+                        metadata={"episode_id": episode_id} if episode_id else {},
+                    )
+                    logger.info(f"[RLMAgent] Created new episode {episode.episode_id}")
+            except Exception as e:
+                logger.warning(f"[RLMAgent] Failed to load episode state: {e}")
+
+        # --- Re-planning depth guard ---
+        if max_replan_depth > 0 and replan_count >= max_replan_depth:
+            result = input_data.copy()
+            result["replan_needed"] = False
+            result["replan_depth_exceeded"] = True
+            result["agent_loop_error"] = (
+                f"Max re-planning depth ({max_replan_depth}) exceeded. Unable to complete task."
+            )
+            result["content"] = (
+                f"[Error: Task failed after {replan_count} re-planning attempts. "
+                "Unable to find viable execution path.]"
+            )
+            result["iterations"] = 0
+            result["rlm_trace"] = []
+            result["agent_loop_trace"] = []
+            return result
+
         messages = input_data.get("messages", [])
         if not messages:
             result = input_data.copy()
@@ -1710,12 +1534,8 @@ Call set_final() when complete."""
             result["rlm_error"] = "No messages provided"
             return result
 
-        # Step 1: Initialize REPL state
-        # This extracts the user content and stores it in repl_state
-        # instead of putting it in the LLM context
         repl_state, metadata, new_messages = self._init_repl_state(messages)
 
-        # Step 2: Load tools
         tools_def = self._load_tools()
         tools_list = []
         if tools_def:
@@ -1726,111 +1546,191 @@ Call set_final() when complete."""
                         tools_list.append(definition)
 
         tool_library = self._load_tool_library()
+        trace: list = []
 
-        # Step 3: Run RLM loop
-        trace = []
-        final_result, final_state = await self._run_rlm_loop(
-            initial_messages=new_messages,
-            repl_state=repl_state,
-            tools_list=tools_list,
-            tool_library=tool_library,
-            model=model,
-            config=config,
-            trace=trace
-        )
+        async def _execute():
+            nonlocal iteration_count
 
-        # Step 4: Build result
-        result = input_data.copy()
-        result["content"] = final_result or ""
-        result["repl_state"] = {
-            "variables": final_state.get("variables", {}),
-            "iteration": final_state.get("iteration", 0),
-            "stdout_count": len(final_state.get("stdout_history", []))
-        }
-        result["iterations"] = final_state.get("iteration", 0) + 1
+            final_result, final_state = await self._run_rlm_loop(
+                initial_messages=new_messages,
+                repl_state=repl_state,
+                tools_list=tools_list,
+                tool_library=tool_library,
+                model=model,
+                config={
+                    "max_iterations": max_iterations,
+                    "max_tokens": max_tokens,
+                    "temperature": temperature,
+                    "max_llm_retries": max_llm_retries,
+                    "retry_delay": retry_delay,
+                    "stdout_preview_length": stdout_preview_length,
+                },
+                trace=trace,
+            )
+
+            # Episode checkpoint
+            if episode is not None and sm is not None:
+                iterations = final_state.get("iteration", 0) + 1
+                iteration_count += iterations
+                if iteration_count % checkpoint_interval == 0 or iterations == 0:
+                    try:
+                        sm.save_episode_state(
+                            phase=EpisodeState.PHASE_EXECUTING,
+                            replan_count=replan_count,
+                            completed_steps=input_data.get("completed_steps", []),
+                            current_step=input_data.get("current_step", 0),
+                            plan=input_data.get("plan", []),
+                            messages=new_messages if config.get("save_messages_in_episode", False) else None,
+                            add_checkpoint=True,
+                        )
+                    except Exception as e:
+                        logger.warning(f"[RLMAgent] Failed to save episode checkpoint: {e}")
+
+            result = input_data.copy()
+            result["content"] = final_result or ""
+            result["repl_state"] = {
+                "variables": final_state.get("variables", {}),
+                "iteration": final_state.get("iteration", 0),
+                "stdout_count": len(final_state.get("stdout_history", [])),
+            }
+            result["iterations"] = final_state.get("iteration", 0) + 1
+            result["rlm_trace"] = trace
+            result["agent_loop_trace"] = trace
+            result["messages"] = new_messages
+
+            if not final_result:
+                result["rlm_error"] = "No final answer set — max iterations reached or error"
+
+            # Re-planning detection
+            actually_failed = not final_result
+
+            plan = input_data.get("plan", [])
+            current_step = input_data.get("current_step", 0)
+
+            if actually_failed:
+                result["replan_needed"] = True
+                result["replan_count"] = replan_count + 1
+                result["replan_reason"] = (
+                    "RLM agent produced no final answer (max iterations reached or set_final not called)"
+                )
+                if plan and len(plan) > 1:
+                    result["suggested_approach"] = (
+                        f"Current plan has {len(plan)} steps. "
+                        f"Consider breaking into smaller sub-tasks or simplifying step {current_step + 1}."
+                    )
+                elif plan:
+                    result["suggested_approach"] = (
+                        "Single-step plan failed. Consider using different tools or approach."
+                    )
+                else:
+                    result["suggested_approach"] = (
+                        "No plan exists. Consider creating a step-by-step plan."
+                    )
+            else:
+                result["replan_needed"] = False
+                result["replan_count"] = 0
+
+            # Episode finalization
+            if episode is not None and sm is not None:
+                try:
+                    if result.get("agent_loop_error"):
+                        final_phase = EpisodeState.PHASE_FAILED
+                    elif result.get("replan_needed"):
+                        final_phase = EpisodeState.PHASE_REPLANNING
+                    else:
+                        final_phase = EpisodeState.PHASE_COMPLETED
+                    sm.save_episode_state(
+                        phase=final_phase,
+                        replan_count=result.get("replan_count", 0),
+                        completed_steps=result.get("completed_steps", []),
+                        current_step=result.get("current_step", 0),
+                        plan=result.get("plan", []),
+                        messages=new_messages if config.get("save_messages_in_episode", False) else None,
+                        add_checkpoint=True,
+                    )
+                    result["episode_id"] = episode.episode_id
+                except Exception as e:
+                    logger.warning(f"[RLMAgent] Failed to save final episode state: {e}")
+
+            return result
+
+        try:
+            if timeout > 0:
+                result = await asyncio.wait_for(_execute(), timeout=timeout)
+            else:
+                result = await _execute()
+        except asyncio.TimeoutError:
+            result = input_data.copy()
+            result["agent_loop_error"] = f"RLM agent timed out after {timeout}s"
+            result["iterations"] = 0
+            result["rlm_trace"] = trace
+            result["agent_loop_trace"] = trace
+            plan = input_data.get("plan", [])
+            result["replan_needed"] = True
+            result["replan_count"] = replan_count + 1
+            result["replan_reason"] = f"Execution timed out after {timeout} seconds"
+            result["suggested_approach"] = (
+                f"Plan with {len(plan)} steps took too long. "
+                "Consider breaking into smaller chunks with shorter timeout."
+                if plan and len(plan) > 1
+                else "Execution timed out. Consider simplifying the approach."
+            )
+            return result
+        except Exception as e:
+            result = input_data.copy()
+            result["agent_loop_error"] = str(e)
+            result["iterations"] = 0
+            result["rlm_trace"] = trace
+            result["agent_loop_trace"] = trace
+            result["replan_needed"] = True
+            result["replan_count"] = replan_count + 1
+            result["replan_reason"] = f"Unexpected error: {str(e)}"
+            result["suggested_approach"] = "Review plan and try alternative approach."
+            return result
+
         result["rlm_trace"] = trace
-        result["messages"] = new_messages  # Return the REPL messages (not full history)
-        
-        if not final_result:
-            result["rlm_error"] = "No final answer set - max iterations reached or error"
-
+        result["agent_loop_trace"] = trace
         return result
 
     async def send(self, processed_data: dict) -> dict:
         return processed_data
 
 
-class HybridAgentExecutor:
+# ---------------------------------------------------------------------------
+# Hybrid Agent Loop
+# ---------------------------------------------------------------------------
+
+class HybridAgentExecutor(AgentBaseExecutor):
     """
-    Hybrid Agent Loop — standard tool calling combined with RLM-style adaptive output routing.
+    Hybrid Agent Loop — standard tool calling with RLM-style adaptive output routing.
 
-    Small tool outputs (≤ large_output_threshold chars) are placed inline in messages so the
-    LLM can read them directly.  Large tool outputs are automatically stored in
-    repl_state["variables"] and only a compact metadata stub (variable name + preview) enters
-    the conversation history.  The LLM retrieves stored data on demand via GetVariable and
-    SetVariable, which are available alongside the full standard tool library.
+    Small tool outputs (≤ large_output_threshold chars) are placed inline in messages
+    so the LLM can read them directly.  Large tool outputs are stored in
+    repl_state["variables"] and only a compact metadata stub enters conversation
+    history.  The LLM retrieves stored data on demand via GetVariable, Peek, Search,
+    Chunk, or SetVariable.
 
-    RLM tools that operate on prompt_var (Peek, Search, Chunk, SubCall, SetFinal) are excluded
-    because prompt_var is not initialised in this executor — those tools would silently return
-    empty results and confuse the LLM.
+    SetFinal is excluded because hybrid uses the no-tool-calls termination convention.
+    All other RLM tools (Peek, Search, Chunk, GetVariable, SetVariable, SubCall) work
+    alongside the full standard tool library.
 
-    Benefits over the standard AgentLoopExecutor:
-    - Context never grows unboundedly — no compaction pass needed.
-    - Standard tools and RLM variable-access tools (GetVariable, SetVariable) coexist.
+    Advantages over the standard agent loop:
+    - Context never grows unboundedly from tool outputs — no compaction needed.
+    - Standard and RLM variable-access tools coexist in one tool set.
     - Handles tool outputs of arbitrary size without truncation.
+    - Full re-planning and episode persistence support (mirrors AgentLoopExecutor).
     """
 
-    # SetFinal changes the termination model — hybrid uses no-tool-calls convention instead.
-    # All other RLM tools (Peek, Search, Chunk, SubCall, GetVariable, SetVariable) work in
-    # hybrid: Peek/Search/Chunk now accept var_name to operate on stored variables; SubCall
-    # is intercepted as an async built-in (same approach as RLMAgentLoopExecutor).
     _EXCLUDED_TOOLS: frozenset = frozenset({"SetFinal"})
 
-    _tools_cache: dict = {"mtime": 0.0, "data": {}}
+    # Fix 3: retrieval tools that should never trigger adaptive routing
+    _RETRIEVAL_TOOLS: frozenset = frozenset({"GetVariable", "Peek", "Search", "Chunk"})
+
     _library_cache: dict = {"mtime": 0.0, "data": {}, "file_mtimes": {}}
-
-    def __init__(self):
-        self.llm = LLMBridge(
-            base_url=settings.get("llm_api_url"),
-            api_key=settings.get("llm_api_key"),
-        )
-        self._sandbox = ToolSandbox(timeout=30.0)
-        try:
-            self._session_manager = get_session_manager()
-        except Exception:
-            self._session_manager = None
-
-    # ------------------------------------------------------------------
-    # Shared helpers
-    # ------------------------------------------------------------------
-
-    def _build_system_prompt(self, input_data: dict, config: dict) -> str:
-        parts = []
-        if config.get("include_plan_in_context", True):
-            v = input_data.get("plan_context")
-            if v:
-                parts.append(v)
-        if config.get("include_memory_context", True):
-            v = input_data.get("_memory_context")
-            if v:
-                parts.append(f"## User Memories\n{v}")
-        if config.get("include_knowledge_context", True):
-            v = input_data.get("knowledge_context")
-            if v:
-                parts.append(f"## Relevant Knowledge\n{v}")
-        if config.get("include_reasoning_context", True):
-            v = input_data.get("reasoning_context")
-            if v:
-                parts.append(f"## Previous Reasoning\n{v}")
-        return "\n\n".join(parts) if parts else ""
 
     @staticmethod
     def _build_variable_system_note(threshold: int) -> str:
-        """Return a brief system-level instruction explaining the variable storage system.
-
-        Injected once at the start of every hybrid run so the LLM knows what to
-        do when it sees a stub instead of inline tool output.
-        """
+        """Return a brief system-level instruction explaining the variable storage system."""
         return (
             "## Variable Storage\n"
             f"Tool outputs longer than {threshold:,} characters are stored as named variables "
@@ -1844,25 +1744,12 @@ class HybridAgentExecutor:
             "- SubCall(prompt=\"...\") — run a focused sub-prompt through the LLM"
         )
 
-    def _load_tools(self):
-        """Load tool schemas from tools.json (includes both standard + RLM schemas)."""
-        try:
-            if os.path.exists(TOOLS_FILE):
-                mtime = os.path.getmtime(TOOLS_FILE)
-                if mtime > self.__class__._tools_cache["mtime"]:
-                    with open(TOOLS_FILE, "r") as f:
-                        self.__class__._tools_cache["data"] = json.load(f)
-                    self.__class__._tools_cache["mtime"] = mtime
-                return self.__class__._tools_cache["data"]
-        except (json.JSONDecodeError, OSError, KeyError) as e:
-            logger.warning(f"[HybridAgent] Failed to load tools: {e}")
-        return {}
-
     def _load_tool_library(self):
         """Load implementations from both LIBRARY_DIR and RLM_LIBRARY_DIR.
 
-        Standard tools are loaded first; RLM tools (Peek, GetVariable, …) override
-        any name conflict so variable-access tools are always the RLM versions.
+        Standard tools are loaded first; RLM tools override any name conflict so
+        variable-access tools are always the RLM versions.  Uses file-level mtime
+        fingerprints for accurate cache invalidation.
         """
         try:
             current_files: dict = {}
@@ -1892,7 +1779,7 @@ class HybridAgentExecutor:
                             tool_name = filename[:-3]
                             with open(os.path.join(LIBRARY_DIR, filename), "r") as f:
                                 library[tool_name] = f.read()
-                # RLM tools override to ensure variable-access tools are correct versions
+                # RLM tools override standard tools on name collision
                 if os.path.exists(RLM_LIBRARY_DIR):
                     for filename in os.listdir(RLM_LIBRARY_DIR):
                         if filename.endswith(".py"):
@@ -1907,84 +1794,23 @@ class HybridAgentExecutor:
             logger.warning(f"[HybridAgent] Failed to load tool library: {e}")
         return {}
 
-    async def _llm_with_retry(
-        self,
-        messages: list,
-        model: str,
-        temperature: float,
-        max_tokens: int,
-        tools: list,
-        max_retries: int,
-        retry_delay: float,
-    ) -> dict:
-        last_error = "Unknown error"
-        for attempt in range(max_retries + 1):
-            if attempt > 0:
-                await asyncio.sleep(retry_delay * (2 ** (attempt - 1)))
-            try:
-                response = await self.llm.chat_completion(
-                    messages=messages,
-                    model=model,
-                    temperature=temperature,
-                    max_tokens=max_tokens,
-                    tools=tools if tools else None,
-                )
-                if response and "choices" in response and not response.get("error"):
-                    return response
-                last_error = (
-                    response.get("error", "Response missing 'choices' key")
-                    if response
-                    else "LLM returned None"
-                )
-            except Exception as e:
-                last_error = str(e)
-        logger.warning(
-            f"[HybridAgent] LLM failed after {max_retries + 1} attempts: {last_error}"
-        )
-        return None
+    def _variable_inventory_msg(self, repl_state: dict) -> dict | None:
+        """Return an ephemeral system message listing currently stored variables.
 
-    # ------------------------------------------------------------------
-    # Core: adaptive tool execution
-    # ------------------------------------------------------------------
-
-    async def _execute_sub_call(self, args: dict, repl_state: dict) -> dict:
-        """Execute SubCall as an async built-in (mirrors RLMAgentLoopExecutor).
-
-        Cannot run inside the sandbox because it needs an awaited LLM call.
+        Injected before each LLM call but never persisted in llm_messages, so
+        it adds zero tokens to the running context history.
         """
-        if repl_state.get("sub_call_count", 0) >= repl_state.get("max_sub_calls", 20):
-            return {"role": "tool", "name": "sub_call", "content": "Error: max_sub_calls limit reached", "success": False}
-        if repl_state.get("recursion_depth", 0) >= repl_state.get("max_recursion_depth", 3):
-            return {"role": "tool", "name": "sub_call", "content": "Error: max_recursion_depth limit reached", "success": False}
-        if repl_state.get("estimated_cost", 0.0) >= repl_state.get("max_cost_usd", 1.0):
-            return {"role": "tool", "name": "sub_call", "content": "Error: max_cost_usd limit reached", "success": False}
-
-        prompt = args.get("prompt", "")
-        if not prompt:
-            return {"role": "tool", "name": "sub_call", "content": "Error: No prompt provided for SubCall", "success": False}
-
-        model = args.get("model") or repl_state.get("sub_call_model") or settings.get("default_model")
-        max_tokens = int(args.get("max_tokens", 2000))
-
-        repl_state["sub_call_count"] = repl_state.get("sub_call_count", 0) + 1
-        old_depth = repl_state.get("recursion_depth", 0)
-        repl_state["recursion_depth"] = old_depth + 1
-        try:
-            response = await self.llm.chat_completion(
-                messages=[{"role": "user", "content": prompt}],
-                model=model,
-                max_tokens=max_tokens,
-            )
-            repl_state["recursion_depth"] = old_depth
-            if response and "choices" in response:
-                content = response["choices"][0]["message"].get("content", "")
-                estimated_tokens = len(prompt) // 4 + max_tokens
-                repl_state["estimated_cost"] = repl_state.get("estimated_cost", 0.0) + (estimated_tokens / 1000) * 0.001
-                return {"role": "tool", "name": "sub_call", "content": content, "success": True}
-            return {"role": "tool", "name": "sub_call", "content": "Error: SubCall LLM returned no choices", "success": False}
-        except Exception as e:
-            repl_state["recursion_depth"] = old_depth
-            return {"role": "tool", "name": "sub_call", "content": f"Error in SubCall: {e}", "success": False}
+        variables = repl_state.get("variables", {})
+        if not variables:
+            return None
+        lines = [f"  • {name}: {len(str(v)):,} chars" for name, v in variables.items()]
+        return {
+            "role": "system",
+            "content": (
+                "Stored variables (use GetVariable(name) to retrieve full content):\n"
+                + "\n".join(lines)
+            ),
+        }
 
     async def _execute_tool(
         self,
@@ -1995,8 +1821,8 @@ class HybridAgentExecutor:
     ) -> dict:
         """Execute one tool call with adaptive output routing.
 
-        If the output exceeds *large_output_threshold* characters it is stored
-        in repl_state["variables"] and a compact stub is returned to the LLM.
+        If the output exceeds *large_output_threshold* characters it is stored in
+        repl_state["variables"] and a compact stub is returned to the LLM instead.
         The LLM can retrieve the full content via GetVariable("<var_name>").
         """
         func_name = tool_call["function"]["name"]
@@ -2029,7 +1855,6 @@ class HybridAgentExecutor:
                 )
                 output = result.get("result", "Success (no result returned)")
                 success = True
-                # Honour state updates from SetVariable and similar tools
                 if isinstance(result.get("_repl_state_update"), dict):
                     repl_state.update(result["_repl_state_update"])
             except Exception as e:
@@ -2037,8 +1862,10 @@ class HybridAgentExecutor:
 
         output_str = str(output)
 
-        # Adaptive routing: store large outputs as named variables
-        if success and len(output_str) > large_output_threshold:
+        # Fix 3: adaptive routing only for non-retrieval tools
+        # Retrieval tools (GetVariable, Peek, Search, Chunk) must always return inline
+        # to avoid infinite indirection chains.
+        if success and len(output_str) > large_output_threshold and func_name not in self._RETRIEVAL_TOOLS:
             count = repl_state["_var_counts"].get(func_name, 0) + 1
             repl_state["_var_counts"][func_name] = count
             var_name = f"var_{func_name.lower()}_{count}"
@@ -2060,28 +1887,6 @@ class HybridAgentExecutor:
             "success": success,
         }
 
-    def _variable_inventory_msg(self, repl_state: dict) -> dict | None:
-        """Return an ephemeral system message listing currently stored variables.
-
-        Injected before each LLM call but never persisted in llm_messages, so
-        it adds zero tokens to the running context history.
-        """
-        variables = repl_state.get("variables", {})
-        if not variables:
-            return None
-        lines = [f"  • {name}: {len(str(v)):,} chars" for name, v in variables.items()]
-        return {
-            "role": "system",
-            "content": (
-                "Stored variables (use GetVariable(name) to retrieve full content):\n"
-                + "\n".join(lines)
-            ),
-        }
-
-    # ------------------------------------------------------------------
-    # Main loop
-    # ------------------------------------------------------------------
-
     async def _run_hybrid_loop(
         self,
         llm_messages: list,
@@ -2098,8 +1903,13 @@ class HybridAgentExecutor:
         large_output_threshold: int,
         trace: list,
         stream_queue: asyncio.Queue = None,
+        thinking_steps: list = None,
     ) -> tuple:
         """Core hybrid loop.  Returns (final_response, iterations, had_tool_error)."""
+        # Fix 2: use local thinking_steps instead of instance-level state
+        if thinking_steps is None:
+            thinking_steps = []
+
         iterations = 0
         final_response = None
         had_tool_error = False
@@ -2109,7 +1919,7 @@ class HybridAgentExecutor:
             iterations += 1
             iteration_trace = {"iteration": iterations, "tool_calls": [], "errors": []}
 
-            # Ephemeral variable inventory — not stored in history
+            # Ephemeral variable inventory — injected per call, never stored in history
             var_msg = self._variable_inventory_msg(repl_state)
             messages_for_llm = llm_messages + ([var_msg] if var_msg else [])
 
@@ -2138,7 +1948,6 @@ class HybridAgentExecutor:
             tool_calls = assistant_message.get("tool_calls", [])
             llm_messages.append(assistant_message)
 
-            # Accumulate thinking steps for real-time streaming
             if tool_calls:
                 for tc in tool_calls:
                     fn = tc.get("function", {})
@@ -2147,19 +1956,18 @@ class HybridAgentExecutor:
                     try:
                         args_dict = json.loads(args_raw)
                         args_display = ", ".join(
-                            f"{k}={repr(v)[:80]}" for k, v in args_dict.items()
+                            f"{k}={repr(v)[:80]}"
+                            for k, v in args_dict.items()
                             if k != "_repl_state"
                         )
                     except Exception:
                         args_display = args_raw[:160]
-                    self._thinking_steps.append({
-                        "type": "tool_call",
-                        "name": name,
-                        "content": f"{name}({args_display})",
-                    })
+                    thinking_steps.append(
+                        {"type": "tool_call", "name": name, "content": f"{name}({args_display})"}
+                    )
                 if stream_queue:
                     await stream_queue.put(
-                        {"type": "thinking", "content": list(self._thinking_steps)}
+                        {"type": "thinking", "content": list(thinking_steps)}
                     )
 
             if not tool_calls:
@@ -2185,23 +1993,18 @@ class HybridAgentExecutor:
                 seen_calls.add(call_sig)
 
                 iteration_trace["tool_calls"].append(tool_name)
-
                 tool_result = await self._execute_tool(
                     tool_call, tool_library, repl_state, large_output_threshold
                 )
 
-                # Append tool result to thinking trace
                 success = tool_result.get("success", False)
                 display = (tool_result.get("content") or "").strip()[:400]
-                self._thinking_steps.append({
-                    "type": "tool_result",
-                    "name": tool_name,
-                    "content": display,
-                    "success": success,
-                })
+                thinking_steps.append(
+                    {"type": "tool_result", "name": tool_name, "content": display, "success": success}
+                )
                 if stream_queue:
                     await stream_queue.put(
-                        {"type": "thinking", "content": list(self._thinking_steps)}
+                        {"type": "thinking", "content": list(thinking_steps)}
                     )
 
                 if not success:
@@ -2220,36 +2023,43 @@ class HybridAgentExecutor:
 
         return final_response, iterations, had_tool_error
 
-    # ------------------------------------------------------------------
-    # Node executor contract
-    # ------------------------------------------------------------------
-
     async def receive(self, input_data: dict, config: dict = None) -> dict:
         """Hybrid Agent Loop node executor.
 
-        Behaves like the standard agent loop but automatically offloads large
-        tool outputs into a side-store (repl_state["variables"]) instead of
-        injecting the full text into message history.  The LLM has access to
-        both the standard tool library and the RLM variable-access tools
-        (GetVariable, Peek, Search, Chunk, SetVariable) so it can retrieve
-        stored data on demand.  Context stays bounded — no compaction needed.
+        Combines standard tool calling with RLM-style adaptive output routing.
+        Supports the same re-planning and episode persistence API as AgentLoopExecutor.
 
         Config:
-            large_output_threshold (int, default 800):
-                Outputs longer than this many characters are stored as variables
-                instead of being placed inline in messages.
+            large_output_threshold (int, default 3000):
+                Outputs longer than this many characters are stored as variables.
             max_iterations (int, default 15), max_tokens (int, default 4096),
             temperature (float, default 0.7), max_llm_retries (int, default 3),
             retry_delay (float, default 1.0), tool_error_strategy (str, default "continue"),
-            timeout (float, default 120), include_plan_in_context (bool, default True),
-            include_memory_context (bool, default True),
-            include_knowledge_context (bool, default True),
-            include_reasoning_context (bool, default True).
+            timeout (float, default 120), max_replan_depth (int, default 3),
+            enable_episode_persistence (bool, default False),
+            include_plan_in_context / include_memory_context /
+            include_knowledge_context / include_reasoning_context (bool, default True).
+
+        Output keys include both hybrid_trace and agent_loop_trace (identical content)
+        for compatibility with the standard agent loop API.
         """
         if input_data is None:
             input_data = {}
         config = config or {}
 
+        # --- Session initialization ---
+        try:
+            sm = get_session_manager()
+            sm.load_or_create_session()
+            sm.log_agent_event("agent_start", {
+                "input_keys": list(input_data.keys()),
+                "config_keys": list(config.keys()),
+            })
+        except Exception as e:
+            logger.warning(f"[HybridAgent] Failed to initialize session manager: {e}")
+            sm = None
+
+        # --- Read configuration ---
         max_iterations = int(config.get("max_iterations", 15))
         max_tokens = int(config.get("max_tokens", 4096))
         temperature = float(config.get("temperature", 0.7))
@@ -2257,9 +2067,78 @@ class HybridAgentExecutor:
         retry_delay = float(config.get("retry_delay", 1.0))
         tool_error_strategy = str(config.get("tool_error_strategy", "continue"))
         timeout = float(config.get("timeout", 120))
+        max_replan_depth = int(config.get("max_replan_depth", 3))
         large_output_threshold = int(config.get("large_output_threshold", 3000))
         stream_queue = config.get("_stream_queue")
         model = config.get("model") or settings.get("default_model")
+
+        # --- Re-planning depth tracking ---
+        replan_count = int(input_data.get("replan_count", 0))
+
+        # --- Episode Persistence Support ---
+        enable_episode = config.get("enable_episode_persistence", False)
+        episode_id = config.get("episode_id")
+        checkpoint_interval = config.get("checkpoint_interval", 1)
+        if checkpoint_interval <= 0:
+            logger.warning("[HybridAgent] checkpoint_interval must be >= 1, defaulting to 1")
+            checkpoint_interval = 1
+
+        episode = None
+        iteration_count = 0
+
+        if enable_episode and sm:
+            try:
+                existing_episode = sm.load_episode_state()
+                should_resume = (
+                    existing_episode
+                    and existing_episode.phase not in [
+                        EpisodeState.PHASE_COMPLETED,
+                        EpisodeState.PHASE_FAILED,
+                    ]
+                    and (episode_id is None or existing_episode.episode_id == episode_id)
+                )
+                if should_resume:
+                    episode = existing_episode
+                    replan_count = episode.replan_count
+                    input_data.setdefault("plan", episode.plan)
+                    input_data.setdefault("completed_steps", episode.completed_steps)
+                    input_data.setdefault("current_step", episode.current_step)
+                    iteration_count = len(episode.checkpoints)
+                    if episode.messages and config.get("resume_from_episode_messages", True):
+                        input_data.setdefault("messages", episode.messages)
+                    episode.update_phase(EpisodeState.PHASE_EXECUTING)
+                    logger.info(f"[HybridAgent] Resuming episode {episode.episode_id}")
+                elif episode_id or config.get("auto_create_episode", True):
+                    budgets = {
+                        "max_iterations": max_iterations,
+                        "max_replan_depth": max_replan_depth,
+                        "timeout": timeout,
+                    }
+                    episode = sm.create_episode(
+                        input_data={"initial_input": list(input_data.keys())},
+                        budgets=budgets,
+                        metadata={"episode_id": episode_id} if episode_id else {},
+                    )
+                    logger.info(f"[HybridAgent] Created new episode {episode.episode_id}")
+            except Exception as e:
+                logger.warning(f"[HybridAgent] Failed to load episode state: {e}")
+
+        # --- Re-planning depth guard ---
+        if max_replan_depth > 0 and replan_count >= max_replan_depth:
+            result = input_data.copy()
+            result["replan_needed"] = False
+            result["replan_depth_exceeded"] = True
+            result["agent_loop_error"] = (
+                f"Max re-planning depth ({max_replan_depth}) exceeded. Unable to complete task."
+            )
+            result["content"] = (
+                f"[Error: Task failed after {replan_count} re-planning attempts. "
+                "Unable to find viable execution path.]"
+            )
+            result["iterations"] = 0
+            result["agent_loop_trace"] = []
+            result["hybrid_trace"] = []
+            return result
 
         messages = input_data.get("messages", [])
         if not messages:
@@ -2268,7 +2147,7 @@ class HybridAgentExecutor:
             result["agent_loop_error"] = "No messages provided"
             return result
 
-        # Build system prompt: context fields + variable storage instruction
+        # --- Build system prompt (context fields + variable storage note) ---
         system_prompt_parts = []
         context_prompt = self._build_system_prompt(input_data, config)
         if context_prompt:
@@ -2276,12 +2155,26 @@ class HybridAgentExecutor:
         system_prompt_parts.append(self._build_variable_system_note(large_output_threshold))
         system_prompt = "\n\n".join(system_prompt_parts)
 
+        # --- Inject system prompt without clobbering existing system messages ---
         llm_messages = list(messages)
-        llm_messages = [{"role": "system", "content": system_prompt}] + [
-            m for m in llm_messages if m.get("role") != "system"
-        ]
+        has_system = any(m.get("role") == "system" for m in llm_messages)
+        if has_system:
+            context_markers = [
+                "## Execution Plan", "## User Memories", "## Relevant Knowledge",
+                "## Previous Reasoning", "## Variable Storage",
+            ]
+            sys_content = next(
+                m.get("content", "") for m in llm_messages if m.get("role") == "system"
+            )
+            if not any(marker in sys_content for marker in context_markers):
+                for m in llm_messages:
+                    if m.get("role") == "system":
+                        m["content"] = m["content"] + "\n\n" + system_prompt
+                        break
+        else:
+            llm_messages.insert(0, {"role": "system", "content": system_prompt})
 
-        # Load tools — exclude RLM tools that require prompt_var or async LLM calls
+        # --- Load tools (exclude RLM-only tools that require prompt_var) ---
         tools_def = self._load_tools()
         tools_list = []
         for tool_name, tool_data in (tools_def or {}).items():
@@ -2297,7 +2190,7 @@ class HybridAgentExecutor:
 
         repl_state: dict = {
             "variables": {},
-            "_var_counts": {},      # per-tool call counter for unique variable naming
+            "_var_counts": {},
             "sub_call_count": 0,
             "max_sub_calls": 20,
             "recursion_depth": 0,
@@ -2306,11 +2199,13 @@ class HybridAgentExecutor:
             "max_cost_usd": 1.0,
         }
         trace: list = []
+        # Fix 2: create thinking_steps locally before _execute()
+        thinking_steps: list = []
 
-        self._thinking_steps = []
+        async def _execute():
+            nonlocal iteration_count
 
-        async def _run():
-            return await self._run_hybrid_loop(
+            final_response, iterations, had_tool_error = await self._run_hybrid_loop(
                 llm_messages=llm_messages,
                 tools_list=tools_list,
                 tool_library=tool_library,
@@ -2323,17 +2218,108 @@ class HybridAgentExecutor:
                 retry_delay=retry_delay,
                 tool_error_strategy=tool_error_strategy,
                 large_output_threshold=large_output_threshold,
-                stream_queue=stream_queue,
                 trace=trace,
+                stream_queue=stream_queue,
+                thinking_steps=thinking_steps,
             )
+
+            # Episode checkpoint
+            if episode is not None and sm is not None:
+                iteration_count += iterations
+                if iteration_count % checkpoint_interval == 0 or iterations == 0:
+                    try:
+                        sm.save_episode_state(
+                            phase=EpisodeState.PHASE_EXECUTING,
+                            replan_count=replan_count,
+                            completed_steps=input_data.get("completed_steps", []),
+                            current_step=input_data.get("current_step", 0),
+                            plan=input_data.get("plan", []),
+                            messages=llm_messages if config.get("save_messages_in_episode", False) else None,
+                            add_checkpoint=True,
+                        )
+                    except Exception as e:
+                        logger.warning(f"[HybridAgent] Failed to save episode checkpoint: {e}")
+
+            content = ""
+            if final_response and "choices" in final_response:
+                content = final_response["choices"][0]["message"].get("content") or ""
+
+            result = input_data.copy()
+            result["messages"] = llm_messages
+            result["content"] = content
+            result["iterations"] = iterations
+            result["hybrid_trace"] = trace
+            result["agent_loop_trace"] = trace  # consistent with AgentLoopExecutor API
+            result["repl_state"] = {
+                "variables": list(repl_state["variables"].keys()),
+                "variable_count": len(repl_state["variables"]),
+            }
+
+            # Re-planning detection (mirrors AgentLoopExecutor logic)
+            has_error_flag = final_response.get("error") is not None if final_response else False
+            actually_failed = had_tool_error or not content or has_error_flag
+
+            plan = input_data.get("plan", [])
+            current_step = input_data.get("current_step", 0)
+
+            if actually_failed:
+                result["replan_needed"] = True
+                result["replan_count"] = replan_count + 1
+                if had_tool_error:
+                    result["replan_reason"] = "Tool execution errors occurred during plan execution"
+                elif not content:
+                    result["replan_reason"] = "Agent produced no content response"
+                else:
+                    result["replan_reason"] = "Agent response contained error indicators"
+                if plan and len(plan) > 1:
+                    result["suggested_approach"] = (
+                        f"Current plan has {len(plan)} steps. "
+                        f"Consider breaking into smaller sub-tasks or simplifying step {current_step + 1}."
+                    )
+                elif plan:
+                    result["suggested_approach"] = (
+                        "Single-step plan failed. Consider using different tools or approach."
+                    )
+                else:
+                    result["suggested_approach"] = (
+                        "No plan exists. Consider creating a step-by-step plan."
+                    )
+            else:
+                result["replan_needed"] = False
+                result["replan_count"] = 0
+
+            if had_tool_error:
+                result["agent_loop_error"] = "One or more tools encountered errors"
+
+            # Episode finalization
+            if episode is not None and sm is not None:
+                try:
+                    if result.get("agent_loop_error") and not had_tool_error:
+                        final_phase = EpisodeState.PHASE_FAILED
+                    elif result.get("replan_needed"):
+                        final_phase = EpisodeState.PHASE_REPLANNING
+                    else:
+                        final_phase = EpisodeState.PHASE_COMPLETED
+                    sm.save_episode_state(
+                        phase=final_phase,
+                        replan_count=result.get("replan_count", 0),
+                        completed_steps=result.get("completed_steps", []),
+                        current_step=result.get("current_step", 0),
+                        plan=result.get("plan", []),
+                        messages=llm_messages if config.get("save_messages_in_episode", False) else None,
+                        add_checkpoint=True,
+                    )
+                    result["episode_id"] = episode.episode_id
+                except Exception as e:
+                    logger.warning(f"[HybridAgent] Failed to save final episode state: {e}")
+
+            return result
 
         try:
             if timeout > 0:
-                final_response, iterations, had_tool_error = await asyncio.wait_for(
-                    _run(), timeout=timeout
-                )
+                result = await asyncio.wait_for(_execute(), timeout=timeout)
             else:
-                final_response, iterations, had_tool_error = await _run()
+                result = await _execute()
         except asyncio.TimeoutError:
             result = input_data.copy()
             result["messages"] = llm_messages
@@ -2341,23 +2327,24 @@ class HybridAgentExecutor:
             result["agent_loop_error"] = f"Hybrid agent timed out after {timeout}s"
             result["iterations"] = 0
             result["hybrid_trace"] = trace
+            result["agent_loop_trace"] = trace
+            plan = input_data.get("plan", [])
+            result["replan_needed"] = True
+            result["replan_count"] = replan_count + 1
+            result["replan_reason"] = f"Execution timed out after {timeout} seconds"
+            result["suggested_approach"] = (
+                f"Plan with {len(plan)} steps took too long. "
+                "Consider breaking into smaller chunks with shorter timeout."
+                if plan and len(plan) > 1
+                else "Execution timed out. Consider simplifying the approach."
+            )
+            self._thinking_steps = thinking_steps
             return result
 
-        content = ""
-        if final_response:
-            content = final_response["choices"][0]["message"].get("content") or ""
-
-        result = input_data.copy()
-        result["messages"] = llm_messages
-        result["content"] = content
-        result["iterations"] = iterations
         result["hybrid_trace"] = trace
-        result["repl_state"] = {
-            "variables": list(repl_state["variables"].keys()),
-            "variable_count": len(repl_state["variables"]),
-        }
-        if had_tool_error:
-            result["agent_loop_error"] = "One or more tools encountered errors"
+        result["agent_loop_trace"] = trace
+        # Fix 2: assign thinking_steps to instance attr at the end of all exit paths
+        self._thinking_steps = thinking_steps
         return result
 
     async def send(self, processed_data: dict) -> dict:
