@@ -70,7 +70,20 @@ SAFE_MODULES: Set[str] = {
     'dataclasses', 'abc', 'contextlib', 'contextvars',
     'types', 'weakref', 'array', 'bisect', 'heapq',
     'copyreg', 'pickletools',
+    # AST module — needed by Calculator tool for safe expression parsing
+    'ast',
+    # Timezone support — needed by TimeZoneConverter tool
+    'zoneinfo',
+    # Email — needed by SendEmail tool
+    'smtplib', 'ssl', 'email', 'email.mime', 'email.mime.text', 'email.mime.multipart',
+    # Third-party optional libraries (treated as safe if installed)
+    'youtube_transcript_api',
 }
+
+# Internal NeuroCore namespaces whose imports are passed through to the real
+# Python importer unchanged.  These are first-party trusted modules that some
+# library tools need (e.g. modules.calendar.events.event_manager).
+PASSTHROUGH_PREFIXES: Set[str] = {'modules'}
 
 
 class SecurityError(Exception):
@@ -91,19 +104,38 @@ class TimeoutError(Exception):
 class RestrictedImport:
     """
     Import hook that blocks dangerous modules and only allows safe ones.
+    Accepts an optional ``mock_modules`` dict that maps module names to
+    pre-built safe substitute objects (e.g. SafeHttpxClient for 'httpx').
+    When a mocked module is imported, the substitute is returned instead of
+    the real module — this lets tool code use ``import httpx`` while still
+    receiving the domain-restricted SafeHttpxClient.
     """
-    
-    def __init__(self, allowed_modules: Optional[Set[str]] = None):
+
+    def __init__(self, allowed_modules: Optional[Set[str]] = None,
+                 mock_modules: Optional[Dict[str, Any]] = None,
+                 passthrough_modules: Optional[Set[str]] = None):
         self.allowed = allowed_modules or SAFE_MODULES
         self.blocked = DANGEROUS_MODULES
-    
+        self.mock_modules: Dict[str, Any] = mock_modules or {}
+        # Namespaces whose imports pass through to the real importer unchanged
+        # (used for trusted first-party code like NeuroCore's own ``modules.*``).
+        self.passthrough: Set[str] = passthrough_modules or PASSTHROUGH_PREFIXES
+
     def __call__(self, name: str, globals=None, locals=None, fromlist=(), level=0):
-        # Block dangerous modules
         base_module = name.split('.')[0]
-        
+
+        # Return pre-built safe substitute (httpx → SafeHttpxClient, os → SafeEnv, etc.)
+        if base_module in self.mock_modules:
+            return self.mock_modules[base_module]
+
+        # Block dangerous modules
         if base_module in self.blocked:
             raise SecurityError(f"Import of module '{name}' is not allowed in sandboxed environment")
-        
+
+        # Pass through trusted internal namespaces (e.g. modules.calendar.events)
+        if base_module in self.passthrough:
+            return _real_import(name, globals, locals, fromlist, level)
+
         # Check if full name or any prefix is in allowed list
         # This supports both 'urllib.parse' and 'urllib' when 'urllib.parse' is in SAFE_MODULES
         parts = name.split('.')
@@ -112,13 +144,11 @@ class RestrictedImport:
             if prefix in self.allowed:
                 # Use the stored real __import__ function instead of __builtins__ subscript
                 return _real_import(name, globals, locals, fromlist, level)
-        
-        # If no prefix matches, check if base module is in allowed
-        if base_module not in self.allowed:
-            raise SecurityError(f"Import of module '{name}' is not permitted. Allowed modules: {sorted(self.allowed)}")
-        
-        # Use the stored real __import__ function instead of __builtins__ subscript
-        return _real_import(name, globals, locals, fromlist, level)
+
+        # Unknown (non-dangerous, non-safe) module — raise ImportError so tools
+        # with graceful ``except ImportError`` fallbacks work correctly.
+        raise ImportError(f"Import of module '{name}' is not permitted. Allowed modules: {sorted(self.allowed)}")
+
 
 
 class SafeOpen:
@@ -186,6 +216,7 @@ class SafeHttpxClient:
         'api.huggingface.co',
         'api.wolframalpha.com',
         'api.weatherapi.com',  # Weather tool
+        'wttr.in',  # Weather tool (wttr.in JSON API)
         'api.frankfurter.app',  # Currency converter
         'en.wikipedia.org',  # Wikipedia
         'export.arxiv.org',  # ArXiv
@@ -388,6 +419,50 @@ class SafeHttpxClient:
     def post(self, url: str, **kwargs):
         return self.request('POST', url, **kwargs)
 
+    def delete(self, url: str, **kwargs):
+        return self.request('DELETE', url, **kwargs)
+
+    def put(self, url: str, **kwargs):
+        return self.request('PUT', url, **kwargs)
+
+    def patch(self, url: str, **kwargs):
+        return self.request('PATCH', url, **kwargs)
+
+
+class SafeEnv:
+    """
+    Restricted mock for the ``os`` module, exposing only environment-variable
+    access (``os.getenv`` / ``os.environ.get``).  All other ``os`` attributes
+    raise SecurityError so sandboxed tools cannot use filesystem or process APIs.
+    """
+
+    class _ReadOnlyEnviron:
+        """A read-only view of os.environ."""
+        def get(self, key: str, default=None):
+            import os as _os
+            return _os.environ.get(key, default)
+
+        def __getitem__(self, key: str):
+            import os as _os
+            return _os.environ[key]
+
+        def __contains__(self, key: str):
+            import os as _os
+            return key in _os.environ
+
+    def __init__(self):
+        self.environ = self._ReadOnlyEnviron()
+
+    def getenv(self, key: str, default=None):
+        import os as _os
+        return _os.environ.get(key, default)
+
+    def __getattr__(self, name: str):
+        raise SecurityError(
+            f"os.{name} is not permitted in sandboxed environment. "
+            "Only os.getenv() and os.environ are available."
+        )
+
 
 def _execute_in_process(code: str, local_vars: Dict[str, Any], result_queue: Queue, 
                         allowed_file_dirs: List[str], read_only_files: bool,
@@ -482,8 +557,19 @@ class ToolSandbox:
             if name not in DANGEROUS_BUILTINS and not name.startswith('_'):
                 safe_builtins[name] = getattr(builtins, name)
         
-        # Add our restricted import
-        safe_builtins['__import__'] = RestrictedImport()
+        # Build safe substitutes for modules that are mocked rather than blocked
+        safe_http_client = SafeHttpxClient(
+            allowed_domains=self.allowed_domains,
+            timeout=self.timeout
+        )
+        safe_env = SafeEnv()
+
+        # Add our restricted import with:
+        #   - mock_modules: substitute objects returned for specific import names
+        #   - passthrough_modules: namespaces passed through to the real importer
+        safe_builtins['__import__'] = RestrictedImport(
+            mock_modules={'httpx': safe_http_client, 'os': safe_env},
+        )
         
         # Add restricted open if file access is needed
         if self.allowed_file_dirs:
@@ -505,11 +591,10 @@ class ToolSandbox:
             except ImportError:
                 pass
         
-        # Add safe httpx client
-        restricted_globals['httpx'] = SafeHttpxClient(
-            allowed_domains=self.allowed_domains,
-            timeout=self.timeout
-        )
+        # Expose safe substitutes as top-level globals so tool code can use them
+        # directly (without import) as well as via `import httpx` / `import os`
+        restricted_globals['httpx'] = safe_http_client
+        restricted_globals['os'] = safe_env
         
         # Add json module (commonly needed)
         restricted_globals['json'] = json
@@ -522,8 +607,9 @@ class ToolSandbox:
         """
         # Check for dangerous imports
         import_patterns = [
-            r'^\s*import\s+(os|sys|subprocess|socket|multiprocessing|ctypes|mmap)',
-            r'^\s*from\s+(os|sys|subprocess|socket|multiprocessing|ctypes|mmap)\s+import',
+            # os is intentionally excluded: it is mocked with SafeEnv at runtime
+            r'^\s*import\s+(sys|subprocess|socket|multiprocessing|ctypes|mmap)',
+            r'^\s*from\s+(sys|subprocess|socket|multiprocessing|ctypes|mmap)\s+import',
             r'__import__\s*\(',
             r'importlib\s*\.\s*import_module',
         ]

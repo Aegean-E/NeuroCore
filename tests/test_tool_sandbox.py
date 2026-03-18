@@ -190,11 +190,11 @@ class TestToolSandboxStaticAnalysis:
     def test_blocks_dangerous_imports(self):
         """Test that code with dangerous imports is blocked."""
         sandbox = ToolSandbox()
-        
-        with pytest.raises(SecurityError) as exc_info:
-            sandbox._check_code_safety('import os')
-        assert "Dangerous import" in str(exc_info.value)
-        
+
+        # os is now mocked with SafeEnv so `import os` is allowed at the static level
+        # (the mock restricts what attributes are accessible at runtime)
+        sandbox._check_code_safety('import os')  # must NOT raise
+
         with pytest.raises(SecurityError) as exc_info:
             sandbox._check_code_safety('from subprocess import call')
         assert "Dangerous import" in str(exc_info.value)
@@ -437,6 +437,128 @@ else:
         # Blocked domains
         assert client._is_domain_allowed('https://evil.com/data') == False
         assert client._is_domain_allowed('https://api.example.com.evil.com/data') == False
+
+    def test_import_httpx_returns_safe_client(self):
+        """
+        Regression test: tool code that does `import httpx` must receive
+        the SafeHttpxClient substitute, not the real httpx module.
+        Previously this raised SecurityError because httpx wasn't in SAFE_MODULES.
+        """
+        sandbox = ToolSandbox()
+        code = """
+import httpx
+# Verify we got the safe client (SafeHttpxClient), not the real httpx module
+result = type(httpx).__name__
+"""
+        result = sandbox.execute(code, {})
+        assert result['result'] == 'SafeHttpxClient', (
+            f"Expected SafeHttpxClient, got {result['result']}"
+        )
+
+    def test_httpx_import_respects_domain_restriction(self):
+        """
+        Tool code that imports httpx and calls a blocked domain must be rejected.
+        """
+        sandbox = ToolSandbox()
+        code = """
+import httpx
+try:
+    httpx.get('https://evil-domain-not-in-whitelist.com/data')
+    result = "should_not_reach"
+except Exception as e:
+    result = "blocked: " + str(e)
+"""
+        result = sandbox.execute(code, {})
+        assert result['result'].startswith('blocked:'), (
+            f"Expected domain to be blocked, got: {result['result']}"
+        )
+
+    def test_import_os_returns_safe_env(self):
+        """import os must return SafeEnv, not the real os module."""
+        sandbox = ToolSandbox()
+        code = """
+import os
+result = type(os).__name__
+"""
+        result = sandbox.execute(code, {})
+        assert result['result'] == 'SafeEnv'
+
+    def test_os_getenv_works(self):
+        """os.getenv() must work via the SafeEnv mock."""
+        import os as _real_os
+        _real_os.environ['_SANDBOX_TEST_VAR'] = 'hello'
+        try:
+            sandbox = ToolSandbox()
+            code = """
+import os
+result = os.getenv('_SANDBOX_TEST_VAR', 'missing')
+"""
+            result = sandbox.execute(code, {})
+            assert result['result'] == 'hello'
+        finally:
+            del _real_os.environ['_SANDBOX_TEST_VAR']
+
+    def test_os_dangerous_attrs_blocked(self):
+        """os.system, os.path, etc. must be blocked via SafeEnv."""
+        sandbox = ToolSandbox()
+        code = """
+import os
+try:
+    os.system('echo hi')
+    result = 'not_blocked'
+except Exception as e:
+    result = 'blocked'
+"""
+        result = sandbox.execute(code, {})
+        assert result['result'] == 'blocked'
+
+    def test_import_ast_works(self):
+        """import ast must succeed (needed by Calculator tool)."""
+        sandbox = ToolSandbox()
+        code = """
+import ast
+tree = ast.parse('1 + 2', mode='eval')
+result = type(tree).__name__
+"""
+        result = sandbox.execute(code, {})
+        assert result['result'] == 'Expression'
+
+    def test_import_zoneinfo_works(self):
+        """from zoneinfo import ZoneInfo must succeed (needed by TimeZoneConverter)."""
+        sandbox = ToolSandbox()
+        code = """
+from zoneinfo import ZoneInfo
+tz = ZoneInfo('UTC')
+result = str(tz)
+"""
+        result = sandbox.execute(code, {})
+        assert result['result'] == 'UTC'
+
+    def test_unknown_module_raises_import_error(self):
+        """Unknown non-dangerous modules raise ImportError, not SecurityError."""
+        sandbox = ToolSandbox()
+        code = """
+try:
+    import totally_unknown_module_xyz
+    result = 'imported'
+except ImportError:
+    result = 'import_error'
+except Exception as e:
+    result = f'other: {type(e).__name__}'
+"""
+        result = sandbox.execute(code, {})
+        assert result['result'] == 'import_error'
+
+    def test_modules_passthrough_works(self):
+        """from modules.* imports pass through to the real NeuroCore package."""
+        sandbox = ToolSandbox()
+        code = """
+from modules.calendar.events import event_manager
+result = type(event_manager).__name__
+"""
+        result = sandbox.execute(code, {})
+        # Should succeed and return the real class name (not raise SecurityError)
+        assert 'Error' not in str(result.get('result', ''))
 
 
 @pytest.mark.asyncio

@@ -467,17 +467,122 @@ Navigate to **Settings** -> **Tools** in the NeuroCore dashboard. Click **+ New 
 
 ## 5. Writing Python Logic
 
-The Python environment executes locally with access to standard libraries and installed packages.
+Tool code runs inside the **NeuroCore sandbox** — a restricted Python execution environment. Understanding what is and is not available is essential to writing working tools.
 
-### Available Variables
+### Pre-injected Globals
 
-| Variable | Type | Description |
-|----------|------|-------------|
-| `args` | `dict` | Arguments provided by the LLM |
-| `result` | `any` | Assign your return value here |
-| `json` | `module` | Pre-imported JSON module |
-| `httpx` | `module` | HTTP client for API calls |
-| `asyncio` | `module` | Async support |
+These names are available in every tool without any `import` statement:
+
+| Name | Type | Description |
+|------|------|-------------|
+| `args` | `dict` | Arguments provided by the LLM call |
+| `result` | (assign to this) | Set this variable to return a value |
+| `json` | module | Standard `json` module |
+| `httpx` | `SafeHttpxClient` | Domain-restricted HTTP client (see below) |
+| `os` | `SafeEnv` | Environment variable access only (see below) |
+
+You can also use `import httpx` or `import os` at the top of your code — both resolve to the same safe substitutes listed above.
+
+### Allowed Standard Library Imports
+
+The following standard library modules can be imported freely:
+
+```
+math, random, datetime, time, calendar, decimal, fractions, numbers,
+statistics, itertools, functools, operator, copy, string, re,
+collections, enum, typing, hashlib, base64, binascii, uuid, json,
+html, html.entities, html.parser, urllib.parse, textwrap, unicodedata,
+stringprep, codecs, dataclasses, abc, contextlib, contextvars, types,
+weakref, array, bisect, heapq, copyreg, ast, zoneinfo,
+smtplib, ssl, email, email.mime.text, email.mime.multipart
+```
+
+Additionally, `youtube_transcript_api` is importable if the package is installed.
+
+### `httpx` — Restricted HTTP Client
+
+`httpx` inside the sandbox is a `SafeHttpxClient`, not the real `httpx` library. It enforces:
+
+- **Domain allowlist** — only requests to approved domains succeed. The default allowlist includes:
+  - Public weather/data APIs: `wttr.in`, `api.weatherapi.com`, `api.frankfurter.app`
+  - Research/media: `en.wikipedia.org`, `export.arxiv.org`, `www.youtube.com`
+  - LLM providers: `api.openai.com`, `api.anthropic.com`, `api.mistral.ai`, and others
+  - Internal server: `127.0.0.1`, `localhost` (for same-host module APIs)
+  - Code hosting: `github.com`, `raw.githubusercontent.com`
+- **SSRF protection** — blocks requests to private IP ranges (10.x, 192.168.x, 172.16–31.x, 169.254.x)
+- **Response size limit** — responses over 10 MB are rejected
+- **Timeout** — capped at the sandbox timeout (default 30 s)
+
+Available methods: `get`, `post`, `put`, `patch`, `delete` (same signature as real `httpx`).
+
+Requests to domains not in the allowlist raise `SecurityError`. If your tool needs a new domain, add it to `SafeHttpxClient.DEFAULT_ALLOWED_DOMAINS` in `modules/tools/sandbox.py`.
+
+```python
+# Both of these work identically — httpx is already injected as a global
+import httpx
+resp = httpx.get("https://wttr.in/London?format=j1", timeout=10)
+data = resp.json()
+```
+
+### `os` — Environment Variables Only
+
+`os` inside the sandbox is a `SafeEnv` mock. Only two things work:
+
+```python
+import os
+
+# Read an environment variable (returns None or default if not set)
+api_key = os.getenv("MY_API_KEY", "default")
+
+# Read via environ
+api_key = os.environ.get("MY_API_KEY")
+```
+
+Accessing any other `os` attribute (`os.path`, `os.system`, `os.listdir`, etc.) raises `SecurityError`. Use environment variables for secrets and configuration; never hardcode credentials in tool code.
+
+### NeuroCore Internal Imports (`modules.*`)
+
+Tools can import from NeuroCore's own package. This is how built-in tools access live app singletons:
+
+```python
+from modules.calendar.events import event_manager
+events = event_manager.get_upcoming(limit=5)
+```
+
+This pass-through is intentional — built-in library tools are first-party trusted code. Custom tools should generally not need internal imports; use the HTTP API (`httpx` → `localhost`) instead.
+
+### Blocked Modules
+
+The following modules are **always blocked**, even if installed:
+
+```
+os (real module)*, sys, subprocess, socket, multiprocessing, threading,
+ctypes, mmap, resource, signal, pickle, cPickle, marshal, imp, importlib,
+site, warnings, traceback, gc, inspect, code, pdb, bdb,
+shutil, tempfile, pathlib, glob, fnmatch, posix, nt
+```
+
+\* `import os` is allowed but returns `SafeEnv` (not the real `os` module).
+
+Attempting to import a blocked module raises `SecurityError` immediately.
+
+### Unknown / Third-Party Modules
+
+Importing a module that is not in the allowlist and not in the blocklist raises `ImportError` (not `SecurityError`). This means tools can use a graceful fallback:
+
+```python
+try:
+    import some_optional_library
+    result = some_optional_library.do_thing(args['input'])
+except ImportError:
+    result = "Error: some_optional_library is not installed."
+```
+
+### Blocked Builtins
+
+The following built-in functions are removed from the sandbox environment:
+
+`eval`, `exec`, `compile`, `open` (unless file dirs are explicitly allowed), `__import__`, `breakpoint`, `input`, `help`, `quit`, `exit`
 
 ### Complete Example: Weather Tool
 
@@ -494,17 +599,19 @@ The Python environment executes locally with access to standard libraries and in
 
 **Python Code:**
 ```python
-import httpx  # Ensure httpx is installed
+from urllib.parse import quote
 
 location = args.get('location')
-
 if not location:
     result = "Error: No location provided."
 else:
     try:
-        # Example API call
-        resp = httpx.get(f"https://wttr.in/{location}?format=3", timeout=5)
-        result = resp.text.strip()
+        # httpx is pre-injected as a SafeHttpxClient — wttr.in is in the domain allowlist
+        resp = httpx.get(f"https://wttr.in/{quote(location)}?format=j1", timeout=10)
+        resp.raise_for_status()
+        data = resp.json()
+        current = data['current_condition'][0]
+        result = f"{current['temp_C']}°C, {current['weatherDesc'][0]['value']}"
     except Exception as e:
         result = f"Failed to fetch weather: {e}"
 ```
@@ -513,14 +620,12 @@ else:
 
 #### Handling Optional Parameters
 ```python
-# Provide defaults for optional args
 limit = args.get('limit', 10)
 offset = args.get('offset', 0)
 ```
 
 #### Type Conversion
 ```python
-# Ensure proper types
 count = int(args.get('count', 0))
 enabled = bool(args.get('enabled', False))
 ```
@@ -530,6 +635,15 @@ enabled = bool(args.get('enabled', False))
 items = args.get('items', [])
 if not isinstance(items, list):
     items = [items]  # Normalize single item to list
+```
+
+#### Reading Configuration from Environment
+```python
+import os
+# Reads from the host environment — set these before starting NeuroCore
+api_key = os.getenv("MY_SERVICE_API_KEY")
+if not api_key:
+    result = "Error: MY_SERVICE_API_KEY environment variable is not set."
 ```
 
 ---
@@ -617,15 +731,25 @@ All tool code (standard and custom) executes in `modules/tools/sandbox.py` with 
 
 | Layer | Mechanism |
 |-------|-----------|
-| Static Analysis | Regex scanning for dangerous patterns before execution |
-| Import Restrictions | `RestrictedImport` blocks `os`, `sys`, `subprocess`, `socket`, `shutil`, `importlib`, `pickle`, `ctypes`, `mmap`, `multiprocessing`, `pathlib`, and 10+ more |
-| Restricted Builtins | Removes `eval`, `exec`, `open`, `__import__`, `compile`, `globals`, `locals` |
-| File Access Control | `SafeOpen` with optional directory whitelist |
-| Network Restrictions | `SafeHttpxClient` with configurable domain allowlist (expanded set of public API domains; see `ALLOWED_DOMAINS` in `sandbox.py`) |
-| SSRF Protection | Blocks requests to private IP ranges (127.x, 10.x, 192.168.x, 172.16–31.x) |
-| Resource Limits | Configurable timeout (default 30s), max output size (100 KB) |
+| Static Analysis | Regex scanning for dangerous patterns (`subprocess`, `sys`, `ctypes`, etc.) before execution |
+| Import Blocklist | `RestrictedImport` blocks `sys`, `subprocess`, `socket`, `shutil`, `importlib`, `pickle`, `ctypes`, `mmap`, `multiprocessing`, `pathlib`, and 15+ more |
+| Module Mocking | `import httpx` → `SafeHttpxClient`; `import os` → `SafeEnv`. Real modules are never exposed. |
+| Module Passthrough | `modules.*` imports pass through to the real NeuroCore package (first-party trusted code) |
+| Restricted Builtins | Removes `eval`, `exec`, `open`, `__import__`, `compile`, `breakpoint`, `input` |
+| File Access Control | `SafeOpen` — file reads only allowed if specific directories are whitelisted |
+| Network Restrictions | `SafeHttpxClient` enforces a domain allowlist; requests to non-listed domains raise `SecurityError` |
+| SSRF Protection | Resolves hostnames via DNS and rejects requests to private/internal IP ranges |
+| Resource Limits | Timeout (default 30 s), max output size (100 KB), optional memory limit |
 
-Security errors raise `SandboxSecurityError` from `core/errors.py`.
+**Error types raised by the sandbox:**
+
+| Error | Meaning |
+|-------|---------|
+| `SecurityError` | Import of a blocked module, access to a blocked `os` attribute, request to a non-whitelisted domain |
+| `ImportError` | Import of an unknown module (not blocked, not in allowlist) — allows `except ImportError` fallbacks |
+| `ResourceLimitError` | Timeout, output size, or memory limit exceeded |
+
+These are caught by the Tool Dispatcher and returned to the LLM as error strings so the agent can react gracefully.
 
 ---
 
@@ -718,6 +842,11 @@ Share tools between NeuroCore instances or back them up.
 | JSON parse errors | Malformed LLM arguments | Tool Dispatcher handles this automatically |
 | Tool executes but no result | Missing `result` assignment | Ensure `result = ...` in Python code |
 | Import fails | Invalid JSON or encoding | Validate JSON syntax, check file encoding |
+| `Import of module 'X' is not permitted` | Module not in sandbox allowlist | Add it to `SAFE_MODULES` in `sandbox.py`, or use an HTTP API via `httpx` instead |
+| `Import of module 'X' is not allowed` | Module is in the danger blocklist | Use a safe alternative; blocked modules cannot be enabled |
+| HTTP request blocked (domain not whitelisted) | `SafeHttpxClient` domain check | Add the domain to `SafeHttpxClient.DEFAULT_ALLOWED_DOMAINS` in `sandbox.py` |
+| `os.X is not permitted` | Accessing a blocked `os` attribute | Only `os.getenv()` and `os.environ.get()` are available; use env vars for config |
+| Tool times out | Slow external API or infinite loop | Add timeouts to HTTP calls; check for logic errors |
 
 ### Debugging Steps
 
