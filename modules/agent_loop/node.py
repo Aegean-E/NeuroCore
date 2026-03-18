@@ -291,6 +291,97 @@ class AgentBaseExecutor:
         return None
 
     # ------------------------------------------------------------------
+    # Session-manager logging helpers
+    # ------------------------------------------------------------------
+
+    def _log_tool_call(self, func_name: str, args: dict) -> float:
+        """Log a tool call to the session trace and return start_time."""
+        start_time = time.time()
+        if self._session_manager:
+            try:
+                self._session_manager.log_tool_call(func_name, args)
+            except Exception:
+                pass
+        return start_time
+
+    def _log_tool_result(
+        self,
+        func_name: str,
+        output: object,
+        success: bool,
+        start_time: float,
+        error: str = None,
+    ) -> None:
+        """Log a tool result to the session trace."""
+        if self._session_manager:
+            try:
+                duration_ms = (time.time() - start_time) * 1000
+                self._session_manager.log_tool_result(
+                    func_name,
+                    output,
+                    success=success,
+                    duration_ms=duration_ms,
+                    error=error,
+                )
+            except Exception:
+                pass
+
+    def _log_llm_call(self, model: str) -> float:
+        """Log an LLM call to the session trace and return start_time."""
+        start_time = time.time()
+        if self._session_manager:
+            try:
+                self._session_manager.log_llm_call(model, tokens=None)
+            except Exception:
+                pass
+        return start_time
+
+    def _log_llm_result(self, model: str, start_time: float, response: dict) -> None:
+        """Log LLM latency + token usage to the session trace."""
+        if self._session_manager:
+            try:
+                latency_ms = (time.time() - start_time) * 1000
+                tokens = None
+                if response and "usage" in response:
+                    tokens = response["usage"].get("total_tokens")
+                self._session_manager.log_llm_call(
+                    model, tokens=tokens, latency_ms=latency_ms
+                )
+            except Exception:
+                pass
+
+    def _log_agent_event(self, event_type: str, data: dict = None) -> None:
+        """Log a general agent lifecycle event to the session trace."""
+        if self._session_manager:
+            try:
+                self._session_manager.log_agent_event(event_type, data)
+            except Exception:
+                pass
+
+    def _log_rlm_event(self, event_type: str, data: dict = None) -> None:
+        """Log an RLM-specific event to the session trace."""
+        if self._session_manager:
+            try:
+                self._session_manager.log_rlm_event(event_type, data)
+            except Exception:
+                pass
+
+    def _log_replan_event(self, result: dict) -> None:
+        """Log a replan event when replan_needed is True, or agent_end on success."""
+        if result.get("replan_needed"):
+            self._log_agent_event("replan", {
+                "reason": result.get("replan_reason"),
+                "replan_count": result.get("replan_count"),
+                "suggested_approach": result.get("suggested_approach"),
+                "agent_loop_error": result.get("agent_loop_error"),
+            })
+        else:
+            self._log_agent_event("agent_end", {
+                "iterations": result.get("iterations", 0),
+                "replan_count": result.get("replan_count", 0),
+            })
+
+    # ------------------------------------------------------------------
     # Shared REPL helpers — used by REPLEnvironmentExecutor and RLM/Hybrid
     # ------------------------------------------------------------------
 
@@ -470,13 +561,7 @@ class AgentLoopExecutor(AgentBaseExecutor):
         except (json.JSONDecodeError, KeyError):
             args = {}
 
-        if self._session_manager:
-            try:
-                self._session_manager.log_tool_call(func_name, args)
-            except Exception:
-                pass
-
-        start_time = time.time()
+        start_time = self._log_tool_call(func_name, args)
         success = False
         if func_name in tool_library:
             code = tool_library[func_name]
@@ -495,18 +580,7 @@ class AgentLoopExecutor(AgentBaseExecutor):
         else:
             output = f"Error: Tool {func_name} not found in library."
 
-        duration_ms = (time.time() - start_time) * 1000
-
-        if self._session_manager:
-            try:
-                self._session_manager.log_tool_result(
-                    func_name,
-                    output,
-                    success=success,
-                    duration_ms=duration_ms,
-                )
-            except Exception:
-                pass
+        self._log_tool_result(func_name, output, success, start_time)
 
         return {
             "tool_call_id": tool_call.get("id", ""),
@@ -567,12 +641,7 @@ class AgentLoopExecutor(AgentBaseExecutor):
                         )
                         _compacted_at_len = len(llm_messages)
 
-            if self._session_manager:
-                try:
-                    self._session_manager.log_llm_call(model, tokens=None)
-                except Exception:
-                    pass
-
+            llm_start = self._log_llm_call(model)
             response = await self._llm_with_retry(
                 messages=llm_messages,
                 model=model,
@@ -582,6 +651,7 @@ class AgentLoopExecutor(AgentBaseExecutor):
                 max_retries=max_llm_retries,
                 retry_delay=retry_delay,
             )
+            self._log_llm_result(model, llm_start, response)
 
             if not response or "choices" not in response:
                 error_msg = (
@@ -934,6 +1004,8 @@ class AgentLoopExecutor(AgentBaseExecutor):
                 result["replan_needed"] = False
                 result["replan_count"] = 0
 
+            self._log_replan_event(result)
+
             # Episode finalization
             if episode is not None and sm is not None:
                 try:
@@ -979,6 +1051,7 @@ class AgentLoopExecutor(AgentBaseExecutor):
                 else "Execution timed out. Consider simplifying the approach."
             )
             self._thinking_steps = thinking_steps
+            self._log_replan_event(result)
             return result
         except Exception as e:
             result = input_data.copy()
@@ -990,6 +1063,7 @@ class AgentLoopExecutor(AgentBaseExecutor):
             result["replan_reason"] = f"Unexpected error: {str(e)}"
             result["suggested_approach"] = "Review plan and try alternative approach."
             self._thinking_steps = thinking_steps
+            self._log_replan_event(result)
             return result
 
         result["agent_loop_trace"] = agent_loop_trace
@@ -1001,7 +1075,7 @@ class AgentLoopExecutor(AgentBaseExecutor):
         return processed_data
 
 
-def get_executor_class(node_type_id: str):
+async def get_executor_class(node_type_id: str):
     if node_type_id == "agent_loop":
         return AgentLoopExecutor
     if node_type_id == "recursive_lm":
@@ -1276,9 +1350,19 @@ Call set_final() when complete."""
 
         # SubCall requires an async LLM call — cannot go through sandbox exec()
         if func_name.lower() in ("subcall", "sub_call"):
-            return await self._execute_sub_call(args, repl_state)
+            self._log_rlm_event("sub_call", {"prompt_preview": str(args.get("prompt", ""))[:200]})
+            result = await self._execute_sub_call(args, repl_state)
+            self._log_rlm_event("sub_call_result", {
+                "success": result.get("success", False),
+                "model_used": result.get("model_used"),
+                "sub_call_count": result.get("sub_call_count"),
+            })
+            return result
 
         actual_tool_name = self._resolve_tool_name(func_name, tool_library)
+        # Strip _repl_state from log input (not useful in trace)
+        log_args = {k: v for k, v in args.items() if k != "_repl_state"}
+        start_time = self._log_tool_call(actual_tool_name, log_args)
         args["_repl_state"] = repl_state
 
         success = False
@@ -1296,10 +1380,17 @@ Call set_final() when complete."""
                 success = True
                 if isinstance(result.get("_repl_state_update"), dict):
                     repl_state.update(result["_repl_state_update"])
+                    # Log set_final when final answer is written via the REPL tool
+                    if "final" in result["_repl_state_update"]:
+                        self._log_rlm_event("set_final", {
+                            "answer_length": len(str(result["_repl_state_update"]["final"])),
+                        })
             except Exception as e:
                 output = f"Error executing tool {func_name}: {str(e)}"
         else:
             output = f"Error: Tool {func_name} not found in library."
+
+        self._log_tool_result(actual_tool_name, output, success, start_time)
 
         return {
             "tool_call_id": tool_call.get("id", ""),
@@ -1361,6 +1452,7 @@ Call set_final() when complete."""
                 {"role": "system", "content": f"REPL state: {json.dumps(state_metadata)}"}
             ]
 
+            llm_start = self._log_llm_call(model)
             response = await self._llm_with_retry(
                 messages=messages_with_state,
                 model=model,
@@ -1370,6 +1462,7 @@ Call set_final() when complete."""
                 max_retries=max_llm_retries,
                 retry_delay=retry_delay,
             )
+            self._log_llm_result(model, llm_start, response)
 
             if not response or "choices" not in response:
                 error_msg = (
@@ -1681,6 +1774,8 @@ Call set_final() when complete."""
                 result["replan_needed"] = False
                 result["replan_count"] = 0
 
+            self._log_replan_event(result)
+
             # Episode finalization — use actual conversation messages
             if episode is not None and sm is not None:
                 try:
@@ -1727,6 +1822,7 @@ Call set_final() when complete."""
                 else "Execution timed out. Consider simplifying the approach."
             )
             self._thinking_steps = thinking_steps
+            self._log_replan_event(result)
             return result
         except Exception as e:
             result = input_data.copy()
@@ -1739,6 +1835,7 @@ Call set_final() when complete."""
             result["replan_reason"] = f"Unexpected error: {str(e)}"
             result["suggested_approach"] = "Review plan and try alternative approach."
             self._thinking_steps = thinking_steps
+            self._log_replan_event(result)
             return result
 
         result["rlm_trace"] = trace
@@ -1887,9 +1984,18 @@ class HybridAgentExecutor(AgentBaseExecutor):
 
         # SubCall requires an async LLM call — intercept before sandbox execution
         if func_name.lower() in ("subcall", "sub_call"):
+            self._log_agent_event("hybrid_sub_call", {"prompt_preview": str(args.get("prompt", ""))[:200]})
             result = await self._execute_sub_call(args, repl_state)
             result["tool_call_id"] = tool_call.get("id", "")
+            self._log_agent_event("hybrid_sub_call_result", {
+                "success": result.get("success", False),
+                "model_used": result.get("model_used"),
+            })
             return result
+
+        # Strip _repl_state from log args (internal, not useful in trace)
+        log_args = {k: v for k, v in args.items() if k != "_repl_state"}
+        start_time = self._log_tool_call(func_name, log_args)
 
         # Pass repl_state so RLM-library tools (Peek, GetVariable, …) work correctly
         args["_repl_state"] = repl_state
@@ -1915,6 +2021,7 @@ class HybridAgentExecutor(AgentBaseExecutor):
                 output = f"Error executing '{func_name}': {e}"
 
         output_str = str(output)
+        self._log_tool_result(func_name, output_str, success, start_time)
 
         # Fix 3: adaptive routing only for non-retrieval tools
         # Retrieval tools (GetVariable, Peek, Search, Chunk) must always return inline
@@ -1930,6 +2037,12 @@ class HybridAgentExecutor(AgentBaseExecutor):
                 f"preview: {preview!r}]\n"
                 f"Call GetVariable(\"{var_name}\") to read the full content."
             )
+            self._log_agent_event("hybrid_variable_stored", {
+                "tool": func_name,
+                "var_name": var_name,
+                "output_chars": len(output_str),
+                "threshold": large_output_threshold,
+            })
         else:
             content = output_str
 
@@ -1979,6 +2092,7 @@ class HybridAgentExecutor(AgentBaseExecutor):
             var_msg = self._variable_inventory_msg(repl_state)
             messages_for_llm = llm_messages + ([var_msg] if var_msg else [])
 
+            llm_start = self._log_llm_call(model)
             response = await self._llm_with_retry(
                 messages=messages_for_llm,
                 model=model,
@@ -1988,6 +2102,7 @@ class HybridAgentExecutor(AgentBaseExecutor):
                 max_retries=max_llm_retries,
                 retry_delay=retry_delay,
             )
+            self._log_llm_result(model, llm_start, response)
 
             if not response or "choices" not in response:
                 error_msg = (
@@ -2348,6 +2463,8 @@ class HybridAgentExecutor(AgentBaseExecutor):
             if had_tool_error:
                 result["agent_loop_error"] = "One or more tools encountered errors"
 
+            self._log_replan_event(result)
+
             # Episode finalization
             if episode is not None and sm is not None:
                 try:
@@ -2396,6 +2513,7 @@ class HybridAgentExecutor(AgentBaseExecutor):
                 else "Execution timed out. Consider simplifying the approach."
             )
             self._thinking_steps = thinking_steps
+            self._log_replan_event(result)
             return result
         except Exception as e:
             result = input_data.copy()
@@ -2410,6 +2528,7 @@ class HybridAgentExecutor(AgentBaseExecutor):
             result["replan_reason"] = f"Unexpected error: {str(e)}"
             result["suggested_approach"] = "Review plan and try alternative approach."
             self._thinking_steps = thinking_steps
+            self._log_replan_event(result)
             return result
 
         result["hybrid_trace"] = trace
