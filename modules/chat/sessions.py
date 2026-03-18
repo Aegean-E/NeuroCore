@@ -70,10 +70,25 @@ class SessionManager:
                 "name": name or f"Session {datetime.utcnow().strftime('%Y-%m-%d %H:%M')}",
                 "history": [],
                 "created_at": now,
-                "updated_at": now
+                "updated_at": now,
+                "total_tokens": 0,
+                "prompt_tokens": 0,
+                "completion_tokens": 0,
             }
             self._save_sessions()
             return self.sessions[session_id]
+
+    def add_tokens(self, session_id: str, usage: dict) -> bool:
+        """Accumulate token usage for a session from an LLM usage dict."""
+        with self._lock:
+            session = self.sessions.get(session_id)
+            if not session:
+                return False
+            session["total_tokens"] = session.get("total_tokens", 0) + int(usage.get("total_tokens", 0))
+            session["prompt_tokens"] = session.get("prompt_tokens", 0) + int(usage.get("prompt_tokens", 0))
+            session["completion_tokens"] = session.get("completion_tokens", 0) + int(usage.get("completion_tokens", 0))
+            self._save_sessions()
+            return True
 
     def get_session(self, session_id):
         with self._lock:

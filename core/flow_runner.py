@@ -68,8 +68,17 @@ class FlowRunner:
                 # Invalidate cache before reloading to ensure fresh class is used
                 cls._executor_cache.pop(cache_key, None)
                 importlib.reload(node_dispatcher)
-            # Get the specific executor class for this node type
-            executor_class = await node_dispatcher.get_executor_class(node_type_id)
+            # Get the specific executor class for this node type.
+            # get_executor_class must be async; guard against sync variants to
+            # produce a clear error instead of the cryptic "object type can't
+            # be used in 'await' expression" TypeError.
+            get_fn = node_dispatcher.get_executor_class
+            if not asyncio.iscoroutinefunction(get_fn):
+                raise RuntimeError(
+                    f"modules.{module_id}.node.get_executor_class must be async def "
+                    f"(found sync function). Did a module reload produce a stale version?"
+                )
+            executor_class = await get_fn(node_type_id)
             cls._executor_cache[cache_key] = executor_class
             return executor_class
     
@@ -938,7 +947,7 @@ class FlowRunner:
                     error_msg = f"Execution failed at node '{node_meta['name']}': {e}"
                     if settings.get("debug_mode"):
                         debug_logger.log(self.flow_id, node_id, node_meta['name'], "error", {"error": str(e), "error_type": type(e).__name__})
-                    logger.error(f"Error in FlowRunner: {error_msg}")
+                    logger.exception(f"Error in FlowRunner: {error_msg}")
                     # Return a structured error that the chat UI can display
                     return {"error": error_msg}
 

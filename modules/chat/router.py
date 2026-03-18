@@ -12,7 +12,6 @@ from core.flow_manager import flow_manager
 import json
 import logging
 import asyncio
-from core.observability import get_token_stats
 
 logger = logging.getLogger(__name__)
 
@@ -151,7 +150,6 @@ async def chat_gui(request: Request, session_id: str = Query(None)):
     return templates.TemplateResponse(request, "chat_gui.html", {
         "session": active_session,
         "estimated_tokens": estimated_tokens,
-        "stats": get_token_stats()
     })
 
 @router.get("/sessions", response_class=HTMLResponse)
@@ -344,6 +342,7 @@ async def send_message(
                     or (flow_result.get("response") or {}).get("usage")
                 )
                 if isinstance(usage, dict) and usage.get("total_tokens"):
+                    await asyncio.to_thread(session_manager.add_tokens, session_id, usage)
                     await queue.put({"type": "usage", "content": usage})
                     
                 # --- Auto-Renaming Logic ---
