@@ -685,22 +685,19 @@ class TestSystemPromptInjection:
 class TestGetExecutorClass:
     """Tests for the get_executor_class module-level dispatcher."""
 
-    @pytest.mark.asyncio
-    async def test_returns_agent_loop_executor_for_correct_id(self):
+    def test_returns_agent_loop_executor_for_correct_id(self):
         """get_executor_class('agent_loop') should return AgentLoopExecutor."""
-        cls = await get_executor_class("agent_loop")
+        cls = get_executor_class("agent_loop")
         assert cls is AgentLoopExecutor
 
-    @pytest.mark.asyncio
-    async def test_returns_none_for_unknown_id(self):
+    def test_returns_none_for_unknown_id(self):
         """get_executor_class with an unknown id should return None."""
-        cls = await get_executor_class("unknown_node_type")
+        cls = get_executor_class("unknown_node_type")
         assert cls is None
 
-    @pytest.mark.asyncio
-    async def test_executor_class_is_instantiable(self):
+    def test_executor_class_is_instantiable(self):
         """The returned class should be instantiable without arguments."""
-        cls = await get_executor_class("agent_loop")
+        cls = get_executor_class("agent_loop")
         instance = cls()
         assert isinstance(instance, AgentLoopExecutor)
 
@@ -1418,9 +1415,9 @@ class TestHybridAgentExecutor:
 
     # --- get_executor_class dispatcher ---
 
-    async def test_get_executor_class_hybrid(self):
+    def test_get_executor_class_hybrid(self):
         from modules.agent_loop.node import get_executor_class
-        cls = await get_executor_class("hybrid_agent")
+        cls = get_executor_class("hybrid_agent")
         assert cls is HybridAgentExecutor
 
     # --- send passthrough ---

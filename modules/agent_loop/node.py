@@ -291,6 +291,32 @@ class AgentBaseExecutor:
         return None
 
     # ------------------------------------------------------------------
+    # Shared REPL helpers — used by REPLEnvironmentExecutor and RLM/Hybrid
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _extract_user_content(messages: list) -> str:
+        """Extract first non-empty user message content from a message list."""
+        for msg in messages:
+            if msg.get("role") == "user":
+                content = msg.get("content", "")
+                if content:
+                    return content
+        return " ".join(m.get("content", "") for m in messages if m.get("role") == "user")
+
+    @staticmethod
+    def _classify_content(content: str) -> str:
+        """Classify content type for REPL environment metadata."""
+        content_lower = content.lower()
+        if "code" in content_lower or "def " in content_lower or "function" in content_lower:
+            return "code"
+        elif len(content) > 100_000:
+            return "large_document"
+        elif len(content) > 10_000:
+            return "long_text"
+        return "standard"
+
+    # ------------------------------------------------------------------
     # Async SubCall — shared by RLM and Hybrid executors
     # ------------------------------------------------------------------
 
@@ -520,12 +546,14 @@ class AgentLoopExecutor(AgentBaseExecutor):
         iterations = 0
         final_response = None
         had_tool_error = False
-        seen_calls: set = set()
         # Only compact again once enough new messages have accumulated since
         # the last compaction, preventing a no-op re-compaction every iteration.
         _compacted_at_len = 0
 
         for iteration in range(max_iterations):
+            # Reset per-iteration: dedup catches duplicate calls within a single
+            # LLM response; max_iterations bounds cross-iteration repetition.
+            seen_calls: set = set()
             iterations += 1
             iteration_trace = {"iteration": iterations, "tool_calls": [], "errors": []}
 
@@ -608,7 +636,7 @@ class AgentLoopExecutor(AgentBaseExecutor):
                 call_signature = f"{tool_name}:{normalized_args}"
                 if call_signature in seen_calls:
                     iteration_trace["errors"].append(
-                        f"Loop detected: '{tool_name}' called with same arguments repeatedly"
+                        f"Duplicate tool call skipped: '{tool_name}' with identical args in same response"
                     )
                     break
                 seen_calls.add(call_signature)
@@ -973,7 +1001,7 @@ class AgentLoopExecutor(AgentBaseExecutor):
         return processed_data
 
 
-async def get_executor_class(node_type_id: str):
+def get_executor_class(node_type_id: str):
     if node_type_id == "agent_loop":
         return AgentLoopExecutor
     if node_type_id == "recursive_lm":
@@ -1012,7 +1040,7 @@ class REPLEnvironmentExecutor:
         config = config or {}
         messages = input_data.get("messages", [])
 
-        user_content = self._extract_user_content(messages)
+        user_content = AgentBaseExecutor._extract_user_content(messages)
 
         repl_state = {
             "prompt_var": user_content,
@@ -1035,7 +1063,7 @@ class REPLEnvironmentExecutor:
         system_content = self._build_repl_system_prompt({
             "prompt_length": len(user_content),
             "prompt_preview": preview,
-            "prompt_type": self._classify_content(user_content),
+            "prompt_type": AgentBaseExecutor._classify_content(user_content),
             "max_recursion_depth": repl_state["max_recursion_depth"],
             "max_sub_calls": repl_state["max_sub_calls"],
         })
@@ -1048,24 +1076,6 @@ class REPLEnvironmentExecutor:
             {"role": "user", "content": "Process the input using the REPL environment."},
         ]
         return result
-
-    def _extract_user_content(self, messages: list) -> str:
-        for msg in messages:
-            if msg.get("role") == "user":
-                content = msg.get("content", "")
-                if content:
-                    return content
-        return " ".join(m.get("content", "") for m in messages if m.get("role") == "user")
-
-    def _classify_content(self, content: str) -> str:
-        content_lower = content.lower()
-        if "code" in content_lower or "def " in content_lower:
-            return "code"
-        elif len(content) > 100000:
-            return "large_document"
-        elif len(content) > 10000:
-            return "long_text"
-        return "standard"
 
     def _build_repl_system_prompt(self, metadata: dict) -> str:
         return f"""You are operating in a REPL environment.
@@ -1116,38 +1126,56 @@ class RLMAgentLoopExecutor(AgentBaseExecutor):
     LLM context window at constant size regardless of input or output length.
     """
 
-    _library_cache: dict = {"mtime": 0.0, "data": {}}
+    _library_cache: dict = {"mtime": 0.0, "data": {}, "file_mtimes": {}}
 
     def _load_tool_library(self):
         """Load RLM tool implementations from both LIBRARY_DIR and RLM_LIBRARY_DIR.
 
         RLM tools take priority over standard tools on name collision.
-        Uses directory mtime for cache invalidation.
+        Uses per-file mtime fingerprints for accurate cache invalidation —
+        catches content edits that don't update the directory mtime.
         """
         try:
-            if os.path.exists(RLM_LIBRARY_DIR):
-                dir_mtime = os.path.getmtime(RLM_LIBRARY_DIR)
-                if dir_mtime > self.__class__._library_cache.get("mtime", 0):
-                    library: dict = {}
-                    # RLM-specific tools first
+            current_files: dict = {}
+            for lib_dir in (LIBRARY_DIR, RLM_LIBRARY_DIR):
+                if not os.path.exists(lib_dir):
+                    continue
+                for filename in os.listdir(lib_dir):
+                    if filename.endswith(".py"):
+                        tool_name = filename[:-3]
+                        code_path = os.path.join(lib_dir, filename)
+                        try:
+                            current_files[tool_name] = os.path.getmtime(code_path)
+                        except OSError:
+                            pass
+
+            cache_mtimes = self.__class__._library_cache.get("file_mtimes", {})
+            needs_reload = (
+                set(current_files) != set(cache_mtimes)
+                or any(current_files[n] != cache_mtimes.get(n) for n in current_files)
+            )
+
+            if needs_reload or not self.__class__._library_cache.get("data"):
+                library: dict = {}
+                # Standard tools loaded first
+                if os.path.exists(LIBRARY_DIR):
+                    for filename in os.listdir(LIBRARY_DIR):
+                        if filename.endswith(".py"):
+                            tool_name = filename[:-3]
+                            code_path = os.path.join(LIBRARY_DIR, filename)
+                            with open(code_path, "r") as f:
+                                library[tool_name] = f.read()
+                # RLM tools override standard tools on name collision
+                if os.path.exists(RLM_LIBRARY_DIR):
                     for filename in os.listdir(RLM_LIBRARY_DIR):
                         if filename.endswith(".py"):
                             tool_name = filename[:-3]
                             code_path = os.path.join(RLM_LIBRARY_DIR, filename)
                             with open(code_path, "r") as f:
                                 library[tool_name] = f.read()
-                    # Common tools from standard library (don't override RLM tools)
-                    if os.path.exists(LIBRARY_DIR):
-                        for filename in os.listdir(LIBRARY_DIR):
-                            if filename.endswith(".py"):
-                                tool_name = filename[:-3]
-                                if tool_name not in library:
-                                    code_path = os.path.join(LIBRARY_DIR, filename)
-                                    with open(code_path, "r") as f:
-                                        library[tool_name] = f.read()
-                    self.__class__._library_cache["data"] = library
-                    self.__class__._library_cache["mtime"] = dir_mtime
-                return self.__class__._library_cache.get("data", {})
+                self.__class__._library_cache["data"] = library
+                self.__class__._library_cache["file_mtimes"] = current_files
+            return self.__class__._library_cache.get("data", {})
         except OSError as e:
             logger.warning(f"Failed to load RLM tool library: {e}")
         return {}
@@ -1177,24 +1205,6 @@ class RLMAgentLoopExecutor(AgentBaseExecutor):
             return snake
 
         return func_name
-
-    def _extract_user_content(self, messages: list) -> str:
-        for msg in messages:
-            if msg.get("role") == "user":
-                content = msg.get("content", "")
-                if content:
-                    return content
-        return " ".join(m.get("content", "") for m in messages if m.get("role") == "user")
-
-    def _classify_content(self, content: str) -> str:
-        content_lower = content.lower()
-        if "code" in content_lower or "def " in content_lower or "function" in content_lower:
-            return "code"
-        elif len(content) > 100000:
-            return "large_document"
-        elif len(content) > 10000:
-            return "long_text"
-        return "standard"
 
     def _build_repl_system_prompt(self, metadata: dict) -> str:
         return f"""You are operating in a REPL environment.
@@ -1308,6 +1318,8 @@ Call set_final() when complete."""
         model: str,
         config: dict,
         trace: list,
+        stream_queue: asyncio.Queue = None,
+        thinking_steps: list = None,
     ) -> tuple:
         """Core RLM loop: LLM generates code → executes tools → only metadata goes back.
 
@@ -1315,8 +1327,11 @@ Call set_final() when complete."""
         repl_state["variables"], NOT injected into messages.  Terminates when
         repl_state["final"] is set via set_final().
 
-        Returns (final_answer, final_repl_state).
+        Returns (final_answer, final_repl_state, conversation_messages).
         """
+        if thinking_steps is None:
+            thinking_steps = []
+
         max_iterations = config.get("max_iterations", 20)
         stdout_preview_length = config.get("stdout_preview_length", 500)
         max_llm_retries = config.get("max_llm_retries", 3)
@@ -1369,6 +1384,27 @@ Call set_final() when complete."""
             assistant_message = response["choices"][0]["message"]
             tool_calls = assistant_message.get("tool_calls", [])
 
+            if tool_calls:
+                for tc in tool_calls:
+                    fn = tc.get("function", {})
+                    name = fn.get("name", "?")
+                    args_raw = fn.get("arguments", "{}")
+                    try:
+                        args_dict = json.loads(args_raw)
+                        args_display = ", ".join(
+                            f"{k}={repr(v)[:80]}" for k, v in args_dict.items()
+                            if k != "_repl_state"
+                        )
+                    except Exception:
+                        args_display = args_raw[:160]
+                    thinking_steps.append(
+                        {"type": "tool_call", "name": name, "content": f"{name}({args_display})"}
+                    )
+                if stream_queue:
+                    await stream_queue.put(
+                        {"type": "thinking", "content": list(thinking_steps)}
+                    )
+
             if not tool_calls:
                 content = assistant_message.get("content", "")
                 if content:
@@ -1401,13 +1437,23 @@ Call set_final() when complete."""
                     "content": stdout_metadata,
                 })
 
+                success = tool_result.get("success", False)
+                display = str(output_content).strip()[:400]
+                thinking_steps.append(
+                    {"type": "tool_result", "name": tool_name, "content": display, "success": success}
+                )
+                if stream_queue:
+                    await stream_queue.put(
+                        {"type": "thinking", "content": list(thinking_steps)}
+                    )
+
             if repl_state.get("final") is not None:
                 trace.append(iteration_trace)
                 break
 
             trace.append(iteration_trace)
 
-        return repl_state.get("final"), repl_state
+        return repl_state.get("final"), repl_state, llm_messages
 
     async def receive(self, input_data: dict, config: dict = None) -> dict:
         """
@@ -1547,11 +1593,14 @@ Call set_final() when complete."""
 
         tool_library = self._load_tool_library()
         trace: list = []
+        stream_queue = config.get("_stream_queue")
+        # Local thinking_steps — assigned to self._thinking_steps at all exit paths
+        thinking_steps: list = []
 
         async def _execute():
             nonlocal iteration_count
 
-            final_result, final_state = await self._run_rlm_loop(
+            final_result, final_state, conversation_messages = await self._run_rlm_loop(
                 initial_messages=new_messages,
                 repl_state=repl_state,
                 tools_list=tools_list,
@@ -1566,9 +1615,11 @@ Call set_final() when complete."""
                     "stdout_preview_length": stdout_preview_length,
                 },
                 trace=trace,
+                stream_queue=stream_queue,
+                thinking_steps=thinking_steps,
             )
 
-            # Episode checkpoint
+            # Episode checkpoint — use actual conversation messages, not stub
             if episode is not None and sm is not None:
                 iterations = final_state.get("iteration", 0) + 1
                 iteration_count += iterations
@@ -1580,7 +1631,7 @@ Call set_final() when complete."""
                             completed_steps=input_data.get("completed_steps", []),
                             current_step=input_data.get("current_step", 0),
                             plan=input_data.get("plan", []),
-                            messages=new_messages if config.get("save_messages_in_episode", False) else None,
+                            messages=conversation_messages if config.get("save_messages_in_episode", False) else None,
                             add_checkpoint=True,
                         )
                     except Exception as e:
@@ -1596,7 +1647,7 @@ Call set_final() when complete."""
             result["iterations"] = final_state.get("iteration", 0) + 1
             result["rlm_trace"] = trace
             result["agent_loop_trace"] = trace
-            result["messages"] = new_messages
+            result["messages"] = conversation_messages
 
             if not final_result:
                 result["rlm_error"] = "No final answer set — max iterations reached or error"
@@ -1630,7 +1681,7 @@ Call set_final() when complete."""
                 result["replan_needed"] = False
                 result["replan_count"] = 0
 
-            # Episode finalization
+            # Episode finalization — use actual conversation messages
             if episode is not None and sm is not None:
                 try:
                     if result.get("agent_loop_error"):
@@ -1645,7 +1696,7 @@ Call set_final() when complete."""
                         completed_steps=result.get("completed_steps", []),
                         current_step=result.get("current_step", 0),
                         plan=result.get("plan", []),
-                        messages=new_messages if config.get("save_messages_in_episode", False) else None,
+                        messages=conversation_messages if config.get("save_messages_in_episode", False) else None,
                         add_checkpoint=True,
                     )
                     result["episode_id"] = episode.episode_id
@@ -1675,6 +1726,7 @@ Call set_final() when complete."""
                 if plan and len(plan) > 1
                 else "Execution timed out. Consider simplifying the approach."
             )
+            self._thinking_steps = thinking_steps
             return result
         except Exception as e:
             result = input_data.copy()
@@ -1686,10 +1738,12 @@ Call set_final() when complete."""
             result["replan_count"] = replan_count + 1
             result["replan_reason"] = f"Unexpected error: {str(e)}"
             result["suggested_approach"] = "Review plan and try alternative approach."
+            self._thinking_steps = thinking_steps
             return result
 
         result["rlm_trace"] = trace
         result["agent_loop_trace"] = trace
+        self._thinking_steps = thinking_steps
         return result
 
     async def send(self, processed_data: dict) -> dict:
@@ -1913,9 +1967,11 @@ class HybridAgentExecutor(AgentBaseExecutor):
         iterations = 0
         final_response = None
         had_tool_error = False
-        seen_calls: set = set()
 
         for iteration in range(max_iterations):
+            # Reset per-iteration: dedup catches duplicate calls within a single
+            # LLM response; max_iterations bounds cross-iteration repetition.
+            seen_calls: set = set()
             iterations += 1
             iteration_trace = {"iteration": iterations, "tool_calls": [], "errors": []}
 
@@ -1979,7 +2035,7 @@ class HybridAgentExecutor(AgentBaseExecutor):
                 tool_name = tool_call.get("function", {}).get("name", "unknown")
                 tool_args = tool_call.get("function", {}).get("arguments", "{}")
 
-                # Deduplication guard
+                # Deduplication guard (per-iteration scope)
                 try:
                     normalized_args = json.dumps(json.loads(tool_args), sort_keys=True)
                 except (json.JSONDecodeError, TypeError):
@@ -1987,7 +2043,7 @@ class HybridAgentExecutor(AgentBaseExecutor):
                 call_sig = f"{tool_name}:{normalized_args}"
                 if call_sig in seen_calls:
                     iteration_trace["errors"].append(
-                        f"Loop detected: '{tool_name}' called with identical args"
+                        f"Duplicate tool call skipped: '{tool_name}' with identical args in same response"
                     )
                     break
                 seen_calls.add(call_sig)
@@ -2192,11 +2248,12 @@ class HybridAgentExecutor(AgentBaseExecutor):
             "variables": {},
             "_var_counts": {},
             "sub_call_count": 0,
-            "max_sub_calls": 20,
+            "max_sub_calls": int(config.get("max_sub_calls", 20)),
             "recursion_depth": 0,
-            "max_recursion_depth": 3,
+            "max_recursion_depth": int(config.get("max_recursion_depth", 3)),
             "estimated_cost": 0.0,
-            "max_cost_usd": 1.0,
+            "max_cost_usd": float(config.get("max_cost_usd", 1.0)),
+            "sub_call_model": config.get("sub_call_model") or model,
         }
         trace: list = []
         # Fix 2: create thinking_steps locally before _execute()
@@ -2338,6 +2395,20 @@ class HybridAgentExecutor(AgentBaseExecutor):
                 if plan and len(plan) > 1
                 else "Execution timed out. Consider simplifying the approach."
             )
+            self._thinking_steps = thinking_steps
+            return result
+        except Exception as e:
+            result = input_data.copy()
+            result["messages"] = llm_messages
+            result["content"] = ""
+            result["agent_loop_error"] = str(e)
+            result["iterations"] = 0
+            result["hybrid_trace"] = trace
+            result["agent_loop_trace"] = trace
+            result["replan_needed"] = True
+            result["replan_count"] = replan_count + 1
+            result["replan_reason"] = f"Unexpected error: {str(e)}"
+            result["suggested_approach"] = "Review plan and try alternative approach."
             self._thinking_steps = thinking_steps
             return result
 
