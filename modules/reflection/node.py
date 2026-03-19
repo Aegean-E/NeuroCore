@@ -32,6 +32,9 @@ class ReflectionExecutor:
                 content = msg.get("content", "")
                 if isinstance(content, str):
                     return content
+                elif isinstance(content, list):
+                    texts = [part.get("text", "") for part in content if isinstance(part, dict) and part.get("type") == "text"]
+                    return " ".join(texts)
         return ""
 
     def _extract_assistant_response(self, input_data: dict) -> str:
@@ -41,13 +44,18 @@ class ReflectionExecutor:
         then falls back to scanning messages.
         """
         content = input_data.get("content")
-        if content:
+        if isinstance(content, str) and content:
             return content
 
         messages = input_data.get("messages", [])
         for msg in reversed(messages):
             if isinstance(msg, dict) and msg.get("role") == "assistant":
-                return msg.get("content", "")
+                content = msg.get("content", "")
+                if isinstance(content, str):
+                    return content
+                elif isinstance(content, list):
+                    texts = [part.get("text", "") for part in content if isinstance(part, dict) and part.get("type") == "text"]
+                    return " ".join(texts)
         return ""
 
     def _inject_improvement_message(self, input_data: dict, needs_improvement: str, user_request: str) -> dict:
