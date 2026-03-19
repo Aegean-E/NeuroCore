@@ -1,5 +1,6 @@
 import json
 import ast
+import os
 import sys
 import platform
 import asyncio
@@ -165,6 +166,116 @@ def make_vote_id(item_id: str) -> str:
     import hmac as _hmac, hashlib
     key = get_decoder()
     return _hmac.new(key, f"marketplace-vote:{item_id}".encode(), hashlib.sha256).hexdigest()[:16]
+
+
+REPORT_THRESHOLD = 3  # reports needed to show warning badge
+
+
+def make_report_id() -> str:
+    """
+    Stable anonymous reporter identity — same machine always produces the same ID.
+    Prevents double-reporting without storing PII.
+    Different context prefix from vote/claim prevents cross-use.
+    """
+    import hmac as _hmac, hashlib
+    key = get_decoder()
+    return _hmac.new(key, b"marketplace-reporter", hashlib.sha256).hexdigest()[:16]
+
+
+def _load_blocklist() -> list:
+    import os
+    path = os.path.join("data", "blocklist.json")
+    if not os.path.exists(path):
+        return []
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return []
+
+
+def _save_blocklist(handles: list) -> None:
+    import os
+    path = os.path.join("data", "blocklist.json")
+    os.makedirs("data", exist_ok=True)
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(handles, f, indent=2)
+    os.replace(tmp, path)
+
+
+MARKETPLACE_MAX_FILE_MB = 10  # max upload size in megabytes
+
+
+_PROFILE_PATH = os.path.join("data", "marketplace_profile.json")
+
+
+def _load_profile() -> dict:
+    """Return local marketplace profile dict (username, description)."""
+    try:
+        with open(_PROFILE_PATH, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
+def _save_profile_field(key: str, value: str) -> None:
+    """Atomically update a single field in the local marketplace profile."""
+    os.makedirs("data", exist_ok=True)
+    profile = _load_profile()
+    profile[key] = value
+    tmp = _PROFILE_PATH + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(profile, f, indent=2)
+    os.replace(tmp, _PROFILE_PATH)
+
+
+def _get_marketplace_username() -> str:
+    return _load_profile().get("username", "")
+
+
+def _get_marketplace_description() -> str:
+    return _load_profile().get("description", "")
+
+
+# ── Marketplace notifications ──────────────────────────────────────────────────
+
+_NOTIFS_PATH = os.path.join("data", "marketplace_notifications.json")
+
+
+def _load_notifs() -> list:
+    try:
+        with open(_NOTIFS_PATH, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return []
+
+
+def _save_notifs(notifs: list) -> None:
+    os.makedirs("data", exist_ok=True)
+    tmp = _NOTIFS_PATH + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(notifs, f, indent=2)
+    os.replace(tmp, _NOTIFS_PATH)
+
+
+def _add_notif(notif_type: str, item_id: str, item_name: str,
+               from_handle: str, from_username: str, text: str) -> None:
+    """Append a notification to the local notifications list (capped at 200)."""
+    import uuid as _uuid
+    notifs = _load_notifs()
+    notifs.insert(0, {
+        "id": str(_uuid.uuid4())[:8],
+        "type": notif_type,
+        "item_id": item_id,
+        "item_name": item_name,
+        "from_handle": from_handle,
+        "from_username": from_username,
+        "text": text[:200],
+        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M"),
+        "read": False,
+    })
+    _save_notifs(notifs[:200])
 
 
 def _is_legacy_owner(item: dict) -> bool:
@@ -969,16 +1080,39 @@ async def get_marketplace(request: Request, settings_man: SettingsManager = Depe
     except Exception:
         pass
 
-    # Pre-compute ownership and vote state (Jinja2 can't call Python functions)
+    # Filter blocked uploaders
+    blocklist = _load_blocklist()
+    my_handle = get_public_handle()
+    if blocklist:
+        catalog = [i for i in catalog if i.get("uploader_handle", "") not in blocklist]
+
+    # Pre-compute ownership, vote state, and report state (Jinja2 can't call Python functions)
     owned_ids = {item["id"] for item in catalog if is_item_owner(item)}
     my_votes = {
         item["id"]: item.get("voters", {}).get(make_vote_id(item["id"]))
         for item in catalog
     }
+    my_reporter_id = make_report_id()
+    my_reported_ids = {
+        item["id"] for item in catalog
+        if any(r.get("reporter_id") == my_reporter_id for r in item.get("reports", []))
+    }
 
-    # Top downloaded (track download_count) and top upvoted
+    # Top stats
     top_downloaded = sorted(catalog, key=lambda i: i.get("download_count", 0), reverse=True)[:5]
     top_upvoted = sorted(catalog, key=lambda i: i.get("upvotes", 0), reverse=True)[:5]
+
+    # Top uploaders: sum downloads per handle
+    uploader_stats: dict = {}
+    for item in catalog:
+        h = item.get("uploader_handle", "")
+        if not h:
+            continue
+        if h not in uploader_stats:
+            uploader_stats[h] = {"handle": h, "downloads": 0, "items": 0}
+        uploader_stats[h]["downloads"] += item.get("download_count", 0)
+        uploader_stats[h]["items"] += 1
+    top_uploaders = sorted(uploader_stats.values(), key=lambda x: x["downloads"], reverse=True)[:5]
 
     # System prompt config for Library tab
     sp_module = module_manager.get_module("system_prompt") or {}
@@ -1009,9 +1143,19 @@ async def get_marketplace(request: Request, settings_man: SettingsManager = Depe
         "catalog": catalog,
         "owned_ids": owned_ids,
         "my_votes": my_votes,
+        "my_reported_ids": my_reported_ids,
         "dl_history": dl_history,
+        "blocklist": blocklist,
+        "my_handle": my_handle,
+        "my_username": _get_marketplace_username(),
+        "my_upload_count": sum(1 for i in catalog if i.get("uploader_handle") == my_handle),
+        "my_total_dl": sum(i.get("download_count", 0) for i in catalog if i.get("uploader_handle") == my_handle),
+        "my_total_up": sum(i.get("upvotes", 0) for i in catalog if i.get("uploader_handle") == my_handle),
         "top_downloaded": top_downloaded,
         "top_upvoted": top_upvoted,
+        "top_uploaders": top_uploaders,
+        "report_threshold": REPORT_THRESHOLD,
+        "max_file_mb": MARKETPLACE_MAX_FILE_MB,
         "active_module": "marketplace",
         "settings": settings_man.settings,
     })
@@ -1037,9 +1181,12 @@ async def upload_marketplace_item(
     ext = os.path.splitext(file.filename)[1]
     save_filename = f"{item_id}{ext}"
     save_path = os.path.join(upload_dir, save_filename)
+    content = await file.read()
+    if len(content) > MARKETPLACE_MAX_FILE_MB * 1024 * 1024:
+        raise HTTPException(status_code=413, detail=f"File too large. Maximum size is {MARKETPLACE_MAX_FILE_MB} MB.")
     with open(save_path, "wb") as f:
-        shutil.copyfileobj(file.file, f)
-        
+        f.write(content)
+
     # Save Image Banner Optional
     image_filename = None
     if image and image.filename:
@@ -1067,6 +1214,8 @@ async def upload_marketplace_item(
         "image_filename": image_filename,
         "created_at": datetime.now().strftime("%Y-%m-%d %H:%M"),
         "uploader_handle": get_public_handle(),
+        "uploader_username": _get_marketplace_username(),
+        "uploader_description": _get_marketplace_description(),
         "version": 1,
     }
     # Compute claim after entry is built so item_id is available
@@ -1174,6 +1323,12 @@ async def marketplace_item_detail(request: Request, item_id: str, module_manager
     ext = os.path.splitext(item["save_filename"])[1].lower()
     is_owner = is_item_owner(item)
     user_vote = item.get("voters", {}).get(make_vote_id(item_id))
+    reports = item.get("reports", [])
+    report_count = len(reports)
+    comments = item.get("comments", [])
+    is_flagged = report_count >= REPORT_THRESHOLD
+    already_reported = any(r.get("reporter_id") == make_report_id() for r in reports)
+    is_blocked = item.get("uploader_handle", "") in _load_blocklist()
 
     # New version badge for non-owners who have downloaded before
     dl_history_path = os.path.join("data", "download_history.json")
@@ -1235,6 +1390,12 @@ async def marketplace_item_detail(request: Request, item_id: str, module_manager
         "item": item,
         "is_owner": is_owner,
         "user_vote": user_vote,
+        "reports": reports,
+        "report_count": report_count,
+        "is_flagged": is_flagged,
+        "already_reported": already_reported,
+        "is_blocked": is_blocked,
+        "report_threshold": REPORT_THRESHOLD,
         "new_version_available": new_version_available,
         "downloaded_version": downloaded_version,
         "item_version": item_version,
@@ -1242,6 +1403,9 @@ async def marketplace_item_detail(request: Request, item_id: str, module_manager
         "file_tree": file_tree,
         "initial_content": initial_content,
         "initial_file": initial_file,
+        "comments": comments,
+        "changelog": item.get("changelog", []),
+        "my_handle": get_public_handle(),
         "modules": module_manager.get_all_modules(),
         "settings": settings_man.settings,
     })
@@ -1308,6 +1472,7 @@ async def preview_marketplace_item(item_id: str):
 async def update_marketplace_item(
     item_id: str,
     description: str = Form(None),
+    update_notes: str = Form(None),
     file: UploadFile = File(None),
     image: UploadFile = File(None),
 ):
@@ -1364,8 +1529,18 @@ async def update_marketplace_item(
         item["description"] = description
 
     # Bump version
-    item["version"] = item.get("version", 1) + 1
+    new_version = item.get("version", 1) + 1
+    item["version"] = new_version
     item["updated_at"] = datetime.now().strftime("%Y-%m-%d %H:%M")
+
+    # Append to changelog
+    if update_notes and update_notes.strip():
+        entry = {
+            "version": new_version,
+            "notes": update_notes.strip()[:500],
+            "timestamp": item["updated_at"],
+        }
+        item.setdefault("changelog", []).insert(0, entry)
 
     tmp = catalog_path + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
@@ -1412,6 +1587,152 @@ async def delete_marketplace_item(item_id: str):
 
     from fastapi import Response
     return Response(status_code=200)
+
+@router.post("/marketplace/report/{item_id}")
+async def report_marketplace_item(item_id: str, reason: str = Form(...)):
+    """Add a user report with description to a marketplace item."""
+    import os
+    if not reason or not reason.strip():
+        raise HTTPException(status_code=400, detail="Reason is required")
+
+    catalog_path = os.path.join("data", "marketplace", "catalog.json")
+    if not os.path.exists(catalog_path):
+        raise HTTPException(status_code=404, detail="Catalog not found")
+    try:
+        with open(catalog_path, "r", encoding="utf-8") as f:
+            catalog = json.load(f)
+    except Exception:
+        raise HTTPException(status_code=500, detail="Failed to read catalog")
+
+    item = next((i for i in catalog if i["id"] == item_id), None)
+    if not item:
+        raise HTTPException(status_code=404, detail="Item not found")
+    if is_item_owner(item):
+        raise HTTPException(status_code=403, detail="You cannot report your own item")
+
+    reporter_id = make_report_id()
+    reports = item.setdefault("reports", [])
+
+    if any(r.get("reporter_id") == reporter_id for r in reports):
+        raise HTTPException(status_code=409, detail="You have already reported this item")
+
+    reports.append({
+        "reporter_id": reporter_id,
+        "reporter_handle": get_public_handle(),
+        "reason": reason.strip()[:500],
+        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M"),
+    })
+
+    tmp = catalog_path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(catalog, f, indent=4)
+    os.replace(tmp, catalog_path)
+
+    report_count = len(reports)
+    return JSONResponse(content={
+        "status": "success",
+        "report_count": report_count,
+        "flagged": report_count >= REPORT_THRESHOLD,
+    })
+
+
+@router.post("/marketplace/block")
+async def block_uploader(handle: str = Form(...)):
+    if not handle:
+        raise HTTPException(status_code=400, detail="Handle required")
+    if handle == get_public_handle():
+        raise HTTPException(status_code=400, detail="Cannot block yourself")
+    blocklist = _load_blocklist()
+    if handle not in blocklist:
+        blocklist.append(handle)
+        _save_blocklist(blocklist)
+    return JSONResponse(content={"status": "success", "blocked": handle})
+
+
+@router.post("/marketplace/unblock")
+async def unblock_uploader(handle: str = Form(...)):
+    if not handle:
+        raise HTTPException(status_code=400, detail="Handle required")
+    blocklist = _load_blocklist()
+    if handle in blocklist:
+        blocklist.remove(handle)
+        _save_blocklist(blocklist)
+    return JSONResponse(content={"status": "success", "unblocked": handle})
+
+
+@router.get("/marketplace/uploader/{handle}", response_class=HTMLResponse)
+async def marketplace_uploader_profile(
+    request: Request, handle: str,
+    preview: bool = False,
+    module_manager: ModuleManager = Depends(get_module_manager),
+    settings_man: SettingsManager = Depends(get_settings_manager),
+):
+    """Public uploader profile: all their items, stats, and reports."""
+    import os
+    catalog_path = os.path.join("data", "marketplace", "catalog.json")
+    catalog = []
+    if os.path.exists(catalog_path):
+        try:
+            with open(catalog_path, "r", encoding="utf-8") as f:
+                catalog = json.load(f)
+        except Exception:
+            pass
+
+    their_items = [i for i in catalog if i.get("uploader_handle") == handle]
+
+    # Aggregate stats
+    total_downloads = sum(i.get("download_count", 0) for i in their_items)
+    total_upvotes   = sum(i.get("upvotes", 0) for i in their_items)
+    total_downvotes = sum(i.get("downvotes", 0) for i in their_items)
+    all_reports = [
+        {**r, "item_name": i.get("name", i["id"]), "item_id": i["id"]}
+        for i in their_items
+        for r in i.get("reports", [])
+    ]
+    total_reports = len(all_reports)
+
+    is_actual_me = handle == get_public_handle()
+    is_me = is_actual_me and not preview
+    is_blocked = handle in _load_blocklist()
+    owned_ids = {i["id"] for i in their_items if is_item_owner(i)}
+
+    dl_history = {}
+    dl_path = os.path.join("data", "download_history.json")
+    if os.path.exists(dl_path):
+        try:
+            with open(dl_path, "r", encoding="utf-8") as f:
+                dl_history = json.load(f)
+        except Exception:
+            pass
+
+    # Get uploader's display username:
+    # - For own handle: use local profile file (authoritative), even in preview mode
+    # - For others: use username stored in their most recent item
+    if is_actual_me:
+        uploader_username = _get_marketplace_username()
+        uploader_description = _get_marketplace_description()
+    else:
+        uploader_username = next((i.get("uploader_username", "") for i in reversed(their_items) if i.get("uploader_username")), "")
+        uploader_description = next((i.get("uploader_description", "") for i in reversed(their_items) if i.get("uploader_description")), "")
+    return templates.TemplateResponse(request, "marketplace_uploader.html", {
+        "handle": handle,
+        "uploader_username": uploader_username,
+        "uploader_description": uploader_description,
+        "items": their_items,
+        "total_downloads": total_downloads,
+        "total_upvotes": total_upvotes,
+        "total_downvotes": total_downvotes,
+        "all_reports": all_reports,
+        "total_reports": total_reports,
+        "report_threshold": REPORT_THRESHOLD,
+        "is_me": is_me,
+        "is_preview": preview,
+        "is_blocked": is_blocked,
+        "owned_ids": owned_ids,
+        "dl_history": dl_history,
+        "settings": settings_man.settings,
+    })
+
 
 @router.post("/marketplace/vote/{item_id}/{direction}")
 async def vote_marketplace_item(item_id: str, direction: str):
@@ -1476,6 +1797,416 @@ async def vote_marketplace_item(item_id: str, direction: str):
         "downvotes": item["downvotes"],
         "user_vote": user_vote
     })
+
+
+@router.post("/marketplace/item/{item_id}/comment")
+async def add_marketplace_comment(item_id: str, text: str = Form(...)):
+    """Append a comment to a marketplace item. Comments persist through owner updates."""
+    import os, uuid as _uuid
+    text = text.strip()
+    if not text:
+        return JSONResponse(status_code=400, content={"status": "error", "detail": "Comment text is required"})
+    if len(text) > 1000:
+        return JSONResponse(status_code=400, content={"status": "error", "detail": "Comment too long (max 1000 chars)"})
+
+    catalog_path = os.path.join("data", "marketplace", "catalog.json")
+    try:
+        with open(catalog_path, "r", encoding="utf-8") as f:
+            catalog = json.load(f)
+    except Exception:
+        raise HTTPException(status_code=500, detail="Failed to read catalog")
+
+    item = next((i for i in catalog if i["id"] == item_id), None)
+    if not item:
+        raise HTTPException(status_code=404, detail="Item not found")
+
+    comment = {
+        "id": str(_uuid.uuid4())[:8],
+        "author_handle": get_public_handle(),
+        "author_username": _get_marketplace_username(),
+        "text": text,
+        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M"),
+    }
+    item.setdefault("comments", []).append(comment)
+
+    tmp = catalog_path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(catalog, f, indent=4)
+    os.replace(tmp, catalog_path)
+
+    my_handle = get_public_handle()
+    author_handle = comment["author_handle"]
+
+    # Notify if someone else commented on my item
+    if item.get("uploader_handle") == my_handle and author_handle != my_handle:
+        _add_notif("comment", item_id, item.get("name", item_id),
+                   author_handle, comment["author_username"], text)
+
+    # Notify if comment @mentions my handle (and I'm not the commenter)
+    import re as _re
+    if author_handle != my_handle and _re.search(rf"@{_re.escape(my_handle)}", text, _re.IGNORECASE):
+        _add_notif("mention", item_id, item.get("name", item_id),
+                   author_handle, comment["author_username"], text)
+
+    return JSONResponse(content={"status": "success", "comment": comment})
+
+
+@router.delete("/marketplace/item/{item_id}/comment/{comment_id}")
+async def delete_marketplace_comment(item_id: str, comment_id: str):
+    """Delete a comment if it belongs to the current user."""
+    catalog_path = os.path.join("data", "marketplace", "catalog.json")
+    try:
+        with open(catalog_path, "r", encoding="utf-8") as f:
+            catalog = json.load(f)
+    except Exception:
+        raise HTTPException(status_code=500, detail="Failed to read catalog")
+
+    item = next((i for i in catalog if i["id"] == item_id), None)
+    if not item:
+        raise HTTPException(status_code=404, detail="Item not found")
+
+    my_handle = get_public_handle()
+    comments = item.get("comments", [])
+    target = next((c for c in comments if c["id"] == comment_id), None)
+    if not target:
+        raise HTTPException(status_code=404, detail="Comment not found")
+    if target["author_handle"] != my_handle:
+        raise HTTPException(status_code=403, detail="Cannot delete another user's comment")
+
+    item["comments"] = [c for c in comments if c["id"] != comment_id]
+    tmp = catalog_path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(catalog, f, indent=4)
+    os.replace(tmp, catalog_path)
+    return JSONResponse(content={"status": "success"})
+
+
+@router.post("/marketplace/import/{item_id}")
+async def import_marketplace_item_to_neurocore(item_id: str, module_manager: ModuleManager = Depends(get_module_manager), settings_man: SettingsManager = Depends(get_settings_manager)):
+    """Import a marketplace item directly into NeuroCore (no file saved to user's disk)."""
+    import os, zipfile, shutil, re
+
+    catalog_path = os.path.join("data", "marketplace", "catalog.json")
+    try:
+        with open(catalog_path, "r", encoding="utf-8") as f:
+            catalog = json.load(f)
+    except Exception:
+        raise HTTPException(status_code=500, detail="Failed to read catalog")
+
+    item = next((i for i in catalog if i["id"] == item_id), None)
+    if not item:
+        raise HTTPException(status_code=404, detail="Item not found")
+
+    file_path = os.path.join("data", "marketplace", "uploads", item["save_filename"])
+    if not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail="File not found on disk")
+
+    item_type = item.get("type", "").lower()
+    ext = os.path.splitext(file_path)[1].lower()
+    result_message = ""
+
+    if item_type == "skill":
+        skills_data_dir = os.path.join("modules", "skills", "data")
+        skills_meta_path = os.path.join(skills_data_dir, "skills_metadata.json")
+        os.makedirs(skills_data_dir, exist_ok=True)
+
+        md_content = None
+        if ext in (".md", ".txt"):
+            with open(file_path, "r", encoding="utf-8", errors="replace") as f:
+                md_content = f.read()
+        elif ext == ".zip":
+            with zipfile.ZipFile(file_path) as zf:
+                for name in zf.namelist():
+                    if name.lower().endswith(".md") and not name.startswith("__"):
+                        md_content = zf.read(name).decode("utf-8", errors="replace")
+                        break
+
+        if not md_content:
+            return JSONResponse(status_code=400, content={"status": "error", "detail": "No .md file found in the skill package"})
+
+        skill_id = re.sub(r'[^a-zA-Z0-9\s]', '', item["name"]).lower().strip().replace(' ', '_') or item["id"]
+        with open(os.path.join(skills_data_dir, f"{skill_id}.md"), "w", encoding="utf-8") as f:
+            f.write(md_content)
+
+        skills_meta: dict = {}
+        try:
+            if os.path.exists(skills_meta_path):
+                with open(skills_meta_path, "r", encoding="utf-8") as f:
+                    skills_meta = json.load(f)
+        except Exception:
+            pass
+        skills_meta[skill_id] = {
+            "name": item["name"],
+            "description": item.get("description", ""),
+            "category": "marketplace",
+            "tags": ["marketplace", "imported"],
+            "created_at": datetime.now().isoformat(),
+            "updated_at": datetime.now().isoformat(),
+        }
+        tmp = skills_meta_path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(skills_meta, f, indent=4)
+        os.replace(tmp, skills_meta_path)
+        result_message = f"Skill '{item['name']}' imported to your skills library."
+
+    elif item_type == "flow":
+        flow_data = None
+        if ext == ".json":
+            try:
+                with open(file_path, "r", encoding="utf-8") as f:
+                    flow_data = json.load(f)
+            except Exception as e:
+                return JSONResponse(status_code=400, content={"status": "error", "detail": f"Invalid JSON: {e}"})
+        elif ext == ".zip":
+            with zipfile.ZipFile(file_path) as zf:
+                for name in zf.namelist():
+                    if name.lower().endswith(".json") and not name.startswith("__"):
+                        try:
+                            flow_data = json.loads(zf.read(name).decode("utf-8"))
+                            break
+                        except Exception:
+                            continue
+
+        if not flow_data or not isinstance(flow_data, dict):
+            return JSONResponse(status_code=400, content={"status": "error", "detail": "No valid JSON flow file found"})
+
+        flows_path = os.path.join("ai_flows.json")
+        flows: dict = {}
+        try:
+            if os.path.exists(flows_path):
+                with open(flows_path, "r", encoding="utf-8") as f:
+                    flows = json.load(f)
+        except Exception:
+            pass
+
+        import uuid as _uuid
+        if all(isinstance(v, dict) and "nodes" in v for v in flow_data.values()):
+            for fid, fdata in flow_data.items():
+                nid = fid if fid not in flows else f"{fid}_{_uuid.uuid4().hex[:6]}"
+                flows[nid] = fdata
+            result_message = f"Imported {len(flow_data)} flow(s) from '{item['name']}'."
+        elif "nodes" in flow_data or "name" in flow_data:
+            flow_name = flow_data.get("name", item["name"])
+            fid = re.sub(r'[^a-zA-Z0-9_]', '_', flow_name.lower())
+            if fid in flows:
+                fid = f"{fid}_{_uuid.uuid4().hex[:6]}"
+            flows[fid] = flow_data
+            result_message = f"Flow '{flow_name}' imported to your flows."
+        else:
+            return JSONResponse(status_code=400, content={"status": "error", "detail": "Unrecognized flow format"})
+
+        tmp = flows_path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(flows, f, indent=4)
+        os.replace(tmp, flows_path)
+
+        # Auto-activate the first imported flow if none are currently active
+        active_flows = list(settings_man.get("active_ai_flows", []))
+        if not active_flows:
+            first_id = list(flows.keys())[0] if flows else None
+            if first_id:
+                settings_man.save_settings({"active_ai_flows": [first_id]})
+                result_message += " Set as active flow."
+
+
+    elif item_type == "module":
+        if ext != ".zip":
+            return JSONResponse(status_code=400, content={"status": "error", "detail": "Module must be a .zip file"})
+        module_name = re.sub(r'[^a-zA-Z0-9_]', '_', item["name"].lower()).strip('_') or item["id"]
+        module_target = os.path.join("modules", module_name)
+        with zipfile.ZipFile(file_path) as zf:
+            members = zf.namelist()
+            root_dirs = {m.split('/')[0] for m in members if '/' in m}
+            if len(root_dirs) == 1:
+                root = list(root_dirs)[0] + '/'
+                for member in members:
+                    if member.startswith(root) and len(member) > len(root):
+                        rel = member[len(root):]
+                        tgt = os.path.join(module_target, rel)
+                        os.makedirs(os.path.dirname(tgt), exist_ok=True)
+                        if not member.endswith('/'):
+                            with zf.open(member) as src, open(tgt, 'wb') as dst:
+                                dst.write(src.read())
+            else:
+                os.makedirs(module_target, exist_ok=True)
+                zf.extractall(module_target)
+        result_message = f"Module '{item['name']}' extracted to modules/{module_name}/. Reload modules in Settings to activate."
+
+    elif item_type == "tool":
+        import filelock as _filelock
+        tools_json   = os.path.join("modules", "tools", "tools.json")
+        library_dir  = os.path.join("modules", "tools", "library")
+        lock_file    = tools_json + ".lock"
+        os.makedirs(library_dir, exist_ok=True)
+
+        with open(file_path, "rb") as f:
+            raw = f.read()
+
+        _lock = _filelock.FileLock(lock_file)
+        with _lock:
+            try:
+                existing = json.loads(open(tools_json).read()) if os.path.exists(tools_json) else {}
+            except Exception:
+                existing = {}
+
+            if ext == ".json":
+                tool_data = json.loads(raw.decode("utf-8"))
+                if isinstance(tool_data, list):
+                    tool_data = tool_data[0] if tool_data else {}
+                t_name = re.sub(r'[^a-zA-Z0-9_]', '_', (tool_data.get("name") or item["name"]).strip()).strip("_") or item["id"]
+                existing[t_name] = {
+                    "definition": {
+                        "type": "function",
+                        "function": {
+                            "name": t_name,
+                            "description": tool_data.get("description", item.get("description", "")),
+                            "parameters": tool_data.get("parameters", {"type": "object", "properties": {}})
+                        }
+                    },
+                    "enabled": tool_data.get("enabled", True)
+                }
+                code = tool_data.get("code", "")
+                with open(os.path.join(library_dir, f"{t_name}.py"), "w", encoding="utf-8") as f:
+                    f.write(code)
+            elif ext == ".py":
+                t_name = re.sub(r'[^a-zA-Z0-9_]', '_', os.path.splitext(os.path.basename(file_path))[0]).strip("_") or item["id"]
+                if t_name not in existing:
+                    existing[t_name] = {
+                        "definition": {
+                            "type": "function",
+                            "function": {
+                                "name": t_name,
+                                "description": item.get("description", "Imported tool"),
+                                "parameters": {"type": "object", "properties": {}}
+                            }
+                        },
+                        "enabled": True
+                    }
+                with open(os.path.join(library_dir, f"{t_name}.py"), "w", encoding="utf-8") as f:
+                    f.write(raw.decode("utf-8"))
+            else:
+                return JSONResponse(status_code=400, content={"status": "error", "detail": "Tool must be a .json or .py file"})
+
+            with open(tools_json, "w", encoding="utf-8") as f:
+                json.dump(existing, f, indent=4)
+
+        result_message = f"Tool '{t_name}' registered and ready in Tools."
+
+    elif item_type == "system prompt":
+        prompts_dir = os.path.join("data", "marketplace", "imported_prompts")
+        os.makedirs(prompts_dir, exist_ok=True)
+        prompt_name = re.sub(r'[^a-zA-Z0-9\s_-]', '', item["name"]).strip()
+        shutil.copy2(file_path, os.path.join(prompts_dir, f"{prompt_name}.md"))
+        result_message = f"System prompt '{item['name']}' saved. Go to Settings → System Prompt to apply it."
+
+    else:
+        return JSONResponse(status_code=400, content={"status": "error", "detail": f"Unknown type: {item_type}"})
+
+    # Record import: increment download_count + update download_history
+    try:
+        with open(catalog_path, "r", encoding="utf-8") as f:
+            cat_m = json.load(f)
+        for ci in cat_m:
+            if ci["id"] == item_id:
+                ci["download_count"] = ci.get("download_count", 0) + 1
+                break
+        tmp = catalog_path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(cat_m, f, indent=4)
+        os.replace(tmp, catalog_path)
+    except Exception:
+        pass
+
+    dl_history_path = os.path.join("data", "download_history.json")
+    try:
+        dl: dict = {}
+        if os.path.exists(dl_history_path):
+            with open(dl_history_path, "r", encoding="utf-8") as f:
+                dl = json.load(f)
+        dl[item_id] = item.get("version", 1)
+        tmp = dl_history_path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(dl, f, indent=2)
+        os.replace(tmp, dl_history_path)
+    except Exception:
+        pass
+
+    return JSONResponse(content={"status": "success", "message": result_message})
+
+
+@router.post("/marketplace/profile/username")
+async def set_marketplace_username(username: str = Form(...)):
+    """Set the user's display name shown alongside their handle."""
+    import re
+    username = username.strip()
+    if len(username) > 30:
+        return JSONResponse(status_code=400, content={"status": "error", "detail": "Username too long (max 30 chars)"})
+    if username and not re.match(r'^[\w\s\-\.]+$', username):
+        return JSONResponse(status_code=400, content={"status": "error", "detail": "Only letters, numbers, spaces, hyphens, and periods allowed"})
+    _save_profile_field("username", username)
+    return JSONResponse(content={"status": "success", "username": username})
+
+
+@router.post("/marketplace/profile/description")
+async def set_marketplace_description(description: str = Form(...)):
+    """Set the user's short bio shown on their uploader profile."""
+    description = description.strip()
+    if len(description) > 200:
+        return JSONResponse(status_code=400, content={"status": "error", "detail": "Description too long (max 200 chars)"})
+    _save_profile_field("description", description)
+    return JSONResponse(content={"status": "success", "description": description})
+
+
+@router.get("/marketplace/handles")
+async def get_marketplace_handles():
+    """Return all distinct uploader handles + display names from the catalog."""
+    catalog_path = os.path.join("data", "marketplace", "catalog.json")
+    try:
+        with open(catalog_path, "r", encoding="utf-8") as f:
+            catalog = json.load(f)
+    except Exception:
+        return JSONResponse(content={"status": "success", "handles": []})
+    seen = {}
+    for item in catalog:
+        h = item.get("uploader_handle", "")
+        if h and h not in seen:
+            seen[h] = item.get("uploader_username", "")
+    handles = [{"handle": h, "username": u} for h, u in seen.items()]
+    return JSONResponse(content={"status": "success", "handles": handles})
+
+
+@router.get("/marketplace/notifications")
+async def get_marketplace_notifications():
+    """Return all local marketplace notifications, newest first."""
+    return JSONResponse(content={"status": "success", "notifications": _load_notifs()})
+
+
+@router.post("/marketplace/notifications/read")
+async def mark_all_notifications_read():
+    """Mark all notifications as read."""
+    notifs = _load_notifs()
+    for n in notifs:
+        n["read"] = True
+    _save_notifs(notifs)
+    return JSONResponse(content={"status": "success"})
+
+
+@router.post("/marketplace/notifications/read/{notif_id}")
+async def mark_notification_read(notif_id: str):
+    """Mark a single notification as read."""
+    notifs = _load_notifs()
+    for n in notifs:
+        if n["id"] == notif_id:
+            n["read"] = True
+    _save_notifs(notifs)
+    return JSONResponse(content={"status": "success"})
+
+
+@router.delete("/marketplace/notifications")
+async def clear_all_notifications():
+    """Delete all notifications."""
+    _save_notifs([])
+    return JSONResponse(content={"status": "success"})
 
 
 @router.post("/settings/decoder/import")

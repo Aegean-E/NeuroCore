@@ -657,6 +657,16 @@
             document.getElementById(tabId).classList.remove('hidden');
         }
 
+        // Auto-navigate to tab from URL ?tab= param
+        document.addEventListener('DOMContentLoaded', () => {
+            const params = new URLSearchParams(window.location.search);
+            const tab = params.get('tab');
+            if (tab) {
+                const link = document.querySelector(`a[onclick*="'${tab}'"]`);
+                if (link) link.click();
+            }
+        });
+
         function openResetModal() {
             const modal = document.getElementById('reset-modal');
             const backdrop = document.getElementById('reset-modal-backdrop');
