@@ -8,15 +8,16 @@ NeuroCore is a **modular, extensible AI orchestration platform** built with Pyth
 
 | Metric | Value |
 |--------|-------|
-| Active modules | 17 |
-| Node executors | 27 |
-| HTTP routes (core) | 45 |
-| Test files | 71 |
-| Test cases | 1,051+ |
-| Web templates | 36 |
+| Active modules | 18 |
+| Node executors | 28 |
+| HTTP routes (core) | 74 |
+| HTTP routes (total) | 167 |
+| Test files | 72 |
+| Test cases | 1,141+ |
+| Web templates | 39 |
 | Built-in tools | 23 (16 standard + 7 RLM) |
-| Total Python files | 165+ |
-| Lines of code | ~41,000 |
+| Total Python files | 170+ |
+| Lines of code | ~45,000 |
 
 ---
 
@@ -48,7 +49,7 @@ NeuroCore is a **modular, extensible AI orchestration platform** built with Pyth
 │                                    ▼                                      │
 │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐   │
 │  │ LLMBridge   │  │Observability│  │ Routers     │  │ Dependencies│   │
-│  │ (API Client)│  │(Trace/Metr.)│  │ (45 routes) │  │ (DI)        │   │
+│  │ (API Client)│  │(Trace/Metr.)│  │ (74 routes) │  │ (DI)        │   │
 │  └─────────────┘  └─────────────┘  └─────────────┘  └─────────────┘   │
 └─────────────────────────────────────────────────────────────────────────────┘
                                     │
@@ -68,10 +69,10 @@ NeuroCore is a **modular, extensible AI orchestration platform** built with Pyth
 │  │messaging │  │ calendar │  │  skills  │  │reasoning │  │ browser_ │   │
 │  │  _bridge │  │ (Events) │  │(Instruct)│  │  _book   │  │  auto    │   │
 │  └──────────┘  └──────────┘  └──────────┘  └──────────┘  └──────────┘   │
-│  ┌──────────┐  ┌──────────┐                                               │
-│  │ memory_  │  │annotatio │                                               │
-│  │ browser  │  │   ns     │                                               │
-│  └──────────┘  └──────────┘                                               │
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐                                │
+│  │ memory_  │  │annotatio │  │  email_  │                                │
+│  │ browser  │  │   ns     │  │  bridge  │                                │
+│  └──────────┘  └──────────┘  └──────────┘                                │
 └─────────────────────────────────────────────────────────────────────────────┘
                                     │
                                     ▼
@@ -91,14 +92,14 @@ NeuroCore is a **modular, extensible AI orchestration platform** built with Pyth
 | **Backend** | Python 3.12+ | Core runtime |
 | **Web Framework** | FastAPI 0.115+ | HTTP API & routing |
 | **Frontend** | HTMX + Tailwind CSS | Dynamic UI without JS framework |
-| **Templating** | Jinja2 3.1+ | HTML generation (36 templates) |
+| **Templating** | Jinja2 3.1+ | HTML generation (39 templates) |
 | **Database** | SQLite (WAL mode, FTS5) | Metadata, memory, knowledge base |
 | **Vector DB** | FAISS IndexFlatIP | Similarity search |
 | **LLM Client** | httpx 0.28+ | Async API calls with connection pooling |
 | **Concurrency** | asyncio + threading | Hybrid async/sync model |
 | **Data Validation** | Pydantic 2.10+ | Schema enforcement |
 | **WebSocket** | websockets 12.0+ | Discord Gateway, custom protocols |
-| **Testing** | pytest + pytest-asyncio | Test framework (1,051+ tests) |
+| **Testing** | pytest + pytest-asyncio | Test framework (1,141+ tests) |
 | **Containers** | Docker + docker-compose | Deployment |
 
 ### 1.3 Project Structure
@@ -116,14 +117,14 @@ NeuroCore/
 │   ├── structured_output.py  # Pydantic schema enforcement (retry logic)
 │   ├── session_manager.py    # Chat session + EpisodeState persistence
 │   ├── debug.py              # Structured debug logging
-│   ├── routers.py            # 45 HTTP endpoints
+│   ├── routers.py            # 74 HTTP endpoints
 │   ├── dependencies.py       # FastAPI dependency injection
 │   ├── errors.py             # 14 typed exception classes
 │   ├── flow_data.py          # FlowData TypedDict + helper functions
 │   ├── flow_context.py       # FlowContext Pydantic model
 │   ├── planner_helpers.py    # PlanHelper: dependency graphs, cycle detection
 │   └── schemas/              # Domain models for scientific research
-├── modules/                  # 17 extensible modules
+├── modules/                  # 18 extensible modules
 │   ├── llm_module/          # Core LLM interface (streaming, tool calling, vision)
 │   ├── agent_loop/          # Autonomous agent loop (3 nodes)
 │   ├── system_prompt/       # Context injection, tool registration
@@ -141,7 +142,7 @@ NeuroCore/
 │   ├── memory_browser/      # Memory management UI
 │   ├── reasoning_book/      # Thought journaling
 │   └── annotations/         # Flow documentation nodes
-├── web/templates/            # 36 Jinja2 HTML templates
+├── web/templates/            # 39 Jinja2 HTML templates
 ├── data/                     # Runtime data (mutable, excluded from reloader)
 │   ├── memory.faiss          # Long-term memory vector index
 │   ├── memory.sqlite3        # Long-term memory relational store
@@ -150,8 +151,14 @@ NeuroCore/
 │   ├── reasoning_book.json   # Thought log
 │   ├── execution_trace.jsonl # Per-node execution trace (debug only)
 │   ├── session.json          # Session persistence
-│   └── episodes/             # EpisodeState files for long-running tasks
-├── tests/                    # 71 test files, 1,051+ tests
+│   ├── episodes/             # EpisodeState files for long-running tasks
+│   ├── marketplace/          # Community marketplace uploads and catalog
+│   │   ├── catalog.json      # Index of all published items
+│   │   └── uploads/          # Uploaded item files
+│   ├── marketplace_profile.json       # Local uploader identity (handle, username, bio)
+│   ├── marketplace_notifications.json # In-app notification queue (capped at 200)
+│   └── download_history.json          # Import tracking for dedup
+├── tests/                    # 72 test files, 1,141+ tests
 ├── docs/                     # Documentation
 ├── ai_flows.json             # Saved flow definitions
 ├── ai_flows_versions.json    # Flow version history (up to 20 versions/flow)
@@ -311,6 +318,7 @@ Domain models for academic research, usable as structured output targets with `c
 | `chat` | 14 | 2 | Chat I/O + session compaction |
 | `messaging_bridge` | 15 | 2 | Telegram/Discord/Signal/WhatsApp |
 | `browser_automation` | 15 | 0 | Headless browser singleton |
+| `email_bridge` | 16 | 2 | IMAP receive + SMTP send |
 | `memory_browser` | — | 0 | Memory management UI |
 | `reasoning_book` | — | 2 | Thought journaling |
 | `annotations` | — | 1 | Flow comment nodes |
@@ -419,6 +427,40 @@ Unified interface for 4 messaging platforms through a single module. Each platfo
 
 Provides a lazy-initialized Playwright singleton (`headless=true` by default). Currently no flow nodes — the browser is available as a service object but cannot be used directly in flows. See IDEAS.md for the planned browser node executors.
 
+#### Email Bridge (`modules/email_bridge/`)
+
+**2 Nodes**: `email_input`, `email_output`
+
+Bridges IMAP/SMTP email into NeuroCore flows. `ImapBridge` polls the inbox for new messages; `SmtpBridge` sends outbound emails. Mirrors the `messaging_bridge` pattern and is configured via `module.json` with IMAP host, SMTP host, credentials, and polling interval.
+
+---
+
+### 3.3 Community Marketplace
+
+The marketplace is implemented entirely in `core/routers.py` (no separate module) and uses the data layer under `data/marketplace/`.
+
+**Key features:**
+- **Item types**: flows, skills, tools, prompts
+- **HMAC uploader identity**: immutable 12-char hex handle per instance, editable display name and bio
+- **Comments + @mentions**: comment threads per item; typing `@handle` triggers autocomplete
+- **Notifications**: server-side triggers for comments on own items and `@mention`s in any comment
+- **Voting**: upvote/downvote per item with score tracking
+- **Versioning**: each publish update prepends a `{version, notes, timestamp}` entry to `item["changelog"]`
+- **Originality enforcement**: imported items are tagged `"marketplace_import"`; backend rejects re-upload of unmodified imports
+- **Import-to-NeuroCore**: type-aware import handler per item type (skill copy, flow import, tool registration with filelock, prompt copy)
+- **Block/unblock uploaders**: per-handle block list persisted per instance
+- **Community profiles**: public uploader pages with item grid, stats, and optional bio
+
+**New data files:**
+
+| File | Purpose |
+|------|---------|
+| `data/marketplace/catalog.json` | All published items |
+| `data/marketplace/uploads/` | Item files on disk |
+| `data/marketplace_profile.json` | Local identity (handle, username, description) |
+| `data/marketplace_notifications.json` | Notification queue, capped at 200 entries |
+| `data/download_history.json` | Import dedup tracking (item_id → `{version, timestamp}`) |
+
 ---
 
 ## 4. Data Flow Analysis
@@ -518,12 +560,12 @@ The sandbox in `modules/tools/sandbox.py` enforces a principle of least privileg
 | Agent loop | 3 | 60+ |
 | Memory | 6+ | 100+ |
 | Tools & sandbox | 3 | 80+ |
-| Individual modules | 12 | 200+ |
+| Individual modules | 14 | 220+ |
 | LLM bridge | 4 | 60+ |
 | Concurrency | 2 | 40+ |
 | Messaging bridge | 1 | 63 |
 | E2E (live server) | 1 | gated |
-| **Total** | **71** | **1,051+** |
+| **Total** | **72** | **1,141+** |
 
 ### 6.2 Testing Infrastructure
 
@@ -635,6 +677,12 @@ Never `await` while holding a `threading.Lock`.
 | Incremental KB Indexing | Knowledge base re-indexes only changed documents |
 | Sandbox Domain Expansion | Configurable allowed domains for sandboxed tool HTTP calls |
 | Agent Thinking Trace | Agent loop emits real-time thinking events visible in chat UI |
+| Community Marketplace | Full marketplace for sharing/importing flows, skills, tools, and prompts with identity, comments, @mentions, notifications, voting, and versioning |
+| Email Bridge | New `email_bridge` module with IMAP polling and SMTP sending, following the messaging_bridge pattern |
+| Marketplace Tool Import | Tools imported from marketplace are fully registered in `tools.json` and written to `library/` with filelock safety |
+| Uploader Profiles | Public uploader pages with immutable HMAC handle, editable display name and bio, item grid, and stats |
+| Comment System | Per-item comment threads with @mention autocomplete, display names, delete-own-comment, and custom confirm modal |
+| Changelog System | Publisher update notes per version, prepended to item changelog and displayed on item detail page |
 
 ---
 
@@ -646,7 +694,7 @@ NeuroCore is a **well-architected, production-ready AI orchestration platform** 
 ✅ Comprehensive error hierarchy with typed exceptions
 ✅ Thread-safe singleton patterns with correct lock ordering
 ✅ Hot-module loading with smart reload safety
-✅ Extensive test coverage (1,051+ tests across 71 files)
+✅ Extensive test coverage (1,141+ tests across 72 files)
 ✅ Async-first design with proper event loop handling
 ✅ Security-conscious tool sandbox (SSRF, import, file, resource limits)
 ✅ Rich observability (distributed tracing, metrics, debug logs)
@@ -658,5 +706,5 @@ See [IDEAS.md](./IDEAS.md) for known bugs, planned improvements, and future feat
 
 ---
 
-*Last updated: 2026-03-17*
-*Based on exhaustive codebase review: 165+ Python files, 1,051+ tests, 17 modules*
+*Last updated: 2026-03-20*
+*Based on exhaustive codebase review: 170+ Python files, 1,141+ tests, 18 modules*

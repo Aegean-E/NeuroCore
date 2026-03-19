@@ -38,7 +38,7 @@ NeuroCore follows a layered architecture, separating the presentation, core logi
                                     │
                                     ▼
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                        MODULE LAYER (17 Modules)                            │
+│                        MODULE LAYER (18 Modules)                            │
 │                                                                             │
 │  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐   │
 │  │llm_module│  │  system  │  │  memory  │  │  tools   │  │  chat    │   │
@@ -52,10 +52,10 @@ NeuroCore follows a layered architecture, separating the presentation, core logi
 │  │messaging │  │ calendar │  │  skills  │  │reasoning │  │ browser  │   │
 │  │  _bridge │  │ (Events) │  │(Instruct)│  │  _book   │  │  _auto   │   │
 │  └──────────┘  └──────────┘  └──────────┘  └──────────┘  └──────────┘   │
-│  ┌──────────┐  ┌──────────┐                                               │
-│  │ memory_  │  │annotatio │                                               │
-│  │ browser  │  │   ns     │                                               │
-│  └──────────┘  └──────────┘                                               │
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐                                │
+│  │ memory_  │  │annotatio │  │  email_  │                                │
+│  │ browser  │  │   ns     │  │  bridge  │                                │
+│  └──────────┘  └──────────┘  └──────────┘                                │
 └────────────────────────────────────┬──────────────────────────────────────┘
                                     │
                                     ▼
@@ -73,7 +73,7 @@ NeuroCore follows a layered architecture, separating the presentation, core logi
 ## 2. Core Layers
 
 ### 2.1 Presentation Layer
-- **UI**: Built with FastAPI, HTMX, and Tailwind CSS to provide a responsive, real-time interface (36 Jinja2 templates).
+- **UI**: Built with FastAPI, HTMX, and Tailwind CSS to provide a responsive, real-time interface (39 Jinja2 templates).
 - **Flow Editor**: A visual canvas for designing DAG-based AI workflows with version history and rollback.
 - **Chat Interface**: Web UI with real-time streaming and thinking trace display.
 
@@ -91,7 +91,7 @@ The "brain" of the framework, handling orchestration, configuration, and foundat
 - **Observability** (`core/observability.py`): Distributed tracing (span-based with parent-child relationships), metrics collection (counters, gauges, histograms with p50/p95/p99), and structured JSON logging. Metrics counters are persisted across restarts.
 
 ### 2.3 Module Layer
-17 independent, self-contained directories under `modules/` extending system functionality.
+18 independent, self-contained directories under `modules/` extending system functionality.
 - Each module implements the `NodeExecutor` interface (`receive` and `send`).
 - Modules are hot-loadable — enable/disable without restarting the server.
 - See [MODULE_GUIDE.md](./MODULE_GUIDE.md) for the full development guide.
@@ -172,7 +172,66 @@ The `messaging_bridge` module provides a unified interface for all messaging pla
 
 ---
 
-## 5. Concurrency & Thread Safety
+## 5. Community Marketplace
+
+`core/routers.py` implements a full community marketplace for sharing AI flows, skills, tools, and prompts between NeuroCore instances.
+
+### 5.1 Data Model
+
+| File | Purpose |
+|------|---------|
+| `data/marketplace/catalog.json` | Central catalog of all uploaded items |
+| `data/marketplace/uploads/` | Uploaded item files |
+| `data/marketplace_profile.json` | Local uploader profile (handle, username, description) |
+| `data/marketplace_notifications.json` | In-app notification queue (capped at 200) |
+| `data/download_history.json` | Per-item import history for dedup tracking |
+
+### 5.2 Identity Model
+
+Each NeuroCore instance has an **immutable uploader handle** (12-char HMAC-SHA256 hex, derived from a local secret). The `uploader_username` and `uploader_description` are editable separately in `marketplace_profile.json`. The handle acts as a tamper-proof author identity.
+
+### 5.3 Item Types and Import
+
+| Type | Import Mechanism |
+|------|----------------|
+| `skill` | Copies `.md` file to `modules/skills/data/` |
+| `flow` | Imports into `ai_flows.json` via FlowManager |
+| `tool` | Registers JSON definition in `modules/tools/tools.json`, writes code to `modules/tools/library/{name}.py` using `filelock` |
+| `prompt` | Copies `.md` file to `modules/skills/data/prompts/` |
+
+### 5.4 Notification System
+
+Notifications are generated server-side when:
+- Someone comments on your uploaded item → `"comment"` notification
+- A comment contains `@{your_handle}` → `"mention"` notification
+
+Notifications are stored in `data/marketplace_notifications.json` and served via `GET /marketplace/notifications`. The badge count is fetched on marketplace page load.
+
+### 5.5 Versioning / Changelog
+
+Each item carries a `changelog` list: `[{version, notes, timestamp}]`. When a publisher updates an item, the new version is prepended. Visitors see the full changelog on the item detail page.
+
+### 5.6 Originality Enforcement
+
+Upload form requires an originality checkbox. On the backend, items flagged as `"marketplace_import"` in their metadata are rejected with HTTP 400, preventing re-upload of unmodified imported content.
+
+---
+
+## 6. Email Bridge (`modules/email_bridge/`)
+
+The `email_bridge` module provides IMAP receive and SMTP send capabilities, bridging email into NeuroCore flows.
+
+| Property | Value |
+|----------|-------|
+| **Bridges** | `ImapBridge` (receive), `SmtpBridge` (send) |
+| **Files** | `imap_bridge.py`, `smtp_bridge.py`, `node.py`, `router.py`, `service.py` |
+| **Config** | IMAP/SMTP server, port, credentials, polling interval |
+
+The module follows the same pattern as `messaging_bridge`: an input node polls the IMAP inbox and an output node sends via SMTP.
+
+---
+
+## 7. Concurrency & Thread Safety
 
 NeuroCore uses a hybrid concurrency model:
 - **`threading.RLock`**: Used for synchronous shared state (FlowManager, ModuleManager, SettingsManager, SessionPersistenceManager).
@@ -183,7 +242,7 @@ For detailed locking rules, see [./CONCURRENCY.md](./CONCURRENCY.md).
 
 ---
 
-## 6. Technology Stack
+## 8. Technology Stack
 
 | Component | Technology |
 |-----------|------------|
@@ -201,7 +260,7 @@ For detailed locking rules, see [./CONCURRENCY.md](./CONCURRENCY.md).
 
 ---
 
-## 7. Key Configuration Settings
+## 9. Key Configuration Settings
 
 All runtime configuration lives in `settings.json`. The `SettingsManager` provides atomic reads and writes protected by `threading.RLock`.
 
@@ -232,11 +291,12 @@ DEFAULT_SETTINGS = {
 
 | Metric | Value |
 |--------|-------|
-| Active modules | 17 |
-| Node executors | 27 |
-| HTTP routes (core) | 45 |
-| Test files | 71 |
-| Test cases | 1,051+ |
-| Web templates | 36 |
+| Active modules | 18 |
+| Node executors | 28 |
+| HTTP routes (core) | 74 |
+| HTTP routes (total) | 167 |
+| Test files | 72 |
+| Test cases | 1,141+ |
+| Web templates | 39 |
 | Built-in tools | 23 (16 standard + 7 RLM) |
-| Python files | 165+ |
+| Python files | 170+ |

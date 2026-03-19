@@ -755,7 +755,21 @@ These are caught by the Tool Dispatcher and returned to the LLM as error strings
 
 ## 8. Importing and Exporting
 
-Share tools between NeuroCore instances or back them up.
+Share tools between NeuroCore instances, back them up, or download from the Community Marketplace.
+
+### Marketplace Import
+
+Tools published to the **Community Marketplace** can be imported directly from the item detail page. Clicking **Import to NeuroCore** on a tool item:
+
+1. Downloads the tool file (`.json` or `.py`)
+2. Parses the definition and code
+3. Registers the tool in `modules/tools/tools.json` using `filelock` for thread safety
+4. Writes the implementation to `modules/tools/library/{name}.py`
+5. The tool is immediately available in the Tools settings page and in flow editors
+
+The import button changes to **Imported** after a successful import and shows **Update Available** if the marketplace version is newer than the local one.
+
+> **Originality note:** Tools that were themselves imported from the marketplace are tagged as `marketplace_import` in their metadata. The marketplace upload form will reject re-uploading these files unchanged to prevent duplication.
 
 ### Exporting Tools
 

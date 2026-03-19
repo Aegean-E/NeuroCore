@@ -9,7 +9,7 @@
   <a href="https://fastapi.tiangolo.com"><img src="https://img.shields.io/badge/FastAPI-009688?style=for-the-badge&logo=fastapi&logoColor=white" alt="FastAPI"></a>
   <a href="https://htmx.org"><img src="https://img.shields.io/badge/HTMX-333333?style=for-the-badge&logo=htmx&logoColor=white" alt="HTMX"></a>
   <a href="https://tailwindcss.com"><img src="https://img.shields.io/badge/Tailwind_CSS-38B2AC?style=for-the-badge&logo=tailwind-css&logoColor=white" alt="Tailwind CSS"></a>
-  <img src="https://img.shields.io/badge/tests-passing-green?style=for-the-badge&color=green" alt="Tests">
+  <img src="https://img.shields.io/badge/tests-1141_passing-brightgreen?style=for-the-badge" alt="Tests">
   <a href="https://github.com/Aegean-E/NeuroCore/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg?style=for-the-badge" alt="License"></a>
 </p>
 
@@ -22,925 +22,730 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/🧠_AI_Memory-gray?style=flat&color=blue" alt="AI Memory">
-  <img src="https://img.shields.io/badge/📚_RAG-gray?style=flat&color=green" alt="RAG">
-  <img src="https://img.shields.io/badge/🔧_Tools-gray?style=flat&color=orange" alt="Tools">
-  <img src="https://img.shields.io/badge/🤖_Autonomous-gray?style=flat&color=purple" alt="Autonomous Agents">
-  <img src="https://img.shields.io/badge/🐳_Docker-gray?style=flat&color=cyan" alt="Docker">
-  <img src="https://img.shields.io/badge/🔌_Hot--Swap_Modules-gray?style=flat&color=red" alt="Hot-Swap">
-  <img src="https://img.shields.io/badge/📊_DAG_Execution-gray?style=flat&color=teal" alt="DAG">
-  <img src="https://img.shields.io/badge/🔍_Hybrid_Search-gray?style=flat&color=darkgreen" alt="Hybrid Search">
-  <img src="https://img.shields.io/badge/🔒_Secure_Sandbox-gray?style=flat&color=gold" alt="Secure Sandbox">
+  <img src="https://img.shields.io/badge/🧠_Persistent_Memory-4f46e5?style=flat-square" alt="AI Memory">
+  <img src="https://img.shields.io/badge/📚_RAG_Hybrid_Search-16a34a?style=flat-square" alt="RAG">
+  <img src="https://img.shields.io/badge/🔧_23_Built--in_Tools-ea580c?style=flat-square" alt="Tools">
+  <img src="https://img.shields.io/badge/🤖_Autonomous_Agents-7c3aed?style=flat-square" alt="Autonomous Agents">
+  <img src="https://img.shields.io/badge/🌐_Community_Marketplace-0891b2?style=flat-square" alt="Marketplace">
+  <img src="https://img.shields.io/badge/🔌_Hot--Swap_Modules-dc2626?style=flat-square" alt="Hot-Swap">
+  <img src="https://img.shields.io/badge/📊_Visual_Flow_Editor-0d9488?style=flat-square" alt="DAG">
+  <img src="https://img.shields.io/badge/🔒_Secure_Sandbox-d97706?style=flat-square" alt="Secure Sandbox">
 </p>
 
-
----
-
-**NeuroCore** is a powerful, modular AI agent framework that transforms how you build and deploy autonomous AI applications. Whether you need a smart chatbot with persistent memory, a document-aware assistant, or a fully autonomous agent that can set goals and use tools — NeuroCore provides the complete toolkit.
-
-Built on the principles of **Speed**, **Simplicity**, and **Modularity**, NeuroCore delivers a solid foundation for building custom AI-powered applications with a fast, modern web stack and a powerful visual workflow editor.
+<h3 align="center">
+  A complete, self-hosted AI agent framework.<br>
+  Visual flow editor · Persistent memory · RAG · Tools · Multi-platform messaging · Community marketplace.
+</h3>
 
 <p align="center">
-  <b>165 Python files &nbsp;•&nbsp; 33 HTML templates &nbsp;•&nbsp; 926 tests &nbsp;•&nbsp; 16 modules &nbsp;•&nbsp; 23 built-in tools &nbsp;•&nbsp; 40+ API routes</b>
+  <a href="#-quick-start">Quick Start</a> •
+  <a href="#%EF%B8%8F-architecture">Architecture</a> •
+  <a href="#-key-features">Features</a> •
+  <a href="#-available-modules">Modules</a> •
+  <a href="#-api-reference">API</a> •
+  <a href="#-testing">Testing</a>
 </p>
-
 
 ---
 
-## 🔥 Why NeuroCore?
+> **NeuroCore** is a production-quality, modular AI orchestration platform. Wire LLM calls, memory retrieval, document search, tool execution, and autonomous agent loops into visual DAG workflows — then deploy with a single command. Everything runs locally, works with any OpenAI-compatible model, and ships with 18 hot-swappable modules out of the box.
 
-- **🎨 Visual AI Flow Editor** — Design complex AI workflows with a drag-and-drop canvas. Chain LLM calls, memory retrieval, knowledge queries, tool execution, and more — all without writing code.
+<p align="center">
+  <b>18 modules &nbsp;·&nbsp; 28 flow nodes &nbsp;·&nbsp; 23 built-in tools &nbsp;·&nbsp; 39 UI templates &nbsp;·&nbsp; 74 core API routes &nbsp;·&nbsp; 1,141 tests</b>
+</p>
 
-- **🧠 Persistent Long-Term Memory** — Built-in FAISS vector database stores user facts and preferences. Smart extraction and semantic consolidation keep memory organized and relevant.
+---
 
-- **📚 Knowledge Base (RAG)** — Upload PDFs, Markdown, or text files. NeuroCore automatically chunks, embeds, and indexes your documents for intelligent retrieval-augmented generation.
+## 🚀 Quick Start
 
-- **🔧 Function Calling & Tools** — Give your AI agency with custom Python tools. From calculators to web search, the LLM can execute code to accomplish real tasks.
+```bash
+# 1. Clone & install
+git clone https://github.com/Aegean-E/NeuroCore
+cd NeuroCore
+pip install -r requirements.txt
 
-- **🤖 Autonomous Agent Capabilities** — Set goals, track progress, and let your agent work independently with the goal system.
+# 2. Point to your LLM (edit settings.json)
+# "llm_api_url": "http://localhost:1234/v1"   ← Ollama, LM Studio, LocalAI, OpenAI…
 
-- **📱 Multi-Platform** — Built-in Chat UI with multimodal support, Telegram bot integration, and calendar scheduling.
+# 3. Run
+py main.py          # Windows
+python main.py      # macOS / Linux
 
-- **⚡ High Performance** — FastAPI backend with HTMX frontend delivers snappy, responsive interactions without heavy JavaScript.
+# 4. Open http://localhost:8000
+```
 
-- **🔌 Hot-Swap Modules** — Enable or disable any module at runtime without restarting the server. Drop a folder into `modules/` to extend the system.
+Or with Docker:
 
-- **🔍 Hybrid Search** — Combines FAISS vector search + SQLite FTS5 keyword search with Reciprocal Rank Fusion (RRF) for best-in-class document retrieval.
+```bash
+docker-compose up -d --build
+# → http://localhost:8000
+```
 
-- **🔒 Secure Tool Sandbox** — All custom Python tools execute in a restricted environment with blocked dangerous imports, network whitelisting, resource limits, and SSRF protection.
+**`settings.json` key fields:**
+```json
+{
+    "llm_api_url":      "http://localhost:1234/v1",
+    "llm_api_key":      "",
+    "default_model":    "local-model",
+    "embedding_api_url": "",
+    "embedding_model":  "",
+    "temperature":      0.7,
+    "max_tokens":       2048,
+    "debug_mode":       false,
+    "module_allowlist": []
+}
+```
 
-- **📊 Observability** — Built-in distributed tracing, metrics collection, and structured JSON logging for debugging and monitoring.
-
+> `module_allowlist` — restrict hot-loadable modules (empty = allow all).
+> `debug_mode` — enables per-node execution traces in `data/execution_trace.jsonl`.
 
 ---
 
 ## 🏗️ Architecture
 
-NeuroCore is organized into **4 clean, decoupled layers** that work together to deliver a seamless AI experience:
-
-### System Overview
-
-At its heart, NeuroCore is a **flow-based execution engine** that treats AI workflows as directed graphs. Each node represents a discrete operation—whether that's calling an LLM, querying a database, or executing custom code. The engine orchestrates these nodes in the correct order, handling data flow, error recovery, and parallel execution automatically.
+NeuroCore is organized into **four clean, decoupled layers:**
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                     User Interaction Layer                       │
-│  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────────┐ │
-│  │   Chat UI   │  │  Telegram   │  │    Visual Flow Editor     │ │
-│  │  (Browser)  │  │    Bot      │  │      (Canvas-based)       │ │
-│  └──────┬──────┘  └──────┬──────┘  └───────────┬───────────────┘ │
-└─────────┼────────────────┼─────────────────────┼────────────────┘
-          │                │                     │
-          └────────────────┴─────────────────────┘
-                            │
-                            ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                     Flow Execution Engine                       │
-│                                                                 │
-│   ┌──────────────┐    ┌──────────────┐    ┌──────────────┐      │
-│   │  FlowRunner  │───▶│  DAG Builder │───▶│  Kahn's Sort │      │
-│   │  (Orchestrator)   │  (Topology)  │    │  (Ordering)  │      │
-│   └──────────────┘    └──────────────┘    └──────────────┘      │
-│          │                                                      │
-│          ▼                                                      │
-│   ┌──────────────┐    ┌──────────────┐    ┌──────────────┐      │
-│   │ Node Executor│◀──▶│ Bridge Groups│◀──▶│ Conditional  │      │
-│   │  (Async)     │    │  (Parallel)  │    │   Routing    │      │
-│   └──────────────┘    └──────────────┘    └──────────────┘      │
-│                                                                 │
-└─────────────────────────────────────────────────────────────────┘
-                            │
-          ┌─────────────────┼─────────────────┐
-          │                 │                 │
-          ▼                 ▼                 ▼
-┌──────────────┐  ┌──────────────┐  ┌──────────────┐
-│   Memory     │  │  Knowledge   │  │    Tools     │
-│   System     │  │    Base      │  │   Library    │
-│  (FAISS+SQL) │  │   (RAG)      │  │  (Sandboxed) │
-└──────────────┘  └──────────────┘  └──────────────┘
+┌────────────────────────────────────────────────────────────────┐
+│  🌐  Presentation Layer                                        │
+│  HTMX + Jinja2 (39 templates) + TailwindCSS                   │
+│  Chat UI · Flow Editor (Canvas) · Memory Browser · Dashboard  │
+├────────────────────────────────────────────────────────────────┤
+│  ⚙️  Core Layer                                                │
+│  flow_runner.py  → DAG engine (Kahn's sort, bridge groups)     │
+│  flow_manager.py → Flow CRUD + version history (20 ver/flow)   │
+│  module_manager.py → Hot-swap module loader                    │
+│  routers.py      → 74 HTTP endpoints (incl. full marketplace)  │
+│  llm.py          → OpenAI-compatible async client              │
+│  observability.py → Distributed tracing · metrics · logging    │
+│  session_manager.py → Chat sessions + EpisodeState persist.    │
+│  settings.py     → Thread-safe config (RLock, atomic write)    │
+├────────────────────────────────────────────────────────────────┤
+│  🔌  Module Layer  (18 modules · 28 node executors)            │
+│  modules/<name>/                                               │
+│    module.json  → Metadata, config, enabled flag               │
+│    node.py      → Executor classes + dispatcher                │
+│    router.py    → FastAPI router (optional)                    │
+├────────────────────────────────────────────────────────────────┤
+│  💾  Data Layer                                                │
+│  SQLite (WAL + FTS5) · FAISS IndexFlatIP · JSON · JSONL        │
+│  memory.sqlite3 + memory.faiss  → Long-term memory            │
+│  knowledge_base.sqlite3 + .faiss → RAG documents              │
+│  data/marketplace/  → Community catalog + uploads             │
+│  data/episodes/     → EpisodeState (long-running tasks)        │
+└────────────────────────────────────────────────────────────────┘
+```
 
+### Flow Engine
+
+Every workflow is a **Directed Acyclic Graph (DAG)** executed by `FlowRunner`:
 
 ```
+Chat Input ──► Memory Recall ──► System Prompt ──► LLM Core
+                                                       │
+                                          ┌────────────┴────────────┐
+                                          ▼                         ▼
+                                   Tool Dispatcher             Chat Output
+                                          │
+                                          ▼
+                                   LLM Core (2nd pass)
+                                          │
+                                          ▼
+                                     Chat Output
 ```
-┌──────────────────────────────────────────────────────────────┐
-│           🌐 Web Layer                                       │
 
-│   HTMX + Jinja2 (32 templates) + TailwindCSS                │
-│   Zero heavy JS frameworks — server-driven UI updates        │
-├──────────────────────────────────────────────────────────────┤
-│           ⚙️  Core Layer                                     │
-│   main.py          → FastAPI app + lifespan manager          │
-│   core/routers.py  → All HTTP routes (40+ endpoints)         │
-│   core/observability.py → Distributed tracing + metrics      │
-│   core/session_manager.py → Session + EpisodeState persist.  │
-│   core/structured_output.py → Pydantic schema enforcement    │
-│   core/flow_runner.py  → DAG engine (Kahn's, timeout, eps.)  │
-│   core/flow_manager.py → Flow CRUD (ai_flows.json)           │
-│   core/module_manager.py → Dynamic hot-swap module loader    │
-│   core/llm.py      → OpenAI-compatible HTTP client           │
-│   core/settings.py → Thread-safe settings manager            │
-│   core/debug.py    → Structured debug logging system         │
-│   core/errors.py   → Typed exception hierarchy               │
-│   core/planner_helpers.py → Plan dependency graphs           │
-│   core/flow_data.py → FlowData TypedDict + helpers           │
-│   core/flow_context.py → FlowContext Pydantic model          │
-├──────────────────────────────────────────────────────────────┤
-│           🔌 Module Layer                                    │
-│   modules/<name>/                                            │
-│     module.json  → Metadata, config, enabled flag, nodes     │
-│     node.py      → Executor classes + dispatcher             │
-│     router.py    → FastAPI router (optional)                 │
-│     __init__.py  → Exports router for hot-loading            │
-├──────────────────────────────────────────────────────────────┤
-│           💾 Data Layer                                      │
-│   data/memory.sqlite3 + memory.faiss  → Long-term memory     │
-│   data/knowledge_base.sqlite3 + .faiss→ RAG documents        │
-│   data/execution_trace.jsonl  → Node execution traces        │
-│   data/episodes/   → EpisodeState (long-running tasks)       │
-│   settings.json    → Runtime configuration                   │
-│   ai_flows.json    → Saved flow definitions                  │
-│   chat_sessions.json → Chat session history                  │
-└──────────────────────────────────────────────────────────────┘
-```
+| Mechanism | How |
+|-----------|-----|
+| **Topological Sort** | Kahn's algorithm — deterministic, dependency-respecting order |
+| **Bridge Groups** | BFS component grouping for implicit parallel data sharing |
+| **Conditional Routing** | `_route_targets` key — branch at runtime without extra wires |
+| **Loop Guard** | `max_node_loops` counter (default 100, max 1,000) |
+| **Executor Cache** | Class-level FIFO cache (max 100) — no re-imports per execution |
+| **Episode Persistence** | `EpisodeState` in `data/episodes/` — resume long-running tasks |
+| **Timeout** | `asyncio.wait_for` wraps every flow run |
+| **Input Isolation** | Deep-copy of `messages` before each node — no cross-node mutation |
 
 ---
 
 ## ✨ Key Features
 
-### 🧠 AI Flow Editor
-A visual, node-based canvas to design and orchestrate complex LLM workflows.
+### 🎨 Visual AI Flow Editor
 
 <p align="center">
   <img src="screenshots/flow_editor.png" alt="AI Flow Editor Canvas" width="100%" style="border-radius: 8px; border: 1px solid #334155;">
 </p>
 
-- **Drag-and-Drop Interface** — Build flows by dragging functions onto the canvas
-- **Pan & Zoom** — Effortlessly navigate large and complex flows
-- **Multiple Active Flows** — Run multiple flows simultaneously for different tasks
-- **Flow Import/Export** — Share flows by exporting as JSON files
-- **Singleton Nodes** — Enforce architectural patterns by restricting certain nodes
-- **Annotations** — Add comment nodes to document your logic directly on the canvas
-- **Keyboard Shortcuts** — Ctrl+A (select all), Ctrl+Z (undo), Delete (remove), Space+Drag (pan), Scroll (zoom)
-- **Selection Box** — Click and drag to select multiple nodes
-- **Flow Validation** — Pre-execution checks for disabled modules, orphaned connections, and missing tools
+Build complex AI pipelines without writing orchestration code.
 
-### ⚡ Logic & Control Flow
-Advanced nodes for complex orchestration:
+| Capability | Detail |
+|------------|--------|
+| Drag-and-drop canvas | Add, move, and wire nodes visually |
+| Pan & zoom | Navigate flows of any size |
+| Multiple active flows | Run several flows in parallel |
+| Flow version history | Up to 20 saved versions per flow with one-click restore |
+| Import / Export | Share flows as JSON files |
+| Singleton nodes | Enforce architectural constraints |
+| Annotation nodes | Document logic directly on the canvas |
+| Keyboard shortcuts | `Ctrl+A` select all · `Ctrl+Z` undo · `Space+drag` pan · Scroll zoom |
+| Pre-flight validation | Checks for disabled modules, orphaned connections, missing tools |
 
-| Node | Description |
-|------|-------------|
-| **Delay** | Pause execution for a set duration (configurable in seconds) |
-| **Python Scripting** | Execute custom Python code directly within the flow |
-| **Repeater** | Create loops or scheduled re-triggers (set to 0 for infinite) |
-| **Conditional Router** | Route data based on conditional logic |
-| **Scheduled Start** | Wait until a specific date/time before proceeding |
-| **Trigger** | Pass-through node for manual triggering |
+---
 
-### 💬 Built-in Chat UI
-A clean, modern chat interface for direct interaction with your configured AI flow.
-
-<p align="center">
-  <img src="screenshots/chat_ui.png" alt="Chat Interface" width="100%" style="border-radius: 8px; border: 1px solid #334155;">
-</p>
-
-- **Multimodal Support** — Upload images to interact with vision-capable models
-- **Session Management** — Create, rename, and delete chat sessions
-- **Auto-Renaming** — Sessions automatically titled based on conversation context
-- **Session Compaction** — LLM summarizes old messages to reduce token usage; keeps last N messages verbatim. Triggered manually (`POST /chat/sessions/{id}/compact`) or automatically when token count exceeds a configured threshold.
-
-### 📚 Long-Term Memory
-**FAISS + SQLite with LLM-powered filtering — not your average RAG.**
-
-Most AI assistants use naive vector retrieval. NeuroCore's memory system is built different:
+### 🧠 Persistent Long-Term Memory
 
 <p align="center">
   <img src="screenshots/memory_browser.png" alt="Memory Browser" width="100%" style="border-radius: 8px; border: 1px solid #334155;">
 </p>
 
-- **FAISS + SQLite** — Fast vector search backed by persistent storage
-- **Arbiter Model** — LLM-powered gate that filters what gets saved (configurable confidence threshold)
-- **Semantic Consolidation** — Auto-merges similar/redundant memories to prevent bloat
-- **Smart Extraction** — Extracts structured facts (FACT, BELIEF, PREFERENCE, IDENTITY) from conversations
-- **Conflict Detection** — LLM identifies contradictory memories
-- **TTL & Access Weight** — Old memories fade, frequently accessed ones persist longer
-- **Memory Browser** — UI to search, filter, edit, merge, and delete memories
-- **Audit Log** — Full `meta_memories` table tracks every edit, merge, delete, and conflict action
-- **Goals System** — Dedicated goals table with priority, status, deadline, and context
-
-#### Memory Types
-
-| Type | Description |
-|------|-------------|
-| `FACT` | Verified, persistent information |
-| `BELIEF` | Unverified — expires after 30 days by default |
-| `PREFERENCE` | User preferences and tastes |
-| `IDENTITY` | Identity facts (name, background, personality) |
-| `RULE` | Behavioral rules and instructions |
-| `EXPERIENCE` | Past events and experiences |
-
-#### Memory Save Pipeline
+Not just vector search — a full memory lifecycle with LLM-powered quality control.
 
 ```
-Conversation Text
-      │
-      ▼
-MemorySaveExecutor.receive()   ← pass-through (non-blocking)
-      │
-      ▼  asyncio.create_task() — fire and forget
-_save_background()
-      │
-      ▼
-LLM Smart Extraction           ← structured JSON facts
-      │
-      ▼
-MemoryArbiter.consider()       ← confidence threshold gate
-      │
-      ▼
-MemoryConsolidator             ← auto-merge similar memories (every N hours)
-      │
-      ▼
-MemoryStore.add_entry()        ← FAISS index + SQLite
+Conversation → LLM Extraction → Arbiter (confidence gate) → Consolidator → FAISS + SQLite
 ```
 
-#### Memory Recall Pipeline
+| Feature | Detail |
+|---------|--------|
+| **Dual storage** | FAISS `IndexFlatIP` + SQLite WAL for fast vector + structured queries |
+| **Arbiter** | LLM-powered gate filters low-confidence memories before saving |
+| **Auto-consolidation** | Merges semantically similar memories every 24 h (cosine > 0.92 threshold) |
+| **Conflict detection** | LLM identifies and flags contradictory memories |
+| **TTL decay** | BELIEFs expire after 30 days; frequently accessed memories persist longer |
+| **Memory Browser** | Full UI to search, filter, edit, merge, and delete memories |
+| **Audit log** | `meta_memories` table records every edit, merge, delete, and conflict |
+| **Goals system** | Dedicated goals table with priority, deadline, and status |
 
-```
-User Message → Embedding → FAISS Search → Score Filter
-      │
-      ▼
-_memory_context injected into input_data
-      │
-      ▼
-SystemPromptExecutor           ← picks up _memory_context
-      │
-      ▼
-Injected into system message   ← LLM receives relevant memories
-```
+**Memory types:** `FACT` · `BELIEF` (30-day TTL) · `PREFERENCE` · `IDENTITY` · `RULE` · `EXPERIENCE`
 
-### 🧠 Knowledge Base (RAG)
-Retrieval-Augmented Generation with **hybrid search** for working with documents.
+---
 
-- **Document Ingestion** — Upload PDF, Markdown, or Text files via UI
-- **Vector Search** — Documents chunked and embedded into FAISS index
-- **Keyword Search** — SQLite FTS5 full-text search with auto-sync triggers
-- **Hybrid Search** — Reciprocal Rank Fusion (RRF, k=60) combines vector + keyword results
-- **Semantic Retrieval** — Knowledge Query node injects relevant context
-- **Self-Healing Index** — Automatically rebuilds FAISS index on startup if out of sync
-- **Integrity Checks** — Detects chunk count mismatches and missing embeddings
+### 📚 Knowledge Base (RAG)
 
-#### Knowledge Base Search Modes
+Upload documents, get intelligent retrieval.
 
-| Mode | Implementation | Best For |
-|------|---------------|----------|
-| **Vector Search** | FAISS `IndexFlatIP` + L2 normalization | Semantic similarity |
-| **Keyword Search** | SQLite FTS5 virtual table | Exact term matching |
-| **Hybrid Search** | Reciprocal Rank Fusion (RRF) | Best overall accuracy |
+| Feature | Detail |
+|---------|--------|
+| **Ingestion** | PDF, Markdown, plain text via drag-and-drop UI |
+| **Hybrid search** | FAISS vector search + SQLite FTS5 combined with **Reciprocal Rank Fusion (RRF, k=60)** |
+| **Incremental indexing** | Only re-indexes changed documents — provenance tracking via timestamps |
+| **Self-healing** | Rebuilds FAISS index on startup if chunk counts are mismatched |
+| **Flow integration** | `query_knowledge` node injects retrieved context into `_kb_context` |
 
-### 📅 Calendar & Scheduling
-Manage time-sensitive tasks and events.
+| Search Mode | Implementation | Best for |
+|-------------|---------------|----------|
+| Vector | FAISS `IndexFlatIP` + L2 norm | Semantic similarity |
+| Keyword | SQLite FTS5 virtual table | Exact term matching |
+| **Hybrid** | Reciprocal Rank Fusion | Best overall accuracy |
 
-- **Visual Calendar** — Full GUI to view and manage events
-- **Event Watcher** — Flow node that checks for upcoming events
-- **Scheduled Execution** — Trigger actions at specific times
+---
 
-### 🛠️ Tools Library with Secure Sandbox
-Define and manage custom Python functions that the LLM can execute—**safely**.
+### 🔧 Tools Library & Secure Sandbox
 
 <p align="center">
   <img src="screenshots/tools_library.png" alt="Tool Library Editor" width="100%" style="border-radius: 8px; border: 1px solid #334155;">
 </p>
 
-- **Function Calling** — Full support for OpenAI-compatible function calling
-- **Visual Editor** — Create tools with JSON schema validation
-- **Hot-Reloading** — Tools saved as Python files, loaded dynamically
-- **Tool Dispatcher** — Execute tools requested by the LLM
-- **Import/Export** — Share tools as JSON or Python files
-- **Per-Node Control** — `allowed_tools` config restricts which tools each dispatcher can use
-- **Rate Limiting** — `max_tools_per_turn` (default: 5) prevents runaway tool loops
-- **🔒 Secure Sandbox** — All tools execute in a restricted environment (see Security section)
+Give your AI real capabilities with custom Python tools — executed **safely**.
 
-#### Security Sandbox Architecture
+**23 built-in tools across 6 categories:**
 
-Every tool executes in an isolated sandbox with multiple defense layers:
+<details>
+<summary><b>🧮 Calculations & Conversions (5 tools)</b></summary>
+
+| Tool | Description |
+|------|-------------|
+| `Calculator` | Evaluates math expressions (AST-based, no `eval`) |
+| `ConversionCalculator` | Converts units — temperature, length, weight, volume |
+| `CurrencyConverter` | Real-time conversion via Frankfurter API |
+| `TimeZoneConverter` | Converts between IANA timezones |
+| `SystemTime` | Returns current date and time |
+
+</details>
+
+<details>
+<summary><b>🌐 Web & Search (5 tools)</b></summary>
+
+| Tool | Description |
+|------|-------------|
+| `Weather` | Current weather for any location |
+| `FetchURL` | Extracts text content from a URL (SSRF-protected) |
+| `WikipediaLookup` | Search and retrieve Wikipedia articles |
+| `ArXivSearch` | Search academic papers by keyword |
+| `YouTubeTranscript` | Fetch full transcripts from YouTube videos |
+
+</details>
+
+<details>
+<summary><b>📅 Calendar & Goals (5 tools)</b></summary>
+
+| Tool | Description |
+|------|-------------|
+| `SaveReminder` | Create calendar events and reminders |
+| `CheckCalendar` | Retrieve upcoming events |
+| `SetGoal` | Create a new goal for autonomous agents |
+| `MarkGoalComplete` | Mark a goal as completed |
+| `DeleteGoal` | Delete a goal |
+
+</details>
+
+<details>
+<summary><b>📧 Communication (1 tool)</b></summary>
+
+| Tool | Description |
+|------|-------------|
+| `SendEmail` | Send emails via SMTP (TLS verified) |
+
+</details>
+
+<details>
+<summary><b>🧠 RLM Tools — Recursive Language Model (7 tools)</b></summary>
+
+For agents working on long or complex inputs that exceed context limits.
+
+| Tool | Description |
+|------|-------------|
+| `Peek` | View a character-range slice of the prompt |
+| `Search` | Find regex matches in the current prompt |
+| `Chunk` | Split prompt into manageable overlapping chunks |
+| `SubCall` | Recursively invoke an LLM on a sub-prompt |
+| `SetVariable` | Store intermediate results by name |
+| `GetVariable` | Retrieve a stored result |
+| `SetFinal` | Set the final answer and terminate processing |
+
+</details>
+
+**Sandbox security — five independent layers:**
+
+| Layer | Mechanism |
+|-------|-----------|
+| Static analysis | Scans code for dangerous patterns before execution |
+| Import blocklist | Blocks `sys`, `subprocess`, `socket`, `pickle`, `ctypes`, `pathlib`, and 15+ more |
+| Module mocking | `import httpx` → `SafeHttpxClient`; `import os` → `SafeEnv` (env vars only) |
+| Network guard | Domain allowlist + SSRF protection (blocks all private IP ranges) |
+| Resource limits | 30 s timeout · 100 KB max output · optional memory cap |
+
+---
+
+### 🤖 Autonomous Agent Loop
+
+Let the agent think, use tools, and iterate — without human input.
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                    Tool Execution Flow                      │
-│                                                             │
-│  Tool Code → Static Analysis → Restricted Globals → Exec    │
-│                  │                    │                     │
-│                  ▼                    ▼                     │
-│         ┌────────────────┐    ┌────────────────┐            │
-│         │  Blocked:      │    │  Allowed:      │            │
-│         │  • import os   │    │  • import math │            │
-│         │  • eval()      │    │  • import json │            │
-│         │  • exec()      │    │  • Safe HTTP   │            │
-│         │  • __import__  │    │  • File access │            │
-│         └────────────────┘    │   (restricted) │           │
-│                               └────────────────┘            │
-│                                                             │
-│  Security Features:                                         │
-│  • Domain whitelisting for HTTP requests                    │
-│  • SSRF protection (blocks 127.0.0.1, 10.x.x.x, etc.)       │
-│  • Resource limits (timeout, memory, output size)           │
-│  • Path traversal prevention                                │
-│  • Dangerous builtin blocking                               │
-└─────────────────────────────────────────────────────────────┘
+[repeater_node] (every N seconds)
+      │
+      ▼
+[memory_recall] → [system_prompt] → [agent_loop]
+                                          │
+                               ┌──────────┴──────────┐
+                               │  LLM ↔ Tool loop    │
+                               │  (up to N iterations)│
+                               └──────────┬──────────┘
+                                          │
+                                   [messaging_output]
+                           (proactive_recipients: ["telegram:123"])
 ```
 
-**Security Features:**
-- **Restricted Imports** — Blocks `os`, `sys`, `subprocess`, `socket`, and 20+ dangerous modules
-- **Safe HTTP Client** — Domain whitelisting with SSRF protection for internal IPs
-- **File Access Control** — Optional read-only mode with directory restrictions
-- **Resource Limits** — Configurable timeout (default 30s), max output size (100KB)
-- **Static Analysis** — Pre-execution code scanning for dangerous patterns
+The `agent_loop` node runs an autonomous LLM↔tool execution loop until the model stops calling tools or `max_iterations` is reached — no external trigger needed.
 
+**Configuration:**
+```json
+{
+    "max_iterations": 10,
+    "tool_error_strategy": "continue",
+    "timeout": 120,
+    "include_memory_context": true,
+    "include_knowledge_context": true,
+    "include_plan_in_context": true
+}
+```
 
-#### Built-in Tools (23 Total)
+---
 
-**🧮 Calculations & Conversions**
-| Tool | Description |
-|------|-------------|
-| **Calculator** | Evaluates mathematical expressions (AST-based, no `eval`) |
-| **ConversionCalculator** | Converts units (temperature, length, weight, volume) |
-| **CurrencyConverter** | Real-time currency conversion (Frankfurter API) |
-| **TimeZoneConverter** | Timezone conversions (IANA format) |
-| **SystemTime** | Current date and time |
+### 🌐 Community Marketplace
 
-**🌐 Web & Search**
-| Tool | Description |
-|------|-------------|
-| **Weather** | Current weather for any location |
-| **FetchURL** | Extracts text content from URLs (with SSRF protection) |
-| **WikipediaLookup** | Searches Wikipedia articles |
-| **ArXivSearch** | Searches academic papers |
-| **YouTubeTranscript** | Fetches YouTube video transcripts |
+Share and discover AI flows, skills, tools, and prompts.
 
-**📅 Calendar & Goals**
-| Tool | Description |
-|------|-------------|
-| **SaveReminder** | Saves calendar events/reminders |
-| **CheckCalendar** | Retrieves upcoming events |
-| **SetGoal** | Creates a new goal for autonomous agents |
-| **MarkGoalComplete** | Marks a goal as completed |
-| **DeleteGoal** | Deletes a goal |
+| Feature | Detail |
+|---------|--------|
+| **Immutable identity** | HMAC-SHA256 handle (12-char hex) — tamper-proof author identity per instance |
+| **Item types** | Flows (`.json`), Skills (`.md`), Tools (`.json`/`.py`), Prompts |
+| **One-click import** | Tools → registered in `tools.json` + written to `library/`; Flows → imported into `ai_flows.json` |
+| **Versioning** | Update notes prepended to `changelog` on each publish; "Update Available" shown for outdated imports |
+| **Comments** | Threaded comments with `@handle` autocomplete, delete-own-comment, custom confirm modal |
+| **Notifications** | Bell icon + unread badge; triggered by comments on your items and `@mention`s |
+| **Voting** | Upvote/downvote per item with score-based sorting |
+| **Originality** | Backend rejects re-upload of unmodified imported items |
+| **Community profiles** | Public uploader pages with bio, item grid, stats; "Preview as visitor" mode |
 
-**📧 Communication**
-| Tool | Description |
-|------|-------------|
-| **SendEmail** | Sends emails via SMTP (TLS verified) |
+---
 
-**🧠 RLM Tools** *(Recursive Language Model — for complex long-context reasoning)*
-| Tool | Description |
-|------|-------------|
-| **Peek** | View a slice of the current prompt by character position |
-| **Search** | Find regex matches in the prompt |
-| **Chunk** | Split prompt into manageable chunks |
-| **SubCall** | Recursively call an LLM with a sub-prompt |
-| **SetVariable** | Store intermediate results |
-| **GetVariable** | Retrieve stored results |
-| **SetFinal** | Set final answer and terminate processing |
+### 📱 Multi-Platform Messaging
 
+Connect your AI flow to messaging platforms via the unified `messaging_bridge` module.
 
-### 📱 Telegram Integration
-Connect your AI flow to Telegram for remote access.
+| Platform | Mechanism | Message limit |
+|----------|-----------|--------------|
+| **Telegram** | HTTP long-polling | 3,072 chars/chunk |
+| **Discord** | WebSocket Gateway v10 | 1,900 chars/chunk |
+| **Signal** | HTTP polling (signal-cli REST) | 1,800 chars/chunk |
+| **WhatsApp** | Webhook (Evolution API) | 4,000 chars/chunk |
 
-- **Chat Remotely** — Interact with your AI from anywhere
-- **Vision Support** — Send photos to analyze with vision models
-- **Command Control** — Manage sessions with `/new_session`, `/delete_session`
+Use `messaging_output` with `proactive_recipients` to push messages autonomously — no incoming trigger required.
 
-### 📖 Reasoning Book
-A reasoning journal for AI agents.
+### 📧 Email Bridge
 
-- **Thought Recording** — Store reasoning steps during flow execution
-- **Context Injection** — Load previous reasoning into LLM context
+The `email_bridge` module connects flows to email.
 
-### 🔌 Modular Architecture
-NeuroCore is built around a powerful, plugin-based architecture.
+- **IMAP receive** — polls inbox and injects messages as flow input
+- **SMTP send** — sends replies or proactive emails via authenticated SMTP
 
-- **Self-Contained Modules** — Each feature is an isolated package
-- **Hot-Swapping** — Enable/disable modules at runtime without restart
-- **Easy Extensibility** — Drop a folder into `modules/` with a `module.json`
-- **Thread-Safe** — All module state mutations protected by `threading.Lock()`
-- **Config Persistence** — Module configs written back to `module.json` automatically
+---
 
-#### Available Modules
+### 💬 Chat UI
 
-| Module | Purpose | Router | Flow Node |
-|--------|---------|--------|-----------|
-| `chat` | Chat UI + session management | ✅ | ✅ |
-| `memory` | FAISS+SQLite long-term memory | ✅ | ✅ |
-| `knowledge_base` | RAG document ingestion | ✅ | ✅ |
-| `tools` | Tool library + dispatcher | ✅ | ✅ |
-| `system_prompt` | System prompt injection | ✅ | ✅ |
-| `llm_module` | Core LLM call node | ✅ | ✅ |
-| `telegram` | Telegram bot integration | ✅ | ✅ |
-| `calendar` | Calendar + event management | ✅ | ✅ |
-| `reasoning_book` | Reasoning journal | ✅ | ✅ |
-| `memory_browser` | Memory management UI | ✅ | — |
-| `logic` | Delay, Repeater, Conditional, etc. | — | ✅ |
-| `annotations` | Flow comment nodes | — | ✅ |
-| `planner` | Planner node | — | ✅ |
-| `agent_loop` | Agent loop node | — | ✅ |
-| `reflection` | Reflection node | — | ✅ |
-| `skills` | Instruction file management | ✅ | — |
+<p align="center">
+  <img src="screenshots/chat_ui.png" alt="Chat Interface" width="100%" style="border-radius: 8px; border: 1px solid #334155;">
+</p>
+
+| Feature | Detail |
+|---------|--------|
+| Real-time streaming | LLM tokens streamed token-by-token via SSE |
+| Thinking trace | Agent reasoning steps displayed live in the UI |
+| Multimodal | Upload images for vision-capable models |
+| Session management | Create, rename, delete chat sessions |
+| Auto-rename | Sessions titled automatically from conversation context |
+| Session compaction | LLM summarizes old context; keeps last N turns verbatim — prevents token overflow |
 
 ---
 
 ### 📋 Skills Management
-Manage reusable instruction files for AI tasks.
 
-- **SKILL.md Files** — Create best practices, patterns, and guidelines
-- **Import/Export** — Share skills as files
-- **Prompt Injection** — Automatically inject skill content into system prompts
+Manage reusable instruction files that inject into system prompts.
+
+- **SKILL.md files** — create best practices, personas, and domain-specific guidelines
+- **In-UI editor** — create and edit skill files directly from Settings
+- **Import / Export** — share skills as Markdown files
+- **Marketplace integration** — publish and import skills from the community
 
 ---
 
-## ⚙️ How It Works — The Flow Engine
+### 📊 Observability
 
-The `FlowRunner` executes AI flows as a **Directed Acyclic Graph (DAG)** using Kahn's topological sort algorithm.
+Production-grade monitoring baked in — no external services needed.
 
-### Node Execution Contract
+- **Distributed tracing** — span-based traces with `trace_id`/`span_id` propagation via `contextvars`
+- **Metrics** — counters, gauges, histograms with p50/p95/p99 percentiles; persisted across restarts
+- **Structured logging** — JSON-formatted logs with trace context correlation
+- **Debug mode** — `debug_mode: true` writes per-node execution traces to `data/execution_trace.jsonl`
 
-Every node executor implements two async methods:
+---
 
-```python
-async def receive(self, input_data: dict, config: dict = None) -> dict | None:
-    # Process input. Return None to STOP the branch (conditional logic).
-    ...
+## 🧩 Available Modules
 
-async def send(self, processed_data: dict) -> dict:
-    # Return output passed to all downstream nodes.
-    ...
-```
+NeuroCore ships **18 hot-swappable modules**. Enable or disable any of them at runtime — no restart required.
 
-### Key Engine Mechanisms
+| Module | Purpose | Router | Flow Nodes |
+|--------|---------|:------:|:----------:|
+| `llm_module` | Core LLM node — streaming, tool calling, vision | ✅ | ✅ |
+| `agent_loop` | Autonomous LLM↔tool loop (3 nodes) | — | ✅ |
+| `system_prompt` | System prompt injection + tool registration | ✅ | ✅ |
+| `memory` | FAISS+SQLite long-term memory (3 nodes) | ✅ | ✅ |
+| `knowledge_base` | RAG — hybrid FTS5+FAISS search | ✅ | ✅ |
+| `tools` | Tool library, dispatcher, secure sandbox | ✅ | ✅ |
+| `logic` | Control flow — Delay, Repeater, Conditional, Script, Schedule, ContextLengthRouter | — | ✅ (7) |
+| `chat` | Chat UI + SSE streaming + session compaction | ✅ | ✅ |
+| `messaging_bridge` | Telegram / Discord / Signal / WhatsApp | ✅ | ✅ |
+| `email_bridge` | IMAP receive + SMTP send | ✅ | ✅ |
+| `planner` | Goal decomposition into executable steps | — | ✅ |
+| `reflection` | Response quality gate (`satisfied` → conditional routing) | — | ✅ |
+| `calendar` | Event scheduling and calendar watcher node | ✅ | ✅ |
+| `skills` | Instruction file management | ✅ | — |
+| `memory_browser` | Full UI to search, edit, merge, delete memories | ✅ | — |
+| `reasoning_book` | Thought journal — save and load reasoning context | ✅ | ✅ |
+| `browser_automation` | Lazy Playwright singleton (headless browser) | ✅ | — |
+| `annotations` | Comment nodes for documenting flows | — | ✅ |
 
-| Mechanism | Implementation | Purpose |
-|-----------|---------------|---------|
-| **Topological Sort** | Kahn's algorithm | Deterministic execution ordering based on dependencies |
-| **Cycle Detection** | Heuristic break | Detects cycles and picks lowest in-degree node to continue |
-| **Bridge Nodes** | BFS component grouping | Implicit parallel connections for synchronized execution |
-| **Conditional Routing** | `_route_targets` key | Dynamic branching based on runtime conditions |
-| **Context Propagation** | `messages` key preservation | Maintains conversation history across all nodes |
-| **Loop Guard** | `max_node_loops` counter | Prevents infinite loops (default: 100, max 1,000) |
-| **Executor Cache** | Class-level `_executor_cache` (FIFO, max 100) | Avoids re-importing modules on every execution |
-| **Dynamic Import** | `importlib` + `reload()` (debug mode only) | Hot code updates without server restart |
-| **Background Tasks** | `asyncio.create_task()` | Non-blocking operations (memory save, consolidation) |
-| **Auto-Start** | Lifespan event handler | Repeater nodes start automatically on app launch |
-| **Bridge Execution** | Upstream-to-downstream ordering | Ensures bridged nodes execute in correct sequence |
-| **Execution Timeout** | `asyncio.wait_for` | Per-flow timeout via `run(timeout=...)` |
-| **Episode Persistence** | `EpisodeState` + `data/episodes/` | Resume long-running agent tasks across invocations |
-| **Input Isolation** | Shallow-copy for source nodes, deep-copy of `messages` | Prevents cross-node state mutation |
-
-### Bridge Nodes: Advanced Parallel Execution
-
-Bridge nodes are a unique NeuroCore feature that enables **implicit parallel execution** with synchronized data sharing:
-
-```
-┌─────────┐      ┌─────────┐      ┌─────────┐
-│ Node A  │◀────▶│ Node B  │◀────▶│ Node C  │
-│(Input)  │bridge│(Process)│bridge│(Output) │
-└─────────┘      └─────────┘      └─────────┘
-      │                │                │
-      └────────────────┴────────────────┘
-              Bridge Group
-              
-All nodes in a bridge group:
-• Execute in upstream-to-downstream order
-• Share data via bridge_input merging
-• Enable parallel processing patterns
-```
-
-**How Bridges Work:**
-1. **Bridge Groups** — BFS identifies connected components of bridged nodes
-2. **Execution Order** — Nodes execute in topological order within the group
-3. **Data Merging** — Each node receives merged output from all upstream bridged nodes
-4. **Synchronization** — Ensures all bridged nodes complete before downstream nodes execute
-
-**Use Cases:**
-- **Multi-Input Processing** — Combine outputs from multiple LLM calls
-- **Parallel Tool Execution** — Run independent tools simultaneously
-- **Data Aggregation** — Merge results from different sources before final output
-
-
-### Typical Flow Execution
-
-```
-Chat Input  ──►  Memory Recall  ──►  System Prompt  ──►  LLM Core
-                                                              │
-                                                    ┌─────────┴──────────┐
-                                                    ▼                    ▼
-                                            Tool Dispatcher        Chat Output
-                                                    │
-                                                    ▼
-                                              LLM Core (2nd pass)
-                                                    │
-                                                    ▼
-                                              Chat Output
-```
+> **Adding a module:** drop a folder into `modules/` with a `module.json` and `__init__.py`. It appears in the dashboard immediately. See [`docs/MODULE_GUIDE.md`](docs/MODULE_GUIDE.md).
 
 ---
 
 ## 🧩 Available AI Flow Nodes
 
-NeuroCore provides **25+ built-in nodes** organized by function. Each node follows the `receive()` → `send()` contract for input processing and output generation.
+**28 built-in node executors** across all modules:
 
 ### Input Nodes
-| Node | Description | Output |
-|------|-------------|--------|
-| **Chat Input** | Receives user messages from the chat interface | `{"messages": [...]}` |
-| **Telegram Input** | Receives messages from Telegram bot | `{"messages": [...]}` |
+| Node | Module | Description |
+|------|--------|-------------|
+| `chat_input` | chat | Receives user messages from the web UI |
+| `messaging_input` | messaging_bridge | Receives messages from any configured platform |
+| `email_input` | email_bridge | Polls IMAP inbox for new messages |
 
 ### Processing Nodes
-| Node | Description | Key Features |
-|------|-------------|--------------|
-| **LLM Core** | Calls the configured LLM with messages | Streaming support, tool calling, vision |
-| **System Prompt** | Injects system prompts and enables tools | Merges `_memory_context`, `_kb_context` |
-| **Memory Save** | Saves content to long-term memory | Async background processing, arbiter filtering |
-| **Memory Recall** | Retrieves relevant memories semantically | FAISS vector search, score thresholding |
-| **Knowledge Query** | Queries the knowledge base for context | Hybrid search (vector + keyword) |
-| **Check Goal** | Injects current goal into context | Priority-based goal selection |
-| **Reasoning Load** | Loads reasoning history into context | Temporal reasoning injection |
+| Node | Module | Description |
+|------|--------|-------------|
+| `llm_module` | llm_module | Calls the LLM — streaming, tool calling, vision |
+| `system_prompt` | system_prompt | Injects system prompt, merges memory/kb/reasoning context |
+| `memory_recall` | memory | Semantic FAISS vector search → `_memory_context` |
+| `memory_save` | memory | Async background extraction + arbiter + consolidation |
+| `check_goal` | memory | Injects highest-priority active goal into context |
+| `query_knowledge` | knowledge_base | Hybrid RAG search → `_kb_context` |
+| `tool_dispatcher` | tools | Executes LLM-requested tool calls in the sandbox |
+| `agent_loop` | agent_loop | Autonomous LLM↔tool loop with configurable max iterations |
+| `recursive_lm` | agent_loop | RLM node for long-context recursive processing |
+| `repl_environment` | agent_loop | REPL-style code execution environment |
+| `planner` | planner | Decomposes a goal into an ordered step list |
+| `plan_step_tracker` | planner | Tracks step completion and routes to next step |
+| `reflection` | reflection | LLM evaluates output quality → `satisfied` bool |
+| `reasoning_save` | reasoning_book | Persists reasoning steps to journal |
+| `reasoning_load` | reasoning_book | Injects reasoning history into context |
+| `calendar_watcher` | calendar | Checks for upcoming calendar events |
 
 ### Output Nodes
-| Node | Description | Use Case |
-|------|-------------|----------|
-| **Chat Output** | Sends responses to the chat interface | Standard chat responses |
-| **Telegram Output** | Sends responses to Telegram | Remote bot interactions |
-| **Tool Dispatcher** | Executes tools requested by the LLM | Function calling, sandboxed execution |
+| Node | Module | Description |
+|------|--------|-------------|
+| `chat_output` | chat | Sends response to the web UI |
+| `messaging_output` | messaging_bridge | Routes reply to originating platform or proactive recipients |
+| `email_output` | email_bridge | Sends email via SMTP |
 
 ### Logic & Control Nodes
-| Node | Description | Configuration |
-|------|-------------|---------------|
-| **Trigger** | Pass-through node for manual triggering | Used with "Run Node" button |
-| **Delay** | Pauses execution for specified seconds | `seconds` parameter |
-| **Python Script** | Executes custom Python code | `code` parameter with sandbox |
-| **Repeater** | Re-triggers flow after delay | `delay_seconds`, `max_repeats` (0=infinite) |
-| **Conditional Router** | Routes based on field existence | Checks for `_route_targets` key |
-| **Scheduled Start** | Waits until specific date/time | ISO 8601 datetime string |
+| Node | Module | Description |
+|------|--------|-------------|
+| `trigger_node` | logic | Pass-through manual trigger |
+| `delay_node` | logic | Pause execution for N seconds |
+| `script_node` | logic | Run custom Python code (sandboxed) |
+| `repeater_node` | logic | Re-trigger flow on a timer (0 = infinite) |
+| `conditional_router` | logic | Branch on field existence (`tool_calls`, `satisfied`, etc.) |
+| `schedule_start_node` | logic | Wait until a specific ISO 8601 datetime |
+| `context_length_router` | logic | Route to RLM vs standard LLM based on token estimate |
+| `comment_node` | annotations | Resizable text note on the canvas |
 
-### Utility Nodes
-| Node | Description | Visual |
-|------|-------------|--------|
-| **Annotation** | Adds comments to document flow logic | Yellow note-style node |
-| **Bridge** | Connects nodes for parallel execution | Visual bridge indicator |
+### Reserved Flow Keys
 
-### Node Execution Contract
-
-Every node implements this async interface:
-
-```python
-class NodeExecutor:
-    async def receive(self, input_data: dict, config: dict = None) -> dict | None:
-        """
-        Process input data.
-        
-        Args:
-            input_data: Data from upstream nodes (merged if multiple)
-            config: Node-specific configuration from flow editor
-        
-        Returns:
-            dict: Output data passed to downstream nodes
-            None: STOP this branch (conditional logic)
-        """
-        # Process input...
-        return {"key": "value"}  # or None to stop branch
-    
-    async def send(self, processed_data: dict) -> dict:
-        """
-        Finalize output before passing to next nodes.
-        
-        Args:
-            processed_data: Data from receive() method
-        
-        Returns:
-            dict: Final output for downstream consumption
-        """
-        return processed_data
-```
-
-### Special Keys & Conventions
-
-| Key | Purpose | Set By | Read By |
-|-----|---------|--------|---------|
-| `messages` | Conversation history | Chat Input | LLM Core, System Prompt |
-| `_memory_context` | Retrieved memories | Memory Recall | System Prompt |
-| `_kb_context` | Knowledge base results | Knowledge Query | System Prompt |
-| `_route_targets` | Conditional routing | Any node | FlowRunner |
-| `tool_calls` | LLM tool requests | LLM Core | Tool Dispatcher |
-| `tool_results` | Tool execution results | Tool Dispatcher | LLM Core |
-| `requires_continuation` | Multi-turn tool loops | Tool Dispatcher | Conditional Router |
-
+| Key | Owner | Purpose |
+|-----|-------|---------|
+| `messages` | All nodes | Conversation history — preserved across all nodes |
+| `_memory_context` | `memory_recall` | Injected memory context |
+| `_kb_context` | `query_knowledge` | Knowledge base retrieval results |
+| `_route_targets` | Conditional router | Dynamic branch targets (consumed by FlowRunner) |
+| `tool_calls` | `llm_module` | LLM-requested tool invocations |
+| `tool_results` | `tool_dispatcher` | Tool execution results |
+| `requires_continuation` | `tool_dispatcher` | Multi-turn tool loop flag |
+| `satisfied` | `reflection` | Boolean for conditional routing |
+| `_is_error` | Internal | Marks the payload as a flow error |
 
 ---
 
 ## 🛠️ Tech Stack
 
-| Layer | Technology | Purpose |
-|-------|-----------|---------|
-| **Backend** | Python 3.12+, FastAPI, Uvicorn, HTTPX | High-performance async API server |
-| **Frontend** | HTMX, TailwindCSS, Vanilla JavaScript | Lightweight, server-driven UI |
-| **Templating** | Jinja2 (32 templates) | Server-side HTML generation |
-| **Vector Database** | FAISS (`faiss-cpu`) — `IndexIDMap(IndexFlatIP)` | Efficient similarity search |
-| **Relational Database** | SQLite (WAL mode, FTS5 full-text search) | Persistence + text search |
-| **LLM Integration** | OpenAI-compatible API | Universal LLM support |
-| **Testing** | pytest, pytest-asyncio, pytest-httpx, pytest-cov | Comprehensive test coverage |
-| **Deployment** | Docker + docker-compose | Containerized deployment |
+| Layer | Technology | Why |
+|-------|-----------|-----|
+| **Backend** | Python 3.12+, FastAPI 0.115+, Uvicorn 0.32+ | Async-first, fast, typed |
+| **Frontend** | HTMX + TailwindCSS + Vanilla JS | No build step, server owns state |
+| **Templating** | Jinja2 3.1+ (39 templates) | Server-rendered HTML fragments for HTMX |
+| **Vector DB** | FAISS `IndexFlatIP` + L2 normalization | Sub-millisecond similarity search |
+| **Relational DB** | SQLite WAL mode + FTS5 | ACID compliance + full-text search, zero infra |
+| **HTTP Client** | HTTPX 0.28+ (async, connection pooling) | Non-blocking LLM calls |
+| **WebSocket** | websockets 12.0+ | Discord Gateway, custom protocols |
+| **LLM API** | OpenAI-compatible | Works with Ollama, LM Studio, LocalAI, OpenAI, etc. |
+| **Validation** | Pydantic 2.10+ | Schema enforcement for flow payloads and structured output |
+| **Testing** | pytest + pytest-asyncio + pytest-httpx + pytest-cov | 1,141 tests across 72 files |
+| **Deployment** | Docker + docker-compose | Single-command production deploy |
+| **Linting** | Ruff | Fast Python linter + formatter |
 
-### Why These Technologies?
-
-**FastAPI + HTMX = Hypermedia-Driven Architecture**
-- No heavy JavaScript frameworks needed
-- Server renders HTML, HTMX swaps DOM fragments
-- Simpler mental model: backend owns state, frontend displays it
-- Perfect for AI applications where backend processing dominates
-
-**FAISS + SQLite = Best of Both Worlds**
-- FAISS provides state-of-the-art vector similarity search
-- SQLite offers ACID compliance and full-text search
-- Combined: hybrid search with RRF ranking
-
-**Async-First Design**
-- All I/O operations are non-blocking
-- Multiple flows can execute concurrently
-- Background tasks (memory consolidation) don't block requests
-
-### Runtime Dependencies
-
+**Runtime dependencies:**
 ```
-fastapi  •  uvicorn  •  httpx  •  jinja2  •  numpy  •  faiss-cpu  •  python-multipart
+fastapi · uvicorn · httpx · jinja2 · numpy · faiss-cpu · python-multipart · filelock
 ```
-
-
----
-
-## 🚀 Getting Started
-
-### Prerequisites
-- Python 3.12 or higher
-- An OpenAI-compatible LLM API endpoint (Ollama, LM Studio, LocalAI, etc.)
-
-### Installation
-
-```bash
-# Clone the repository
-git clone https://github.com/Aegean-E/NeuroCore
-cd NeuroCore
-
-# Create virtual environment
-python -m venv venv
-
-# Activate (Windows)
-.\venv\Scripts\activate
-# Or (macOS/Linux)
-source venv/bin/activate
-
-# Install dependencies
-pip install fastapi uvicorn httpx jinja2 numpy faiss-cpu "pytest<9" "pytest-cov" "pytest-httpx" "pytest-asyncio" python-multipart
-```
-
-### Configuration
-
-The application uses `settings.json`. On first run, it will be created with defaults. Update `llm_api_url` to point to your LLM:
-
-```json
-{
-    "llm_api_url": "http://localhost:1234/v1",
-    "llm_api_key": "",
-    "default_model": "local-model",
-    "embedding_api_url": "",
-    "embedding_model": "",
-    "temperature": 0.7,
-    "max_tokens": 2048,
-    "debug_mode": false,
-    "request_timeout": 60.0,
-    "max_node_loops": 100,
-    "module_allowlist": [],
-    "ui_wide_mode": false,
-    "ui_show_footer": true
-}
-```
-
-- `module_allowlist` — restrict which modules can be hot-loaded (empty = allow all)
-- `ui_wide_mode` — use a wider layout in the web UI
-- `debug_mode` — enables per-node execution tracing and reloads node modules on every call
-
-### Running
-
-```bash
-# Windows
-py main.py
-
-# macOS/Linux
-python main.py
-```
-
-Access at `http://localhost:8000`
-
-### Docker
-
-NeuroCore can also be run using Docker:
-
-```bash
-# Build and run
-docker-compose up -d --build
-
-# View logs
-docker-compose logs -f
-
-# Stop
-docker-compose down
-```
-
-Access at `http://localhost:8000`
-
-**Note:** Create a `settings.json` with your LLM configuration before running, or it will be created with defaults on first start. The `data/` folder and `settings.json` are mounted from your host for persistence.
 
 ---
 
 ## 📂 Project Structure
 
+<details>
+<summary><b>Click to expand full tree</b></summary>
+
 ```
 NeuroCore/
-├── core/                       # Core application logic (15 files)
-│   ├── dependencies.py         # FastAPI dependency injection
-│   ├── debug.py                # Structured debug logging
-│   ├── errors.py               # Typed exception hierarchy
-│   ├── flow_context.py         # FlowContext Pydantic model
-│   ├── flow_data.py            # FlowData TypedDict + helpers
-│   ├── flow_manager.py         # AI Flow CRUD operations
-│   ├── flow_runner.py          # DAG execution engine (timeout, episodes)
-│   ├── llm.py                  # LLM API client (OpenAI-compatible)
-│   ├── module_manager.py       # Dynamic module loading & hot-swap
-│   ├── planner_helpers.py      # Plan dependency graphs & cycle detection
-│   ├── routers.py              # Main API routes (40+ endpoints)
-│   ├── session_manager.py      # Session persistence + EpisodeState
-│   ├── settings.py             # Thread-safe settings manager
-│   ├── observability.py        # Distributed tracing + metrics
-│   └── structured_output.py    # Pydantic schema enforcement
-├── modules/                    # Self-contained feature modules (16)
-│   ├── agent_loop/             # Agent loop node
-│   ├── annotations/            # Flow annotation nodes
-│   ├── calendar/               # Calendar and event management
-│   ├── chat/                   # Chat UI and session management
-│   ├── knowledge_base/         # RAG document processing (hybrid search)
-│   ├── logic/                  # Logic nodes (Delay, Repeater, etc.)
-│   ├── llm_module/             # Core LLM node
-│   ├── memory/                 # Long-term memory (FAISS + SQLite)
-│   ├── memory_browser/         # Memory management UI
-│   ├── planner/                # Planner node
-│   ├── reasoning_book/         # Reasoning journal
-│   ├── reflection/             # Reflection node
-│   ├── skills/                 # Instruction file management
-│   ├── system_prompt/          # System prompt injection
-│   ├── telegram/               # Telegram bot integration
-│   └── tools/                  # Tool library and dispatcher
-│       ├── library/            # 16 standard built-in tool files
-│       └── rlm_library/        # 7 RLM tool files
-├── tests/                      # Comprehensive test suite (67 files, 926 tests)
-├── web/
-│   └── templates/              # Jinja2 HTML templates (33)
-├── data/                       # Persistent data (SQLite + FAISS + traces)
-│   ├── memory.sqlite3          # Long-term memory DB
-│   ├── memory.faiss            # Long-term memory vector index
-│   ├── knowledge_base.sqlite3  # RAG document DB (FTS5)
-│   ├── knowledge_base.faiss    # RAG vector index
-│   ├── reasoning_book.json     # Reasoning journal
-│   ├── execution_trace.jsonl   # Per-node execution traces (debug)
-│   ├── session.json            # Session persistence
-│   └── episodes/               # EpisodeState for long-running tasks
-├── screenshots/                # UI screenshots
-├── docs/                       # Documentation
-├── main.py                     # FastAPI application entry point
-├── pyproject.toml              # Project metadata & build config
-├── requirements.txt            # Python dependencies
-├── settings.json               # Runtime configuration
-├── ai_flows.json               # Saved AI Flow definitions
-├── Dockerfile                  # Container build instructions
-└── docker-compose.yml          # Container orchestration
+├── core/                         # Core framework (15 files)
+│   ├── flow_runner.py            # DAG execution engine (Kahn's sort, bridge groups, episodes)
+│   ├── flow_manager.py           # Flow CRUD + version history (up to 20 versions/flow)
+│   ├── module_manager.py         # Hot-swap module loader (_loaded_once safety)
+│   ├── routers.py                # 74 HTTP endpoints + full marketplace implementation
+│   ├── llm.py                    # Async OpenAI-compatible LLM client (connection pooling)
+│   ├── settings.py               # Thread-safe config manager (RLock + atomic write)
+│   ├── observability.py          # Distributed tracing · metrics · structured JSON logging
+│   ├── session_manager.py        # Chat sessions + EpisodeState persistence
+│   ├── structured_output.py      # Pydantic-based structured output with retry logic
+│   ├── planner_helpers.py        # Plan dependency graphs + cycle detection
+│   ├── flow_context.py           # FlowContext Pydantic model
+│   ├── flow_data.py              # FlowData TypedDict + helper functions
+│   ├── errors.py                 # 14 typed exception classes
+│   ├── debug.py                  # Structured debug logging
+│   ├── dependencies.py           # FastAPI dependency injection
+│   └── schemas/                  # Scientific domain models (Hypothesis, Article, Finding, StudyDesign)
+├── modules/                      # 18 self-contained feature modules
+│   ├── agent_loop/               # Autonomous agent loop (3 nodes)
+│   ├── annotations/              # Flow comment nodes
+│   ├── browser_automation/       # Lazy Playwright singleton (headless=true)
+│   ├── calendar/                 # Calendar events + watcher node
+│   ├── chat/                     # Chat UI + SSE streaming + session compaction
+│   ├── email_bridge/             # IMAP polling + SMTP sending
+│   ├── knowledge_base/           # RAG — hybrid FTS5+FAISS with RRF
+│   ├── llm_module/               # Core LLM node — streaming, tool calling, vision
+│   ├── logic/                    # 7 control-flow nodes
+│   ├── memory/                   # Long-term memory — FAISS+SQLite+arbiter+consolidation
+│   ├── memory_browser/           # Memory management UI
+│   ├── messaging_bridge/         # Telegram/Discord/Signal/WhatsApp
+│   ├── planner/                  # Goal decomposition (planner + plan_step_tracker)
+│   ├── reasoning_book/           # Thought journal (save + load nodes)
+│   ├── reflection/               # Quality gate node
+│   ├── skills/                   # Instruction file management
+│   ├── system_prompt/            # System prompt injection + tool registration
+│   └── tools/                    # Tool library (23 tools) + dispatcher + sandbox
+│       ├── library/              # 16 standard tool implementations
+│       └── rlm_library/          # 7 RLM tool implementations
+├── web/templates/                # 39 Jinja2 HTML templates
+├── tests/                        # 72 test files · 1,141 tests
+│   └── run_tests.py              # Test runner with optional coverage
+├── data/                         # Runtime data (mutable, excluded from hot-reloader)
+│   ├── memory.sqlite3            # Long-term memory relational store
+│   ├── memory.faiss              # Long-term memory vector index
+│   ├── knowledge_base.sqlite3    # RAG relational store (FTS5)
+│   ├── knowledge_base.faiss      # RAG vector index
+│   ├── reasoning_book.json       # Thought journal
+│   ├── execution_trace.jsonl     # Per-node execution traces (debug_mode only)
+│   ├── episodes/                 # EpisodeState files for long-running agent tasks
+│   ├── marketplace/              # Community catalog (catalog.json) + uploads/
+│   ├── marketplace_profile.json  # Local uploader identity (handle, username, bio)
+│   ├── marketplace_notifications.json  # Notification queue (capped at 200)
+│   └── download_history.json     # Import dedup tracking
+├── docs/                         # Deep-dive documentation
+│   ├── SYSTEM_ARCHITECTURE.md    # Architecture reference
+│   ├── PROJECT_ANALYSIS.md       # Full codebase analysis
+│   ├── MODULE_GUIDE.md           # How to build modules
+│   ├── TOOL_GUIDE.md             # How to build tools + sandbox reference
+│   ├── CONCURRENCY.md            # Lock ordering rules + deadlock prevention
+│   └── IDEAS.md                  # Feature backlog
+├── main.py                       # FastAPI app entry point + lifespan manager
+├── settings.json                 # Runtime configuration
+├── ai_flows.json                 # Saved flow definitions
+├── ai_flows_versions.json        # Flow version history
+├── pyproject.toml                # Project metadata · pytest config · ruff rules
+├── requirements.txt              # Runtime dependencies
+├── Dockerfile
+└── docker-compose.yml
 ```
+
+</details>
 
 ---
 
 ## 🌐 API Reference
 
-NeuroCore exposes a comprehensive REST API:
+74 routes in `core/routers.py` alone. Key groups:
 
-| Group | Key Endpoints |
-|-------|--------------|
-| **Dashboard** | `GET /` · `GET /dashboard/gui` · `GET /dashboard/stats` · `GET /dashboard/recent-sessions` |
-| **Modules** | `GET /modules/list` · `GET /modules/{id}/details` · `GET /modules/{id}/default-config` · `GET /modules/{id}/default-prompt` · `POST /modules/{id}/config` · `POST /modules/{id}/{action}` · `POST /modules/reorder` |
-| **AI Flow** | `GET /ai-flow` · `POST /ai-flow/save` · `GET /ai-flow/{id}` · `GET /ai-flow/{id}/validate` · `POST /ai-flow/{id}/rename` · `POST /ai-flow/{id}/set-active` · `POST /ai-flow/stop-active` · `POST /ai-flow/make-default` · `POST /ai-flow/{id}/run-node/{node_id}` · `POST /ai-flow/{id}/delete` |
-| **Settings** | `GET /settings` · `POST /settings/save` · `POST /settings/reset` · `GET /settings/export/config` · `POST /settings/import/config` · `GET /settings/export/flows` · `POST /settings/import/flows` · `GET /settings/modules-nav` |
-| **Debug** | `GET /debug` · `GET /debug/logs` · `GET /debug/events` · `GET /debug/summary` · `GET /debug/agent-summary` · `POST /debug/clear` |
-| **Goals** | `GET /goals` |
-| **System** | `GET /llm-status` · `GET /navbar` · `GET /footer` · `GET /system-time` |
+| Group | Endpoints |
+|-------|-----------|
+| **Dashboard** | `GET /` · `GET /dashboard/stats` · `GET /dashboard/recent-sessions` |
+| **AI Flows** | `GET /ai-flow` · `POST /ai-flow/save` · `GET /ai-flow/{id}/validate` · `POST /ai-flow/{id}/run-node/{nid}` · `POST /ai-flow/{id}/delete` · *(version history, rename, set-active, make-default…)* |
+| **Modules** | `GET /modules/list` · `POST /modules/{id}/config` · `POST /modules/{id}/{action}` · `POST /modules/reorder` |
+| **Settings** | `GET /settings` · `POST /settings/save` · `POST /settings/reset` · `GET/POST /settings/export|import` |
+| **Marketplace** | `GET /marketplace` · `GET /marketplace/item/{id}` · `POST /marketplace/upload` · `POST /marketplace/item/{id}/import` · `POST /marketplace/item/{id}/vote` · `POST /marketplace/item/{id}/update` · `DELETE /marketplace/item/{id}` · `GET /marketplace/uploader/{handle}` · `POST /marketplace/item/{id}/comment` · `DELETE /marketplace/item/{id}/comment/{cid}` · `GET /marketplace/notifications` · `POST /marketplace/notifications/read` · `DELETE /marketplace/notifications` · `GET /marketplace/handles` · `GET/POST /marketplace/profile` |
+| **Debug** | `GET /debug/logs` · `GET /debug/events` · `GET /debug/summary` · `GET /debug/agent-summary` · `POST /debug/clear` |
+| **System** | `GET /llm-status` · `GET /navbar` · `GET /footer` · `GET /system-time` · `GET /goals` |
+
+Each module also exposes its own router (e.g. `/chat/*`, `/memory/*`, `/knowledge-base/*`, `/tools/*`).
 
 ---
 
 ## 🧪 Testing
 
-Comprehensive test suite with **67 test files** and **926 individual tests** covering all layers:
-
 ```bash
 # Run all tests
 py tests/run_tests.py
 
-# Run with coverage
+# With coverage report
 py tests/run_tests.py --coverage
 
-# Run specific test file
+# Single file
 pytest tests/test_tool_sandbox.py -v
 
-# Run with markers
-pytest -m "not slow"  # Skip slow integration tests
+# E2E tests (requires live server)
+NEUROCORE_RUN_E2E=1 pytest tests/test_e2e.py -v
 ```
 
-`asyncio_mode = "auto"` is set globally in `pyproject.toml` — no `@pytest.mark.asyncio` needed. E2E tests require a live server; set `NEUROCORE_RUN_E2E=1` to enable them.
+`asyncio_mode = "auto"` is set globally — **never add `@pytest.mark.asyncio`.**
+`conftest.py` auto-backs up and restores `module.json` files around each test session.
 
-### Test Philosophy
+**Coverage breakdown:**
 
-NeuroCore follows **test-driven development** principles:
-- **Unit Tests** — Test individual functions and classes in isolation
-- **Integration Tests** — Test module interactions and data flow
-- **End-to-End Tests** — Test complete user workflows via HTTP requests
+| Area | Files | Tests |
+|------|------:|------:|
+| Core flow engine | 6 | 120+ |
+| Chat + sessions | 6 | 90+ |
+| Agent loop | 3 | 60+ |
+| Memory system | 6 | 100+ |
+| Tools + sandbox | 3 | 80+ |
+| Individual modules | 14 | 220+ |
+| LLM bridge | 4 | 60+ |
+| Concurrency / robustness | 2 | 40+ |
+| Messaging bridge | 1 | 63 |
+| E2E (live server) | 1 | gated |
+| **Total** | **72** | **1,141+** |
 
-### Coverage Areas
-
-| Area | Test Files | Test Count |
-|------|-----------|------------|
-| **Core Engine** | `test_flow_runner.py`, `test_flow_manager.py`, `test_flow_integration.py`, `test_flow_validation.py`, `test_core_flow_manager.py` | 40+ |
-| **Module System** | `test_module_manager.py`, `test_dependencies.py` | 20+ |
-| **Memory** | `test_memory_nodes.py`, `test_memory_arbiter.py`, `test_memory_consolidation.py`, `test_memory_router.py`, `test_memory_browser.py` | 50+ |
-| **Knowledge Base** | `test_knowledge_base.py`, `test_knowledge_base_improvements.py` | 30+ |
-| **Chat** | `test_chat_module.py`, `test_chat_sessions.py`, `test_chat_features.py`, `test_chat_router_flow.py` | 40+ |
-| **Tools** | `test_tools_library.py`, `test_tools_node.py`, `test_tool_sandbox.py`, `test_sandbox_security.py` | 90+ |
-| **LLM** | `test_core_llm.py`, `test_llm_node.py` | 25+ |
-| **Security** | `test_tool_sandbox.py`, `test_sandbox_security.py` | 24+ |
-| **Robustness** | `test_core_concurrency.py`, `test_core_robustness.py`, `test_core_improvements.py` | 30+ |
-| **Integrations** | `test_telegram_module.py`, `test_calendar.py`, `test_reasoning_book.py`, `test_calendar_events.py`, `test_calendar_node.py` | 35+ |
-| **E2E** | `test_e2e.py` | 7 (requires `NEUROCORE_RUN_E2E=1`) |
-
-### Security Testing
-
-The tool sandbox includes **24 dedicated security tests**:
-
+**Security testing — sandbox enforcement:**
 ```python
-# Example: Testing that dangerous imports are blocked
+# Dangerous imports are blocked
 def test_blocks_dangerous_modules():
     with pytest.raises(SecurityError):
         execute_sandboxed("import os; result = os.getcwd()", {})
 
-# Example: Testing SSRF protection
+# SSRF protection
 def test_blocks_internal_ips():
-    client = SafeHttpxClient()
-    assert client._is_ip_blocked('127.0.0.1') == True
+    assert SafeHttpxClient()._is_ip_blocked('127.0.0.1') == True
 ```
-
 
 ---
 
 ## 🤝 Contributing
 
-We welcome contributions! Please see our [Module Development Guide](modules/MODULE_GUIDE.md) for creating custom modules and the [Tool Guide](modules/TOOL_GUIDE.md) for adding new tools.
-
-### Development Setup
+Contributions are welcome. See:
+- [`docs/MODULE_GUIDE.md`](docs/MODULE_GUIDE.md) — build a new module in minutes
+- [`docs/TOOL_GUIDE.md`](docs/TOOL_GUIDE.md) — add tools with sandbox-aware Python
+- [`docs/SYSTEM_ARCHITECTURE.md`](docs/SYSTEM_ARCHITECTURE.md) — deep architecture reference
+- [`docs/CONCURRENCY.md`](docs/CONCURRENCY.md) — lock ordering rules (read before touching shared state)
 
 ```bash
-# Install dev dependencies
-pip install -e ".[dev]"
-
-# Run pre-commit hooks (if contributing)
-pre-commit install
-
-# Run tests before submitting PR
-pytest tests/ -x  # Stop on first failure
+# Run tests before submitting
+pytest tests/ -x      # stop on first failure
+ruff check .          # lint
+ruff format .         # format
 ```
 
-### Contribution Ideas
+**Ideas for contributions:**
+- New messaging platform bridges (Slack, Matrix, etc.)
+- Browser automation flow nodes (Playwright executor)
+- New domain-specific tools (finance, science, DevOps)
+- Flow visual replay from `execution_trace.jsonl`
+- Dashboard analytics from `core/observability.py` metrics
 
-- **New Modules** — Add integrations for Discord, Slack, email, etc.
-- **New Tools** — Create tools for specific domains (finance, science, etc.)
-- **UI Improvements** — Enhance the flow editor with new features
-- **Documentation** — Improve guides and add examples
-- **Security** — Help audit and improve the sandbox system
+---
 
 ## 📄 License
 
 NeuroCore is licensed under the [Apache 2.0 License](LICENSE).
 
+---
+
 ## 🙏 Acknowledgments
 
-- **FAISS** — Facebook AI Similarity Search library
-- **FastAPI** — Modern, fast web framework
-- **HTMX** — HTML over the wire movement
-- **Ollama/LM Studio/LocalAI** — Making local LLMs accessible
-
+- **[FAISS](https://github.com/facebookresearch/faiss)** — Facebook AI Similarity Search
+- **[FastAPI](https://fastapi.tiangolo.com)** — Modern async Python web framework
+- **[HTMX](https://htmx.org)** — HTML over the wire
+- **[Ollama](https://ollama.ai) / [LM Studio](https://lmstudio.ai) / [LocalAI](https://localai.io)** — Making local LLMs accessible
 
 ---
 
 <p align="center">
-  <b>Built with ❤️ for the AI community</b><br>
+  <b>Built with ❤️ for the AI community</b><br><br>
   <a href="https://github.com/Aegean-E/NeuroCore">⭐ Star us on GitHub</a>
 </p>

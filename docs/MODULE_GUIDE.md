@@ -308,7 +308,7 @@ These keys are managed by the framework and must not be repurposed:
 
 ## 7. Core Modules Reference
 
-NeuroCore includes **17 built-in modules** with 27 node executors.
+NeuroCore includes **18 built-in modules** with 28 node executors.
 
 ### Core AI Modules
 
@@ -618,6 +618,31 @@ Headless browser singleton (Playwright).
 ```
 
 The Playwright instance is lazily initialized on first use. Currently available as a service object; flow node executors are planned (see `docs/IDEAS.md`).
+
+---
+
+#### Email Bridge (`email_bridge`)
+IMAP/SMTP email integration for NeuroCore flows.
+
+| Property | Value |
+|----------|-------|
+| **Nodes** | `email_input`, `email_output` |
+| **Order** | 16 |
+
+**Configuration:**
+```json
+{
+    "imap_host": "",
+    "imap_port": 993,
+    "smtp_host": "",
+    "smtp_port": 587,
+    "email": "",
+    "password": "",
+    "poll_interval_seconds": 30
+}
+```
+
+`email_input` polls the IMAP inbox for new messages and injects them as flow input. `email_output` sends replies or proactive messages via SMTP. Mirrors the `messaging_bridge` architecture with `ImapBridge` and `SmtpBridge` classes.
 
 ---
 
