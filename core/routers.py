@@ -1008,6 +1008,35 @@ async def create_skill(
     except Exception: raise HTTPException(status_code=500, detail="Failed to create skill assets")
     return JSONResponse(content={"status": "success", "message": "Skill created", "id": skill_id})
 
+@router.post("/settings/skills/upload_to_marketplace/{skill_id}")
+async def upload_skill_to_marketplace(skill_id: str):
+    import os, json, uuid, shutil
+    from datetime import datetime
+    skills_path = os.path.join("modules", "skills", "data", "skills_metadata.json")
+    content_path = os.path.join("modules", "skills", "data", f"{skill_id}.md")
+    if not os.path.exists(skills_path) or not os.path.exists(content_path): raise HTTPException(status_code=404, detail="Skill assets not found")
+    try:
+         with open(skills_path, "r", encoding="utf-8") as f: skills = json.load(f)
+    except Exception: raise HTTPException(status_code=500, detail="Failed to read skills metadata")
+    skill = skills.get(skill_id)
+    if not skill: raise HTTPException(status_code=404, detail="Skill not found")
+    catalog_path = os.path.join("data", "marketplace", "catalog.json")
+    upload_dir = os.path.join("data", "marketplace", "uploads")
+    os.makedirs(upload_dir, exist_ok=True)
+    try:
+         if os.path.exists(catalog_path):
+              with open(catalog_path, "r", encoding="utf-8") as f: catalog = json.load(f)
+         else: catalog = []
+    except Exception: catalog = []
+    item_id = str(uuid.uuid4())
+    shutil.copy(content_path, os.path.join(upload_dir, f"{item_id}.md"))
+    catalog.append({
+         "id": item_id, "name": skill.get("name", skill_id), "description": skill.get("description", ""),
+         "type": "skill", "filename": f"{skill_id}.md", "save_filename": f"{item_id}.md", "uploaded_at": datetime.now().isoformat(), "uploader_id": "local_user"
+    })
+    with open(catalog_path, "w", encoding="utf-8") as f: json.dump(catalog, f, indent=4)
+    return JSONResponse(content={"status": "success", "message": "Uploaded to Marketplace", "id": item_id})
+
 @router.get("/settings", response_class=HTMLResponse)
 async def get_settings(request: Request, settings_man: SettingsManager = Depends(get_settings_manager), module_manager: ModuleManager = Depends(get_module_manager)):
     import os

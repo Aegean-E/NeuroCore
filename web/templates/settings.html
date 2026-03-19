@@ -211,6 +211,11 @@
                                 <p class="text-xs text-slate-500 mt-1">Add custom prompt assets</p>
                             </button>
                         </div>
+                        
+                        <!-- Floating Create Trigger -->
+                        <button onclick="openCreateSkillModal()" class="fixed bottom-6 right-6 bg-indigo-600 hover:bg-indigo-500 text-white p-4 rounded-full shadow-2xl flex items-center justify-center transition-all hover:scale-110 z-30" title="Create New Skill">
+                            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path></svg>
+                        </button>
 
                         <!-- Skill Modal -->
                         <div id="skill-modal" class="hidden fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-40 flex items-center justify-center p-4" onclick="if(event.target === this) { closeSkillModal(); cancelEdit(); }">
@@ -218,6 +223,10 @@
                                 <div class="p-6 border-b border-slate-800 flex justify-between items-center">
                                     <h3 id="modal-skill-title" class="text-lg font-bold text-white"></h3>
                                     <div class="flex items-center space-x-2">
+                                        <button id="modal-upload-btn" onclick="uploadToMarketplace()" class="bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold px-3 py-1.5 rounded-lg transition-all shadow-lg shadow-blue-500/20 flex items-center space-x-1">
+                                            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"></path></svg>
+                                            <span>Upload</span>
+                                        </button>
                                         <button id="modal-edit-btn" onclick="startEdit()" class="bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold px-3 py-1.5 rounded-lg border border-slate-700 transition-all">Edit</button>
                                         <button id="modal-save-btn" onclick="saveEdit()" class="hidden bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold px-3 py-1.5 rounded-lg transition-all shadow-lg shadow-indigo-500/20">Save</button>
                                         <button id="modal-cancel-edit-btn" onclick="cancelEdit()" class="hidden bg-slate-800 hover:bg-slate-700 text-slate-400 text-xs font-bold px-3 py-1.5 rounded-lg border border-slate-700 transition-all">Cancel</button>
@@ -285,6 +294,38 @@
                         function closeSkillModal() {
                             document.getElementById('skill-modal').classList.add('hidden');
                             activeSkillId = '';
+                        }
+
+                        function uploadToMarketplace() {
+                            if (!activeSkillId) return;
+                            const btn = document.getElementById('modal-upload-btn');
+                            const originalHTML = btn.innerHTML;
+                            btn.innerHTML = '<span>Uploading...</span>';
+                            btn.disabled = true;
+                            
+                            fetch('/settings/skills/upload_to_marketplace/' + activeSkillId, {
+                                method: 'POST'
+                            })
+                            .then(response => response.json())
+                            .then(data => {
+                                if (data.status === 'success') {
+                                    const statusText = document.createElement('span');
+                                    statusText.className = 'text-xs text-green-500 font-bold ml-2';
+                                    statusText.innerText = 'Uploaded!';
+                                    btn.parentNode.appendChild(statusText);
+                                    btn.innerHTML = '<span>Uploaded</span>';
+                                    setTimeout(() => statusText.remove(), 3000);
+                                } else {
+                                    alert('Failed to upload: ' + (data.message || 'Unknown error'));
+                                    btn.innerHTML = originalHTML;
+                                    btn.disabled = false;
+                                }
+                            })
+                            .catch(err => {
+                                alert('Failed to upload skill');
+                                btn.innerHTML = originalHTML;
+                                btn.disabled = false;
+                            });
                         }
 
                         function startEdit() {
