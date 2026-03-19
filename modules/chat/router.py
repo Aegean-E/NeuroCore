@@ -432,7 +432,7 @@ async def stream_chat(session_id: str):
                     
                 if isinstance(chunk, dict) and chunk.get("type") == "token":
                     payload = json.dumps({"text": chunk.get("content", "")})
-                    yield f"event: message\ndata: {payload}\n\n"
+                    yield f"data: {payload}\n\n"
                 elif isinstance(chunk, dict) and chunk.get("type") == "error":
                     payload = json.dumps({"error": chunk.get("content", "")})
                     yield f"event: error\ndata: {payload}\n\n"

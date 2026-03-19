@@ -347,6 +347,29 @@
         animation: message-appear 0.3s ease-out forwards;
     }
     
+    .markdown-content ul {
+        list-style-type: disc !important;
+        padding-left: 1.5rem !important;
+        margin-top: 0.5rem !important;
+        margin-bottom: 0.5rem !important;
+    }
+    .markdown-content ol {
+        list-style-type: decimal !important;
+        padding-left: 1.5rem !important;
+        margin-top: 0.5rem !important;
+        margin-bottom: 0.5rem !important;
+    }
+    .markdown-content li {
+        margin-bottom: 0.25rem !important;
+        display: list-item !important;
+    }
+    .markdown-content p {
+        margin-bottom: 0.75rem !important;
+    }
+    .markdown-content p:last-child {
+        margin-bottom: 0 !important;
+    }
+
     @keyframes message-appear {
         from { opacity: 0; transform: translateY(10px); }
         to { opacity: 1; transform: translateY(0); }
