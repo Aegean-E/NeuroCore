@@ -144,6 +144,29 @@ class TestReflectionBasic:
         executor.llm.chat_completion.assert_not_called()
 
     @pytest.mark.asyncio
+    async def test_markdown_wrapped_json_parsing(self):
+        """When LLM response is wrapped in ```json ... ```, it should still parse correctly."""
+        executor = make_executor()
+        raw_response = (
+            "```json\n"
+            "{\n"
+            '  "satisfied": true,\n'
+            '  "reason": "Correctly parsed from markdown wrapper",\n'
+            '  "needs_improvement": null\n'
+            "}\n"
+            "```"
+        )
+        executor.llm.chat_completion = AsyncMock(
+            return_value={"choices": [{"message": {"role": "assistant", "content": raw_response}}]}
+        )
+
+        result = await executor.receive(make_input())
+
+        assert result["satisfied"] is True
+        assert result["reflection"]["satisfied"] is True
+        assert result["reflection"]["reason"] == "Correctly parsed from markdown wrapper"
+
+    @pytest.mark.asyncio
     async def test_reflection_key_always_present(self):
         """Output must always contain a 'reflection' dict."""
         executor = make_executor()

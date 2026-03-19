@@ -213,8 +213,15 @@ class ReflectionExecutor:
                 raw = response["choices"][0]["message"].get("content", "")
 
                 try:
-                    # Strip JavaScript-style comments before parsing
-                    cleaned = re.sub(r'//.*', '', raw)
+                    # Strip markdown code blocks if present
+                    match = re.search(r'```(?:json)?\s*({[\s\S]*?})\s*```', raw)
+                    if match:
+                        cleaned = match.group(1)
+                    else:
+                        cleaned = raw
+
+                    # Strip JavaScript-style comments
+                    cleaned = re.sub(r'//.*', '', cleaned)
                     cleaned = re.sub(r'/\*.*?\*/', '', cleaned, flags=re.DOTALL)
                     parsed = json.loads(cleaned.strip())
 
