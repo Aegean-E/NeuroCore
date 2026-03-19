@@ -544,7 +544,7 @@ class AgentLoopExecutor(AgentBaseExecutor):
                         if filename.endswith(".py"):
                             tool_name = filename[:-3]
                             code_path = os.path.join(LIBRARY_DIR, filename)
-                            with open(code_path, "r") as f:
+                            with open(code_path, "r", encoding="utf-8") as f:
                                 library[tool_name] = f.read()
                     self.__class__._library_cache["data"] = library
                     self.__class__._library_cache["file_mtimes"] = current_files
@@ -1252,7 +1252,7 @@ class RLMAgentLoopExecutor(AgentBaseExecutor):
                         if filename.endswith(".py"):
                             tool_name = filename[:-3]
                             code_path = os.path.join(LIBRARY_DIR, filename)
-                            with open(code_path, "r") as f:
+                            with open(code_path, "r", encoding="utf-8") as f:
                                 library[tool_name] = f.read()
                 # RLM tools override standard tools on name collision
                 if os.path.exists(RLM_LIBRARY_DIR):
@@ -1260,7 +1260,7 @@ class RLMAgentLoopExecutor(AgentBaseExecutor):
                         if filename.endswith(".py"):
                             tool_name = filename[:-3]
                             code_path = os.path.join(RLM_LIBRARY_DIR, filename)
-                            with open(code_path, "r") as f:
+                            with open(code_path, "r", encoding="utf-8") as f:
                                 library[tool_name] = f.read()
                 self.__class__._library_cache["data"] = library
                 self.__class__._library_cache["file_mtimes"] = current_files
@@ -1943,14 +1943,14 @@ class HybridAgentExecutor(AgentBaseExecutor):
                     for filename in os.listdir(LIBRARY_DIR):
                         if filename.endswith(".py"):
                             tool_name = filename[:-3]
-                            with open(os.path.join(LIBRARY_DIR, filename), "r") as f:
+                            with open(os.path.join(LIBRARY_DIR, filename), "r", encoding="utf-8") as f:
                                 library[tool_name] = f.read()
                 # RLM tools override standard tools on name collision
                 if os.path.exists(RLM_LIBRARY_DIR):
                     for filename in os.listdir(RLM_LIBRARY_DIR):
                         if filename.endswith(".py"):
                             tool_name = filename[:-3]
-                            with open(os.path.join(RLM_LIBRARY_DIR, filename), "r") as f:
+                            with open(os.path.join(RLM_LIBRARY_DIR, filename), "r", encoding="utf-8") as f:
                                 library[tool_name] = f.read()
                 self.__class__._library_cache["data"] = library
                 self.__class__._library_cache["file_mtimes"] = current_files

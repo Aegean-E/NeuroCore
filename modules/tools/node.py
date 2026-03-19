@@ -95,7 +95,7 @@ class ToolDispatcherExecutor:
                     code_path = os.path.join(os.path.dirname(__file__), "library", f"{func_name}.py")
                     code = ""
                     if os.path.exists(code_path):
-                        with open(code_path, "r") as f:
+                        with open(code_path, "r", encoding="utf-8") as f:
                             code = f.read()
                     
                     # Execute tool code in sandboxed environment for security
