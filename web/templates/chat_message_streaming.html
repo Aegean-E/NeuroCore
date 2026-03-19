@@ -171,7 +171,12 @@
                     tokenUsageEl.classList.remove('hidden');
                     statusDiv.style.display = 'flex';
                     const tokenCounter = document.getElementById('session-token-count');
-                    if (tokenCounter) htmx.trigger(tokenCounter, 'tokenUsageUpdated', { usage });
+                    if (tokenCounter) {
+                        tokenCounter.dispatchEvent(new CustomEvent('tokenUsageUpdated', {
+                            bubbles: true,
+                            detail: { usage }
+                        }));
+                    }
                 }
             } catch(e) {
                 console.warn('Failed to parse usage event', e);

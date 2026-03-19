@@ -611,7 +611,9 @@ class AgentLoopExecutor(AgentBaseExecutor):
     ) -> tuple:
         """Core agent loop: LLM ↔ Tool execution until no more tool calls or max_iterations.
 
-        Returns (final_response, iterations, had_tool_error).
+        Returns (final_response, iterations, had_tool_error, accumulated_usage).
+        accumulated_usage is a dict with prompt_tokens, completion_tokens, total_tokens
+        summed across all LLM calls in this loop run.
         """
         # Fix 2: use local thinking_steps instead of instance-level state
         if thinking_steps is None:
@@ -620,6 +622,8 @@ class AgentLoopExecutor(AgentBaseExecutor):
         iterations = 0
         final_response = None
         had_tool_error = False
+        # Accumulate token usage across all LLM iterations
+        accumulated_usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
         # Only compact again once enough new messages have accumulated since
         # the last compaction, preventing a no-op re-compaction every iteration.
         _compacted_at_len = 0
@@ -664,6 +668,12 @@ class AgentLoopExecutor(AgentBaseExecutor):
                 break
 
             final_response = response
+            # Accumulate token usage from each LLM response
+            iter_usage = response.get("usage", {})
+            if isinstance(iter_usage, dict):
+                accumulated_usage["prompt_tokens"] += iter_usage.get("prompt_tokens", 0)
+                accumulated_usage["completion_tokens"] += iter_usage.get("completion_tokens", 0)
+                accumulated_usage["total_tokens"] += iter_usage.get("total_tokens", 0)
             assistant_message = response["choices"][0]["message"]
 
             tool_calls = assistant_message.get("tool_calls", [])
@@ -750,7 +760,7 @@ class AgentLoopExecutor(AgentBaseExecutor):
             if tool_error_occurred and tool_error_strategy == "stop":
                 break
 
-        return final_response, iterations, had_tool_error
+        return final_response, iterations, had_tool_error, accumulated_usage
 
     async def receive(self, input_data: dict, config: dict = None) -> dict:
         """
@@ -926,7 +936,7 @@ class AgentLoopExecutor(AgentBaseExecutor):
                 else:
                     llm_messages.insert(0, {"role": "system", "content": system_prompt})
 
-            final_response, iterations, had_tool_error = await self._run_agent_loop(
+            final_response, iterations, had_tool_error, accumulated_usage = await self._run_agent_loop(
                 llm_messages=llm_messages,
                 tools_list=tools_list,
                 tool_library=tool_library,
@@ -946,6 +956,7 @@ class AgentLoopExecutor(AgentBaseExecutor):
             )
 
             # Episode checkpoint
+
             if episode is not None and sm is not None:
                 iteration_count += iterations
                 if iteration_count % checkpoint_interval == 0 or iterations == 0:
@@ -966,9 +977,13 @@ class AgentLoopExecutor(AgentBaseExecutor):
             result["messages"] = llm_messages
             result["response"] = final_response
             result["iterations"] = iterations
+            # Expose accumulated token usage so the chat router can report it to the UI
+            if accumulated_usage.get("total_tokens", 0) > 0:
+                result["usage"] = accumulated_usage
 
             if final_response and "choices" in final_response:
                 result["content"] = final_response["choices"][0]["message"].get("content", "")
+
 
             # Re-planning detection — use structured flags, not text matching
             content = result.get("content", "")

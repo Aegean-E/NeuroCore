@@ -185,9 +185,11 @@ class LLMExecutor:
         """
         Execute LLM call using streaming endpoint and pushing tokens to the queue.
         Re-assembles full response text and returns choices dict matching normal output.
+        Captures usage data from the final SSE chunk if provided by the server.
         """
         full_content = ""
-        
+        usage_data = None
+
         try:
             stream_gen = self.bridge.chat_completion_stream(
                 messages=messages,
@@ -198,6 +200,10 @@ class LLMExecutor:
                 if "error" in chunk:
                     logger.warning(f"Error chunk in stream: {chunk['error']}")
                     break
+
+                # Capture usage from the final chunk (OpenAI-compatible servers send it here)
+                if "usage" in chunk and chunk["usage"]:
+                    usage_data = chunk["usage"]
                     
                 choices = chunk.get("choices", [])
                 if not choices:
@@ -214,8 +220,8 @@ class LLMExecutor:
             logger.warning("Timeout during LLM streaming")
         except Exception as e:
             logger.error(f"Error during LLM streaming: {e}")
-            
-        return {
+
+        result = {
             "choices": [
                 {
                     "message": {
@@ -226,6 +232,9 @@ class LLMExecutor:
                 }
             ]
         }
+        if usage_data:
+            result["usage"] = usage_data
+        return result
 
     async def send(self, processed_data: dict) -> dict:
         return processed_data
