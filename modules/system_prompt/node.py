@@ -176,7 +176,8 @@ class SystemPromptExecutor:
                 "\n\n## Tool Execution Guidelines\n"
                 "- **Direct Action**: When executing, testing, or demonstrating tools, you MUST emit the `tool_calls` payload immediately.\n"
                 "- **No Pre-Summaries**: Do NOT output text listing or describing what you will do before emitting the `tool_calls`.\n"
-                "- **Sequential Chain**: To perform multi-turn tasks, evaluate tool results and continue with successive tool calls turn-by-turn."
+                "- **Sequential Chain**: To perform multi-turn tasks, evaluate tool results and continue with successive tool calls turn-by-turn.\n"
+                "- **Missing Parameters**: For user-directed actions (e.g., sending emails, creating events), DO NOT use placeholder or guessed values (e.g., 'recipient@example.com'). If critical arguments are missing, ask the user for clarification."
             )
             full_prompt += tool_rules
         
