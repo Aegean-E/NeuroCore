@@ -250,38 +250,49 @@
         }
 
         let activeDeleteMarketplaceId = '';
+        let deleteInProgress = false;
         function openDeleteMarketplaceModal(id, name) {
+            if (deleteInProgress) return;
             activeDeleteMarketplaceId = id;
             document.getElementById('delete-item-name').innerText = name;
-            document.getElementById('delete-marketplace-modal').classList.remove('hidden');
-            
+
             const confirmBtn = document.getElementById('confirm-delete-marketplace-btn');
+            confirmBtn.innerText = "Delete";
+            confirmBtn.disabled = false;
+
+            document.getElementById('delete-marketplace-modal').classList.remove('hidden');
             confirmBtn.onclick = function() {
+                if (deleteInProgress) return;
+                deleteInProgress = true;
+                const capturedId = activeDeleteMarketplaceId;
                 confirmBtn.innerText = "Deleting...";
                 confirmBtn.disabled = true;
-                
-                fetch('/marketplace/delete/' + activeDeleteMarketplaceId, {
+
+                fetch('/marketplace/delete/' + capturedId, {
                     method: 'POST'
                 })
                 .then(response => {
+                    deleteInProgress = false;
+                    confirmBtn.innerText = "Delete";
+                    confirmBtn.disabled = false;
                     if (response.ok) {
-                         const cardById = document.getElementById('marketplace-card-' + activeDeleteMarketplaceId);
+                         const cardById = document.getElementById('marketplace-card-' + capturedId);
                          if (cardById) cardById.remove();
                          closeDeleteMarketplaceModal();
                     } else {
                         alert('Delete failed');
-                        confirmBtn.innerText = "Delete";
-                        confirmBtn.disabled = false;
                     }
                 })
                 .catch(() => {
-                    alert('Delete failed error');
+                    deleteInProgress = false;
                     confirmBtn.innerText = "Delete";
                     confirmBtn.disabled = false;
+                    alert('Delete failed');
                 });
             };
         }
         function closeDeleteMarketplaceModal() {
+            if (deleteInProgress) return;
             document.getElementById('delete-marketplace-modal').classList.add('hidden');
             activeDeleteMarketplaceId = '';
         }

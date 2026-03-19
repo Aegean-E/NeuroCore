@@ -186,14 +186,13 @@
                     {% if skills %}
                         <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
                             {% for id, skill in skills.items() %}
-                                {% set is_uploaded = False %}
-                                {% set needs_update = False %}
+                                {% set ns = namespace(is_uploaded=False, needs_update=False) %}
                                 {% if marketplace_catalog %}
                                     {% for m_item in marketplace_catalog %}
                                         {% if m_item.type|lower == 'skill' and m_item.filename == id ~ '.md' %}
-                                            {% set is_uploaded = True %}
+                                            {% set ns.is_uploaded = True %}
                                             {% if skill.content_hash and m_item.content_hash and skill.content_hash != m_item.content_hash %}
-                                                {% set needs_update = True %}
+                                                {% set ns.needs_update = True %}
                                             {% endif %}
                                         {% endif %}
                                     {% endfor %}
@@ -211,12 +210,12 @@
                                     {% if skill.instructions %}
                                         <div id="skill-instructions-{{ id }}" class="hidden">{{ skill.instructions }}</div>
                                         <div class="flex space-x-2 mt-3">
-                                            {% if needs_update %}
+                                            {% if ns.needs_update %}
                                             <button id="card-upload-btn-{{ id }}" onclick="uploadToMarketplaceOnCard('{{ id }}')" class="flex-1 bg-amber-950/30 hover:bg-amber-900/50 text-amber-500 hover:text-amber-400 text-xs font-bold py-2 rounded-lg border border-amber-900/30 transition-all flex items-center justify-center space-x-1" title="Update in Marketplace (local changes found)">
                                                 <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m13 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
                                                 <span>Update</span>
                                             </button>
-                                            {% elif is_uploaded %}
+                                            {% elif ns.is_uploaded %}
                                             <button id="card-upload-btn-{{ id }}" class="flex-1 bg-green-950/20 text-green-400/80 text-xs font-bold py-2 rounded-lg border border-green-900/20 flex items-center justify-center space-x-1 cursor-default" title="Uploaded to Marketplace">
                                                 <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 8"></path></svg>
                                                 <span>Uploaded</span>
@@ -227,7 +226,7 @@
                                                 <span>Upload to Marketplace</span>
                                             </button>
                                             {% endif %}
-                                            <button onclick="openSkillModal('{{ (skill.name or id)|replace('\'', '\\\'') }}', document.getElementById('skill-instructions-{{ id }}').innerText, '{{ id }}', {{ 'true' if is_uploaded else 'false' }}, {{ 'true' if needs_update else 'false' }})" class="flex-1 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold py-2 rounded-lg border border-slate-700 transition-all">
+                                            <button onclick="openSkillModal('{{ (skill.name or id)|replace('\'', '\\\'') }}', document.getElementById('skill-instructions-{{ id }}').innerText, '{{ id }}', {{ 'true' if ns.is_uploaded else 'false' }}, {{ 'true' if ns.needs_update else 'false' }})" class="flex-1 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold py-2 rounded-lg border border-slate-700 transition-all">
                                                 View Instructions
                                             </button>
                                         </div>

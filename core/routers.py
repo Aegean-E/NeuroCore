@@ -47,12 +47,36 @@ templates.env.filters["format_reasoning"] = format_reasoning_content
 def get_hardware_id():
     import uuid
     import hashlib
+    import subprocess
+    import platform
+
+    def get_cmd(cmd):
+        try: return subprocess.check_output(cmd, shell=True, stderr=subprocess.DEVNULL).decode().strip()
+        except Exception: return ""
+
     try:
-        node = uuid.getnode()
-        # Fallback handling might return random node, but getnode() is usually stable.
-        return hashlib.sha256(str(node).encode()).hexdigest()[:16].upper()
+        cpu_id = get_cmd("wmic cpu get ProcessorId")
+        cpu_name = get_cmd("wmic cpu get Name")
+        cpu_mhz = get_cmd("wmic cpu get MaxClockSpeed")
+        board_sn = get_cmd("wmic baseboard get SerialNumber")
+        board_mfr = get_cmd("wmic baseboard get Manufacturer")
+        board_product = get_cmd("wmic baseboard get Product")
+        ram = get_cmd("wmic ComputerSystem get TotalPhysicalMemory")
+        disk_sn = get_cmd("wmic diskdrive where index=0 get SerialNumber")
+        os_name = f"{platform.system()} {platform.release()} {platform.version()}"
+
+        combined = f"{cpu_id}|{cpu_name}|{cpu_mhz}|{board_sn}|{board_mfr}|{board_product}|{ram}|{disk_sn}|{os_name}"
+        useful = combined.replace("|", "").replace(" ", "").strip()
+        if len(useful) < 10:
+            raise ValueError("Specs too short")
+
+        return hashlib.sha256(combined.encode()).hexdigest()[:24].upper()
     except Exception:
-        return "UNKNOWN"
+        try:
+            node = uuid.getnode()
+            return hashlib.sha256(str(node).encode()).hexdigest()[:24].upper()
+        except Exception:
+            return "UNKNOWN"
 
 # Centralized definition of config keys that should be hidden from the generic JSON editor
 HIDDEN_CONFIG_KEYS = {
@@ -1073,7 +1097,7 @@ async def upload_skill_to_marketplace(skill_id: str):
          catalog.append({
               "id": item_id, "name": skill.get("name", skill_id), "description": skill.get("description", ""),
               "type": "skill", "filename": f"{skill_id}.md", "save_filename": f"{item_id}.md", 
-              "uploaded_at": datetime.now().isoformat(), "uploader_id": "local_user",
+              "uploaded_at": datetime.now().isoformat(), "uploader_id": get_hardware_id(),
               "content_hash": content_hash
          })
          
