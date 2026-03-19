@@ -44,7 +44,7 @@
             <div id="view-community" class="view-content grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                 {% if catalog %}
                     {% for item in catalog %}
-                    <div class="bg-slate-950/50 border border-slate-800 rounded-2xl p-6 flex flex-col justify-between hover:border-slate-700 hover:bg-slate-950/80 transition-all group shadow-lg overflow-hidden relative marketplace-card">
+                    <div onclick="openItemModal('{{ (item.name or '')|replace('\'', '\\\'') }}', '{{ (item.description or '')|replace('\'', '\\\'') }}', '{{ item.type }}', '{{ item.filename }}', '{{ item.id }}')" class="bg-slate-950/50 border border-slate-800 rounded-2xl p-6 flex flex-col justify-between hover:border-slate-700 hover:bg-slate-950/80 transition-all group shadow-lg overflow-hidden relative marketplace-card cursor-pointer">
                         {% if item.image_filename %}
                         <div class="h-40 -mt-6 -mx-6 mb-4 overflow-hidden border-b border-slate-800/80">
                             <img src="/marketplace/image/{{ item.id }}" class="w-full h-full object-cover group-hover:scale-105 transition-all duration-300" alt="{{ item.name }}">
@@ -53,7 +53,7 @@
                         <div>
                             <div class="flex justify-between items-start mb-3">
                                 <span class="px-2.5 py-1 rounded-md text-xs font-bold uppercase tracking-wider bg-indigo-900/50 text-indigo-300 border border-indigo-800/50">{{ item.type }}</span>
-                                <span class="text-xs text-slate-500">{{ item.created_at }}</span>
+                                <span class="text-xs text-slate-500">{{ item.uploaded_at if item.uploaded_at else '' }}</span>
                             </div>
                             <h3 class="text-lg font-bold text-white group-hover:text-blue-400 transition-colors">{{ item.name }}</h3>
                             <p class="text-sm text-slate-400 mt-2 line-clamp-2 h-10">{{ item.description }}</p>
@@ -61,12 +61,12 @@
                         <div class="mt-6 pt-4 border-t border-slate-800/50 flex items-center justify-between">
                             <span class="text-xs text-slate-500 truncate max-w-[150px]" title="{{ item.filename }}">📄 {{ item.filename }}</span>
                             <div class="flex items-center space-x-2">
-                                {% if item.uploader_id == hardware_id %}
-                                <button hx-post="/marketplace/delete/{{ item.id }}" hx-confirm="Are you sure you want to delete this upload from the Community lists?" hx-swap="outerHTML" hx-target="closest .marketplace-card" class="bg-red-950/30 hover:bg-red-950/50 text-red-500 hover:text-red-400 px-3 py-1.5 rounded-xl text-xs font-bold border border-red-800/20 transition-all">
+                                {% if item.uploader_id == 'local_user' or item.uploader_id == hardware_id %}
+                                <button onclick="event.stopPropagation()" hx-post="/marketplace/delete/{{ item.id }}" hx-confirm="Are you sure you want to delete this upload from the Community lists?" hx-swap="outerHTML" hx-target="closest .marketplace-card" class="bg-red-950/30 hover:bg-red-950/50 text-red-500 hover:text-red-400 px-3 py-1.5 rounded-xl text-xs font-bold border border-red-800/20 transition-all">
                                     Delete
                                 </button>
                                 {% endif %}
-                                <a href="/marketplace/download/{{ item.id }}" class="bg-slate-800 hover:bg-slate-700 text-white px-4 py-1.5 rounded-lg text-xs font-bold border border-slate-700 transition-all flex items-center space-x-1">
+                                <a href="/marketplace/download/{{ item.id }}" onclick="event.stopPropagation()" class="bg-slate-800 hover:bg-slate-700 text-white px-4 py-1.5 rounded-lg text-xs font-bold border border-slate-700 transition-all flex items-center space-x-1">
                                     <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
                                     <span>Download</span>
                                 </a>
@@ -217,7 +217,62 @@
         function closeUploadModal() {
             document.getElementById('upload-modal').classList.add('hidden');
         }
+
+        function openItemModal(name, description, type, filename, id) {
+            document.getElementById('modal-item-name').innerText = name;
+            document.getElementById('modal-item-description').innerText = description;
+            document.getElementById('modal-item-badge').innerText = type;
+            document.getElementById('modal-item-download').href = '/marketplace/download/' + id;
+            document.getElementById('item-view-modal').classList.remove('hidden');
+            
+            const previewEl = document.getElementById('modal-item-preview');
+            previewEl.innerText = "Loading content...";
+            
+            fetch('/marketplace/preview/' + id)
+            .then(response => response.json())
+            .then(data => {
+                if (data.status === 'success') {
+                    previewEl.innerText = data.content;
+                } else {
+                    previewEl.innerText = "Error loading content: " + (data.message || 'Unknown');
+                }
+            })
+            .catch(() => {
+                previewEl.innerText = "No preview available or failed to load.";
+            });
+        }
+        
+        function closeItemModal() {
+            document.getElementById('item-view-modal').classList.add('hidden');
+        }
     </script>
+
+    <!-- Item View Modal -->
+    <div id="item-view-modal" class="hidden fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4" onclick="if(event.target === this) closeItemModal()">
+        <div class="bg-slate-900 border border-slate-800 rounded-2xl max-w-xl w-full flex flex-col shadow-2xl overflow-hidden">
+            <div class="p-6 border-b border-slate-800 flex justify-between items-center bg-slate-950/40">
+                <div class="flex items-center space-x-3">
+                    <span id="modal-item-badge" class="px-2.5 py-1 rounded-md text-xs font-bold uppercase bg-indigo-900/50 text-indigo-300 border border-indigo-800/50"></span>
+                    <h3 id="modal-item-name" class="text-xl font-bold text-white"></h3>
+                </div>
+                <button onclick="closeItemModal()" class="text-slate-500 hover:text-white text-xl">&times;</button>
+            </div>
+            <div class="p-6 flex-grow overflow-y-auto custom-scrollbar">
+                <p id="modal-item-description" class="text-sm text-slate-400 mb-6 leading-relaxed"></p>
+                <div class="p-4 bg-slate-950 border border-slate-800 rounded-xl">
+                    <h4 class="text-xs font-bold text-slate-300 mb-2">Content / Preview</h4>
+                    <div id="modal-item-preview" class="text-xs text-slate-400 font-mono whitespace-pre-wrap leading-relaxed max-h-60 overflow-y-auto custom-scrollbar">Loading content...</div>
+                </div>
+            </div>
+            <div class="p-6 border-t border-slate-800 flex justify-end space-x-3 bg-slate-950/20">
+                <button onclick="closeItemModal()" class="px-4 py-2 rounded-lg text-sm font-bold text-slate-400 hover:bg-slate-800 transition-all">Close</button>
+                <a id="modal-item-download" href="#" class="bg-blue-600 hover:bg-blue-500 text-white px-5 py-2 rounded-lg text-sm font-bold transition-all shadow-lg shadow-blue-500/20 flex items-center space-x-2">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
+                    <span>Download</span>
+                </a>
+            </div>
+        </div>
+    </div>
 
 </body>
 </html>

@@ -902,6 +902,27 @@ async def download_marketplace_item(item_id: str):
         
     return FileResponse(file_path, filename=item["filename"])
 
+@router.get("/marketplace/preview/{item_id}")
+async def preview_marketplace_item(item_id: str):
+    import os, json
+    catalog_path = os.path.join("data", "marketplace", "catalog.json")
+    if not os.path.exists(catalog_path): raise HTTPException(status_code=404, detail="Catalog not found")
+    try:
+         with open(catalog_path, "r", encoding="utf-8") as f: catalog = json.load(f)
+    except Exception: raise HTTPException(status_code=500, detail="Failed to read catalog")
+    item = next((i for i in catalog if i["id"] == item_id), None)
+    if not item: raise HTTPException(status_code=404, detail="Item not found")
+    file_path = os.path.join("data", "marketplace", "uploads", item["save_filename"])
+    if not os.path.exists(file_path): raise HTTPException(status_code=404, detail="File missing on disk")
+    content = ""
+    try:
+         ext = os.path.splitext(item["save_filename"])[1].lower()
+         if ext in ['.md', '.txt', '.json', '.py']:
+             with open(file_path, "r", encoding="utf-8") as f: content = f.read()
+         else: content = f"Binary file ({ext}). Preview not available."
+    except Exception as e: content = f"Could not read preview: {str(e)}"
+    return JSONResponse(content={"status": "success", "content": content})
+
 @router.post("/marketplace/delete/{item_id}")
 async def delete_marketplace_item(item_id: str):
     import os
