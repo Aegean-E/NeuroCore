@@ -38,18 +38,18 @@
                 <button id="upvote-btn-{{ item.id }}"
                         onclick="castVote('{{ item.id }}', 'up')"
                         class="flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-sm font-bold border transition-all
-                               {% if item.voters is defined and item.voters.get(hardware_id) == 'up' %}bg-emerald-900/40 text-emerald-400 border-emerald-700/50{% else %}bg-slate-800 text-slate-400 hover:text-emerald-400 hover:border-emerald-700/40 border-slate-700{% endif %}"
+                               {% if user_vote == 'up' %}bg-emerald-900/40 text-emerald-400 border-emerald-700/50{% else %}bg-slate-800 text-slate-400 hover:text-emerald-400 hover:border-emerald-700/40 border-slate-700{% endif %}"
                         title="Upvote">
-                    <svg class="w-4 h-4" fill="{% if item.voters is defined and item.voters.get(hardware_id) == 'up' %}currentColor{% else %}none{% endif %}" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 15l7-7 7 7"></path></svg>
+                    <svg class="w-4 h-4" fill="{% if user_vote == 'up' %}currentColor{% else %}none{% endif %}" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 15l7-7 7 7"></path></svg>
                     <span id="upvote-count-{{ item.id }}">{{ item.upvotes if item.upvotes is defined else 0 }}</span>
                 </button>
                 <!-- Downvote -->
                 <button id="downvote-btn-{{ item.id }}"
                         onclick="castVote('{{ item.id }}', 'down')"
                         class="flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-sm font-bold border transition-all
-                               {% if item.voters is defined and item.voters.get(hardware_id) == 'down' %}bg-red-900/40 text-red-400 border-red-700/50{% else %}bg-slate-800 text-slate-400 hover:text-red-400 hover:border-red-700/40 border-slate-700{% endif %}"
+                               {% if user_vote == 'down' %}bg-red-900/40 text-red-400 border-red-700/50{% else %}bg-slate-800 text-slate-400 hover:text-red-400 hover:border-red-700/40 border-slate-700{% endif %}"
                         title="Downvote">
-                    <svg class="w-4 h-4" fill="{% if item.voters is defined and item.voters.get(hardware_id) == 'down' %}currentColor{% else %}none{% endif %}" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
+                    <svg class="w-4 h-4" fill="{% if user_vote == 'down' %}currentColor{% else %}none{% endif %}" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
                     <span id="downvote-count-{{ item.id }}">{{ item.downvotes if item.downvotes is defined else 0 }}</span>
                 </button>
 
@@ -59,7 +59,7 @@
                     <span>Download</span>
                 </a>
 
-                {% if item.uploader_id == 'local_user' or item.uploader_id == hardware_id %}
+                {% if is_owner %}
                 <button onclick="confirmDelete()"
                         class="bg-red-950/40 hover:bg-red-950/70 text-red-500 hover:text-red-400 px-4 py-1.5 rounded-lg text-sm font-bold border border-red-800/30 transition-all">
                     Delete
@@ -71,7 +71,7 @@
         <!-- Meta strip -->
         <div class="flex items-center space-x-6 px-6 py-3 border-b border-slate-800/60 bg-slate-950/30 flex-shrink-0 text-xs text-slate-500">
             <span>📄 {{ item.filename }}</span>
-            <span>👤 {{ item.uploader_id }}</span>
+            {% if is_owner %}<span class="text-emerald-600 font-semibold">✓ Your item</span>{% endif %}
             {% if item.uploaded_at %}<span>🕒 {{ item.uploaded_at }}</span>{% endif %}
             {% if item.description %}<span class="text-slate-400 truncate max-w-xl" title="{{ item.description }}">{{ item.description }}</span>{% endif %}
         </div>

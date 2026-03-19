@@ -42,7 +42,7 @@
             <div id="view-community" class="view-content grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                 {% if catalog %}
                     {% for item in catalog %}
-                    {% set user_vote = item.voters.get(hardware_id) if item.voters is defined else None %}
+                    {% set user_vote = my_votes.get(item.id) %}
                     <div id="marketplace-card-{{ item.id }}" onclick="window.location.href='/marketplace/item/{{ item.id }}'" class="bg-slate-950/50 border border-slate-800 rounded-2xl p-6 flex flex-col justify-between hover:border-slate-700 hover:bg-slate-950/80 transition-all group shadow-lg overflow-hidden relative marketplace-card cursor-pointer">
                         {% if item.image_filename %}
                         <div class="h-40 -mt-6 -mx-6 mb-4 overflow-hidden border-b border-slate-800/80">
@@ -59,7 +59,6 @@
                         </div>
                         <div class="mt-4 flex flex-col space-y-1">
                             <span class="text-xs text-slate-500 truncate max-w-[200px]" title="{{ item.filename }}">📄 {{ item.filename }}</span>
-                            <span class="text-[10px] text-slate-500 font-mono tracking-tight">👤 ID: {{ item.uploader_id }}</span>
                         </div>
                         <div class="mt-4 pt-4 border-t border-slate-800/50 flex items-center justify-between">
                             <!-- Vote buttons -->
@@ -83,7 +82,7 @@
                             </div>
                             <!-- Actions -->
                             <div class="flex items-center space-x-2">
-                                {% if item.uploader_id == 'local_user' or item.uploader_id == hardware_id %}
+                                {% if item.id in owned_ids %}
                                 <button onclick="event.stopPropagation(); openDeleteMarketplaceModal('{{ item.id }}', '{{ (item.name or '')|replace('\'', '\\\'') }}')" class="bg-red-950/30 hover:bg-red-950/50 text-red-500 hover:text-red-400 px-3 py-1.5 rounded-xl text-xs font-bold border border-red-800/20 transition-all">
                                     Delete
                                 </button>

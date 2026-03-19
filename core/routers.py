@@ -101,17 +101,89 @@ def get_hardware_id():
     return hardware_id
 
 
-def get_public_user_id() -> str:
+def get_decoder() -> bytes:
     """
-    Derives a stable, opaque public identifier from the private Instance ID.
-    This is the ID stored in marketplace items and shown to other users.
-    It cannot be reversed to reveal the Instance ID.
+    Load or generate the local decoder key (32 random bytes).
+    Stored in data/decoder.key as a 64-char hex string.
+    This key NEVER leaves the machine and is the basis for all ownership claims.
+    If lost, the user permanently loses the ability to manage their marketplace items.
     """
-    import hashlib
-    instance_id = get_hardware_id()
-    # HMAC-style derivation with a fixed domain separator
-    raw = hashlib.sha256(f"neurocore-marketplace-v1:{instance_id}".encode()).hexdigest()
-    return raw[:20].upper()
+    import secrets, os
+    key_file = os.path.join("data", "decoder.key")
+    if os.path.exists(key_file):
+        try:
+            with open(key_file, "r") as f:
+                hex_key = f.read().strip()
+            if len(hex_key) == 64:
+                return bytes.fromhex(hex_key)
+        except Exception:
+            pass
+    # Generate new random key
+    key = secrets.token_bytes(32)
+    try:
+        os.makedirs("data", exist_ok=True)
+        # Write atomically: temp file + rename
+        tmp = key_file + ".tmp"
+        with open(tmp, "w") as f:
+            f.write(key.hex())
+        os.replace(tmp, key_file)
+    except Exception:
+        pass
+    return key
+
+
+def make_claim(item_id: str) -> str:
+    """
+    Compute a cryptographic ownership claim for a marketplace item.
+    Only reproducible by a machine holding the same decoder key.
+    Uses a context prefix to prevent cross-purpose token reuse.
+    Returns a 32-char hex string.
+    """
+    import hmac as _hmac, hashlib
+    key = get_decoder()
+    return _hmac.new(key, f"marketplace-claim:{item_id}".encode(), hashlib.sha256).hexdigest()[:32]
+
+
+def make_vote_id(item_id: str) -> str:
+    """
+    Derive a stable anonymous vote identity for an item.
+    Different context prefix than make_claim prevents cross-use.
+    Returns a 16-char hex string.
+    """
+    import hmac as _hmac, hashlib
+    key = get_decoder()
+    return _hmac.new(key, f"marketplace-vote:{item_id}".encode(), hashlib.sha256).hexdigest()[:16]
+
+
+def _is_legacy_owner(item: dict) -> bool:
+    """
+    Backward-compat check for items uploaded before the decoder system.
+    Covers items with uploader_id = hardware_id, old public_user_id, or 'local_user'.
+    """
+    uid = item.get("uploader_id", "")
+    if uid == "local_user":
+        return True
+    try:
+        hw = get_hardware_id()
+        if uid == hw:
+            return True
+        # Also cover the brief window when get_public_user_id() was used
+        import hashlib
+        pub = hashlib.sha256(f"neurocore-marketplace-v1:{hw}".encode()).hexdigest()[:20].upper()
+        if uid == pub:
+            return True
+    except Exception:
+        pass
+    return False
+
+
+def is_item_owner(item: dict) -> bool:
+    """
+    Full ownership check: claim-based (new) with legacy fallback (old).
+    """
+    if item.get("claim") and item["claim"] == make_claim(item["id"]):
+        return True
+    return _is_legacy_owner(item)
 
 
 # Centralized definition of config keys that should be hidden from the generic JSON editor
@@ -875,15 +947,23 @@ async def get_marketplace(request: Request, settings_man: SettingsManager = Depe
                  catalog = json.load(f)
          except Exception: pass
 
+    # Pre-compute ownership and vote state (Jinja2 can't call Python functions)
+    owned_ids = {item["id"] for item in catalog if is_item_owner(item)}
+    my_votes = {
+        item["id"]: item.get("voters", {}).get(make_vote_id(item["id"]))
+        for item in catalog
+    }
+
     return templates.TemplateResponse(request, "marketplace.html", {
         "request": request,
         "modules": modules,
         "tools": tools,
         "skills": skills,
         "catalog": catalog,
+        "owned_ids": owned_ids,
+        "my_votes": my_votes,
         "active_module": "marketplace",
         "settings": settings_man.settings,
-        "hardware_id": get_public_user_id()
     })
 
 @router.post("/marketplace/upload")
@@ -935,9 +1015,10 @@ async def upload_marketplace_item(
         "filename": file.filename,
         "save_filename": save_filename,
         "image_filename": image_filename,
-        "uploader_id": get_public_user_id(),
         "created_at": datetime.now().strftime("%Y-%m-%d %H:%M")
     }
+    # Compute claim after entry is built so item_id is available
+    entry["claim"] = make_claim(entry["id"])
     catalog.append(entry)
     
     with open(catalog_path, "w", encoding="utf-8") as f:
@@ -1009,7 +1090,8 @@ async def marketplace_item_detail(request: Request, item_id: str, module_manager
 
     file_path = os.path.join("data", "marketplace", "uploads", item["save_filename"])
     ext = os.path.splitext(item["save_filename"])[1].lower()
-    hardware_id = get_public_user_id()
+    is_owner = is_item_owner(item)
+    user_vote = item.get("voters", {}).get(make_vote_id(item_id))
 
     # Build file tree for zips; single content for flat files
     file_tree = []   # list of {"path": str, "name": str, "is_dir": bool}
@@ -1052,7 +1134,8 @@ async def marketplace_item_detail(request: Request, item_id: str, module_manager
 
     return templates.TemplateResponse(request, "marketplace_item.html", {
         "item": item,
-        "hardware_id": hardware_id,
+        "is_owner": is_owner,
+        "user_vote": user_vote,
         "is_zip": is_zip,
         "file_tree": file_tree,
         "initial_content": initial_content,
@@ -1136,9 +1219,8 @@ async def delete_marketplace_item(item_id: str):
     if not item:
          raise HTTPException(status_code=404, detail="Item not found")
         
-    current_id = get_public_user_id()
-    if item.get("uploader_id") != current_id and item.get("uploader_id") != 'local_user':
-         raise HTTPException(status_code=403, detail="You can only delete items that you uploaded")
+    if not is_item_owner(item):
+        raise HTTPException(status_code=403, detail="You can only delete items that you uploaded")
         
     # Remove files
     upload_dir = os.path.join("data", "marketplace", "uploads")
@@ -1178,7 +1260,7 @@ async def vote_marketplace_item(item_id: str, direction: str):
     if not item:
         raise HTTPException(status_code=404, detail="Item not found")
 
-    voter_id = get_public_user_id()
+    voter_id = make_vote_id(item_id)
 
     # Initialise vote fields if missing
     if "voters" not in item:
@@ -1221,6 +1303,30 @@ async def vote_marketplace_item(item_id: str, direction: str):
         "downvotes": item["downvotes"],
         "user_vote": user_vote
     })
+
+
+@router.post("/settings/decoder/import")
+async def import_decoder_key(key: str = Form(...)):
+    """
+    Import a decoder key from another machine.
+    The key must be a 64-char hex string (32 bytes).
+    This overwrites the current decoder — all current ownership claims become unverifiable.
+    """
+    import os, re
+    key = key.strip().upper()
+    if not re.fullmatch(r"[0-9A-F]{64}", key):
+        return JSONResponse(status_code=400, content={"status": "error", "message": "Invalid key format. Must be 64 hex characters."})
+    key_file = os.path.join("data", "decoder.key")
+    try:
+        os.makedirs("data", exist_ok=True)
+        tmp = key_file + ".tmp"
+        with open(tmp, "w") as f:
+            f.write(key.lower())
+        os.replace(tmp, key_file)
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
+    return JSONResponse(content={"status": "success", "message": "Decoder key imported. Restart may be needed."})
+
 
 @router.post("/settings/skills/delete/{skill_id}")
 async def delete_skill(skill_id: str):
@@ -1333,8 +1439,9 @@ async def upload_skill_to_marketplace(skill_id: str):
          catalog.append({
               "id": item_id, "name": skill.get("name", skill_id), "description": skill.get("description", ""),
               "type": "skill", "filename": f"{skill_id}.md", "save_filename": f"{item_id}.md", 
-              "uploaded_at": datetime.now().isoformat(), "uploader_id": get_public_user_id(),
-              "content_hash": content_hash
+              "uploaded_at": datetime.now().isoformat(),
+              "content_hash": content_hash,
+              "claim": make_claim(item_id),
          })
          
     with open(catalog_path, "w", encoding="utf-8") as f: json.dump(catalog, f, indent=4)
@@ -1377,6 +1484,7 @@ async def get_settings(request: Request, settings_man: SettingsManager = Depends
         "system_time": datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S %Z"),
         "system_info": system_info,
         "hardware_id": get_hardware_id(),
+        "decoder_key": get_decoder().hex().upper(),
         "skills": skills,
         "marketplace_catalog": catalog
     })
