@@ -144,6 +144,18 @@ def make_claim(item_id: str) -> str:
     return _hmac.new(key, f"marketplace-claim:{item_id}".encode(), hashlib.sha256).hexdigest()[:32]
 
 
+def get_public_handle() -> str:
+    """
+    A stable, opaque public identifier for this user, shown in the marketplace as the uploader.
+    Same across all items from the same machine/decoder key, but reveals nothing about the user.
+    Derived from the decoder key so it follows the key when imported to a new machine.
+    Returns a 12-char uppercase hex string, e.g. 'A3F8C1D920BE'.
+    """
+    import hmac as _hmac, hashlib
+    key = get_decoder()
+    return _hmac.new(key, b"marketplace-user-handle", hashlib.sha256).hexdigest()[:12].upper()
+
+
 def make_vote_id(item_id: str) -> str:
     """
     Derive a stable anonymous vote identity for an item.
@@ -947,6 +959,16 @@ async def get_marketplace(request: Request, settings_man: SettingsManager = Depe
                  catalog = json.load(f)
          except Exception: pass
 
+    # Load local download history for "new version" badges
+    dl_history_path = os.path.join("data", "download_history.json")
+    dl_history = {}
+    try:
+        if os.path.exists(dl_history_path):
+            with open(dl_history_path, "r", encoding="utf-8") as f:
+                dl_history = json.load(f)
+    except Exception:
+        pass
+
     # Pre-compute ownership and vote state (Jinja2 can't call Python functions)
     owned_ids = {item["id"] for item in catalog if is_item_owner(item)}
     my_votes = {
@@ -954,14 +976,42 @@ async def get_marketplace(request: Request, settings_man: SettingsManager = Depe
         for item in catalog
     }
 
+    # Top downloaded (track download_count) and top upvoted
+    top_downloaded = sorted(catalog, key=lambda i: i.get("download_count", 0), reverse=True)[:5]
+    top_upvoted = sorted(catalog, key=lambda i: i.get("upvotes", 0), reverse=True)[:5]
+
+    # System prompt config for Library tab
+    sp_module = module_manager.get_module("system_prompt") or {}
+    sp_config = sp_module.get("config", {})
+    system_prompts_data = {
+        "active": sp_config.get("system_prompt", ""),
+        "enabled": sp_module.get("enabled", False),
+    }
+
+    # Flows for Library tab
+    flows_data = {}
+    flows_path = os.path.join("ai_flows.json")
+    if os.path.exists(flows_path):
+        try:
+            with open(flows_path, "r", encoding="utf-8") as f:
+                flows_raw = json.load(f)
+            flows_data = flows_raw if isinstance(flows_raw, dict) else {}
+        except Exception:
+            pass
+
     return templates.TemplateResponse(request, "marketplace.html", {
         "request": request,
         "modules": modules,
         "tools": tools,
         "skills": skills,
+        "flows": flows_data,
+        "system_prompts_data": system_prompts_data,
         "catalog": catalog,
         "owned_ids": owned_ids,
         "my_votes": my_votes,
+        "dl_history": dl_history,
+        "top_downloaded": top_downloaded,
+        "top_upvoted": top_upvoted,
         "active_module": "marketplace",
         "settings": settings_man.settings,
     })
@@ -1015,7 +1065,9 @@ async def upload_marketplace_item(
         "filename": file.filename,
         "save_filename": save_filename,
         "image_filename": image_filename,
-        "created_at": datetime.now().strftime("%Y-%m-%d %H:%M")
+        "created_at": datetime.now().strftime("%Y-%m-%d %H:%M"),
+        "uploader_handle": get_public_handle(),
+        "version": 1,
     }
     # Compute claim after entry is built so item_id is available
     entry["claim"] = make_claim(entry["id"])
@@ -1070,6 +1122,36 @@ async def download_marketplace_item(item_id: str):
     if not os.path.exists(file_path):
          raise HTTPException(status_code=404, detail="File missing on disk")
         
+    # Increment download count in catalog
+    try:
+        with open(catalog_path, "r", encoding="utf-8") as f:
+            catalog_mutable = json.load(f)
+        for ci in catalog_mutable:
+            if ci["id"] == item_id:
+                ci["download_count"] = ci.get("download_count", 0) + 1
+                break
+        tmp = catalog_path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(catalog_mutable, f, indent=4)
+        os.replace(tmp, catalog_path)
+    except Exception:
+        pass
+
+    # Record which version this user downloaded
+    dl_history_path = os.path.join("data", "download_history.json")
+    try:
+        dl_history = {}
+        if os.path.exists(dl_history_path):
+            with open(dl_history_path, "r", encoding="utf-8") as f:
+                dl_history = json.load(f)
+        dl_history[item_id] = item.get("version", 1)
+        tmp = dl_history_path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(dl_history, f, indent=2)
+        os.replace(tmp, dl_history_path)
+    except Exception:
+        pass
+
     return FileResponse(file_path, filename=item["filename"])
 
 @router.get("/marketplace/item/{item_id}", response_class=HTMLResponse)
@@ -1092,6 +1174,23 @@ async def marketplace_item_detail(request: Request, item_id: str, module_manager
     ext = os.path.splitext(item["save_filename"])[1].lower()
     is_owner = is_item_owner(item)
     user_vote = item.get("voters", {}).get(make_vote_id(item_id))
+
+    # New version badge for non-owners who have downloaded before
+    dl_history_path = os.path.join("data", "download_history.json")
+    dl_history = {}
+    try:
+        if os.path.exists(dl_history_path):
+            with open(dl_history_path, "r", encoding="utf-8") as f:
+                dl_history = json.load(f)
+    except Exception:
+        pass
+    downloaded_version = dl_history.get(item_id)
+    item_version = item.get("version", 1)
+    new_version_available = (
+        not is_owner
+        and downloaded_version is not None
+        and item_version > downloaded_version
+    )
 
     # Build file tree for zips; single content for flat files
     file_tree = []   # list of {"path": str, "name": str, "is_dir": bool}
@@ -1136,6 +1235,9 @@ async def marketplace_item_detail(request: Request, item_id: str, module_manager
         "item": item,
         "is_owner": is_owner,
         "user_vote": user_vote,
+        "new_version_available": new_version_available,
+        "downloaded_version": downloaded_version,
+        "item_version": item_version,
         "is_zip": is_zip,
         "file_tree": file_tree,
         "initial_content": initial_content,
@@ -1201,6 +1303,77 @@ async def preview_marketplace_item(item_id: str):
          else: content = f"Binary file ({ext}). Preview not available."
     except Exception as e: content = f"Could not read preview: {str(e)}"
     return JSONResponse(content={"status": "success", "content": content})
+
+@router.post("/marketplace/update/{item_id}")
+async def update_marketplace_item(
+    item_id: str,
+    description: str = Form(None),
+    file: UploadFile = File(None),
+    image: UploadFile = File(None),
+):
+    """Owner publishes a new version. Bumps version counter, optionally replaces file/image/description."""
+    import os, shutil
+    catalog_path = os.path.join("data", "marketplace", "catalog.json")
+    if not os.path.exists(catalog_path):
+        raise HTTPException(status_code=404, detail="Catalog not found")
+    try:
+        with open(catalog_path, "r", encoding="utf-8") as f:
+            catalog = json.load(f)
+    except Exception:
+        raise HTTPException(status_code=500, detail="Failed to read catalog")
+
+    item = next((i for i in catalog if i["id"] == item_id), None)
+    if not item:
+        raise HTTPException(status_code=404, detail="Item not found")
+    if not is_item_owner(item):
+        raise HTTPException(status_code=403, detail="Not authorized")
+
+    upload_dir = os.path.join("data", "marketplace", "uploads")
+    os.makedirs(upload_dir, exist_ok=True)
+
+    # Replace file if provided
+    if file and file.filename:
+        old_path = os.path.join(upload_dir, item["save_filename"])
+        # Archive old version alongside the new one (keep for rollback reference)
+        old_version = item.get("version", 1)
+        archive_name = f"{item_id}_v{old_version}_{item['save_filename']}"
+        try:
+            if os.path.exists(old_path):
+                shutil.copy2(old_path, os.path.join(upload_dir, archive_name))
+        except Exception:
+            pass
+        content = await file.read()
+        with open(old_path, "wb") as f_out:
+            f_out.write(content)
+        item["filename"] = file.filename
+        # Update content hash for skills
+        import hashlib
+        item["content_hash"] = hashlib.md5(content).hexdigest()
+
+    # Replace image if provided
+    if image and image.filename:
+        img_content = await image.read()
+        img_ext = os.path.splitext(image.filename)[1].lower() or ".jpg"
+        img_filename = f"{item_id}{img_ext}"
+        with open(os.path.join(upload_dir, img_filename), "wb") as f_out:
+            f_out.write(img_content)
+        item["image_filename"] = img_filename
+
+    # Update description if provided
+    if description is not None:
+        item["description"] = description
+
+    # Bump version
+    item["version"] = item.get("version", 1) + 1
+    item["updated_at"] = datetime.now().strftime("%Y-%m-%d %H:%M")
+
+    tmp = catalog_path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(catalog, f, indent=4)
+    os.replace(tmp, catalog_path)
+
+    return JSONResponse(content={"status": "success", "version": item["version"]})
+
 
 @router.post("/marketplace/delete/{item_id}")
 async def delete_marketplace_item(item_id: str):
@@ -1442,6 +1615,8 @@ async def upload_skill_to_marketplace(skill_id: str):
               "uploaded_at": datetime.now().isoformat(),
               "content_hash": content_hash,
               "claim": make_claim(item_id),
+              "uploader_handle": get_public_handle(),
+              "version": 1,
          })
          
     with open(catalog_path, "w", encoding="utf-8") as f: json.dump(catalog, f, indent=4)
@@ -1485,6 +1660,7 @@ async def get_settings(request: Request, settings_man: SettingsManager = Depends
         "system_info": system_info,
         "hardware_id": get_hardware_id(),
         "decoder_key": get_decoder().hex().upper(),
+        "public_handle": get_public_handle(),
         "skills": skills,
         "marketplace_catalog": catalog
     })

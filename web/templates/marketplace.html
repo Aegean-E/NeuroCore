@@ -39,11 +39,94 @@
         <div class="flex-grow overflow-y-auto custom-scrollbar pb-6">
 
             <!-- Community Tab -->
-            <div id="view-community" class="view-content grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            <div id="view-community" class="view-content flex flex-col gap-4">
+
+                <!-- Search bar -->
+                <div class="relative">
+                    <svg class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0"></path></svg>
+                    <input id="community-search" type="text" placeholder="Search by name or description…"
+                           oninput="filterCommunity()"
+                           class="w-full bg-slate-950/60 border border-slate-800 rounded-xl pl-9 pr-4 py-2.5 text-sm text-slate-300 placeholder-slate-600 focus:outline-none focus:ring-1 focus:ring-blue-600 transition-all">
+                </div>
+
+                <!-- Featured: Top Downloaded + Top Upvoted -->
+                {% if top_downloaded or top_upvoted %}
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {% if top_upvoted %}
+                    <div class="bg-slate-950/40 border border-slate-800/60 rounded-xl p-4">
+                        <div class="flex items-center space-x-2 mb-3">
+                            <svg class="w-4 h-4 text-emerald-400" fill="currentColor" viewBox="0 0 24 24"><path d="M5 15l7-7 7 7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>
+                            <span class="text-xs font-bold text-slate-400 uppercase tracking-widest">Top Upvoted</span>
+                        </div>
+                        <div class="flex flex-col divide-y divide-slate-800/60">
+                            {% for fi in top_upvoted %}
+                            {% if fi.upvotes is defined and fi.upvotes > 0 %}
+                            <a href="/marketplace/item/{{ fi.id }}" class="flex items-center justify-between py-2 hover:text-blue-400 transition-colors group">
+                                <span class="text-sm text-slate-300 group-hover:text-blue-400 truncate max-w-[160px]">{{ fi.name }}</span>
+                                <span class="text-xs text-emerald-400 font-bold flex-shrink-0 ml-2">▲ {{ fi.upvotes }}</span>
+                            </a>
+                            {% endif %}
+                            {% endfor %}
+                        </div>
+                    </div>
+                    {% endif %}
+                    {% if top_downloaded %}
+                    <div class="bg-slate-950/40 border border-slate-800/60 rounded-xl p-4">
+                        <div class="flex items-center space-x-2 mb-3">
+                            <svg class="w-4 h-4 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
+                            <span class="text-xs font-bold text-slate-400 uppercase tracking-widest">Top Downloaded</span>
+                        </div>
+                        <div class="flex flex-col divide-y divide-slate-800/60">
+                            {% for fi in top_downloaded %}
+                            {% if fi.download_count is defined and fi.download_count > 0 %}
+                            <a href="/marketplace/item/{{ fi.id }}" class="flex items-center justify-between py-2 hover:text-blue-400 transition-colors group">
+                                <span class="text-sm text-slate-300 group-hover:text-blue-400 truncate max-w-[160px]">{{ fi.name }}</span>
+                                <span class="text-xs text-blue-400 font-bold flex-shrink-0 ml-2">↓ {{ fi.download_count }}</span>
+                            </a>
+                            {% endif %}
+                            {% endfor %}
+                        </div>
+                    </div>
+                    {% endif %}
+                </div>
+                {% endif %}
+
+                <!-- Sidebar + grid layout -->
+                <div class="flex gap-5">
+
+                    <!-- Type filter sidebar -->
+                    <aside class="flex-shrink-0 w-36 flex flex-col gap-1.5">
+                        <p class="text-xs font-bold text-slate-600 uppercase tracking-widest mb-1">Type</p>
+                        <button onclick="setCommunityType('all')" id="filter-all" class="type-filter-btn w-full text-left px-3 py-2 rounded-lg text-sm font-semibold border bg-blue-600 text-white border-blue-500 transition-all">All</button>
+                        <button onclick="setCommunityType('flow')" id="filter-flow" class="type-filter-btn w-full text-left px-3 py-2 rounded-lg text-sm font-medium border bg-slate-800/40 text-slate-400 border-slate-700/40 hover:bg-slate-800 hover:text-white transition-all">Flow</button>
+                        <button onclick="setCommunityType('module')" id="filter-module" class="type-filter-btn w-full text-left px-3 py-2 rounded-lg text-sm font-medium border bg-slate-800/40 text-slate-400 border-slate-700/40 hover:bg-slate-800 hover:text-white transition-all">Module</button>
+                        <button onclick="setCommunityType('tool')" id="filter-tool" class="type-filter-btn w-full text-left px-3 py-2 rounded-lg text-sm font-medium border bg-slate-800/40 text-slate-400 border-slate-700/40 hover:bg-slate-800 hover:text-white transition-all">Tool</button>
+                        <button onclick="setCommunityType('system prompt')" id="filter-system prompt" class="type-filter-btn w-full text-left px-3 py-2 rounded-lg text-sm font-medium border bg-slate-800/40 text-slate-400 border-slate-700/40 hover:bg-slate-800 hover:text-white transition-all">System Prompt</button>
+                        <button onclick="setCommunityType('skill')" id="filter-skill" class="type-filter-btn w-full text-left px-3 py-2 rounded-lg text-sm font-medium border bg-slate-800/40 text-slate-400 border-slate-700/40 hover:bg-slate-800 hover:text-white transition-all">Skill</button>
+                        <div id="handle-filter-badge" class="hidden mt-3 flex flex-col gap-1">
+                            <p class="text-xs font-bold text-slate-600 uppercase tracking-widest">Uploader</p>
+                            <div class="flex items-center justify-between bg-slate-800/60 border border-slate-700/40 rounded-lg px-2.5 py-1.5">
+                                <span id="handle-filter-label" class="text-xs font-mono text-blue-400 truncate"></span>
+                                <button onclick="clearHandleFilter()" class="ml-1.5 text-slate-500 hover:text-white flex-shrink-0" title="Clear">
+                                    <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                                </button>
+                            </div>
+                        </div>
+                        <p id="community-count" class="text-xs text-slate-600 mt-2 px-1"></p>
+                    </aside>
+
+                <!-- Cards grid -->
+                <div id="community-grid" class="flex-1 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
                 {% if catalog %}
                     {% for item in catalog %}
                     {% set user_vote = my_votes.get(item.id) %}
-                    <div id="marketplace-card-{{ item.id }}" onclick="window.location.href='/marketplace/item/{{ item.id }}'" class="bg-slate-950/50 border border-slate-800 rounded-2xl p-6 flex flex-col justify-between hover:border-slate-700 hover:bg-slate-950/80 transition-all group shadow-lg overflow-hidden relative marketplace-card cursor-pointer">
+                    <div id="marketplace-card-{{ item.id }}"
+                         data-name="{{ item.name | lower }}"
+                         data-description="{{ (item.description or '') | lower }}"
+                         data-type="{{ item.type | lower }}"
+                         data-handle="{{ item.uploader_handle if item.uploader_handle is defined else '' }}"
+                         onclick="window.location.href='/marketplace/item/{{ item.id }}'"
+                         class="community-card bg-slate-950/50 border border-slate-800 rounded-2xl p-6 flex flex-col justify-between hover:border-slate-700 hover:bg-slate-950/80 transition-all group shadow-lg overflow-hidden relative marketplace-card cursor-pointer">
                         {% if item.image_filename %}
                         <div class="h-40 -mt-6 -mx-6 mb-4 overflow-hidden border-b border-slate-800/80">
                             <img src="/marketplace/image/{{ item.id }}" class="w-full h-full object-cover group-hover:scale-105 transition-all duration-300" alt="{{ item.name }}">
@@ -51,7 +134,14 @@
                         {% endif %}
                         <div>
                             <div class="flex justify-between items-start mb-3">
-                                <span class="px-2.5 py-1 rounded-md text-xs font-bold uppercase tracking-wider bg-indigo-900/50 text-indigo-300 border border-indigo-800/50">{{ item.type }}</span>
+                                <div class="flex items-center gap-2">
+                                    <span class="px-2.5 py-1 rounded-md text-xs font-bold uppercase tracking-wider bg-indigo-900/50 text-indigo-300 border border-indigo-800/50">{{ item.type }}</span>
+                                    {% set item_ver = item.version if item.version is defined else 1 %}
+                                    {% set dl_ver = dl_history.get(item.id, 0) %}
+                                    {% if item.id not in owned_ids and dl_ver > 0 and item_ver > dl_ver %}
+                                    <span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-900/50 text-amber-400 border border-amber-700/50 animate-pulse">↑ v{{ item_ver }} available</span>
+                                    {% endif %}
+                                </div>
                                 <span class="text-xs text-slate-500">{{ item.uploaded_at if item.uploaded_at else '' }}</span>
                             </div>
                             <h3 class="text-lg font-bold text-white group-hover:text-blue-400 transition-colors">{{ item.name }}</h3>
@@ -59,6 +149,13 @@
                         </div>
                         <div class="mt-4 flex flex-col space-y-1">
                             <span class="text-xs text-slate-500 truncate max-w-[200px]" title="{{ item.filename }}">📄 {{ item.filename }}</span>
+                            {% if item.uploader_handle is defined and item.uploader_handle %}
+                            <button onclick="event.stopPropagation(); filterByHandle('{{ item.uploader_handle }}')"
+                                    class="text-[10px] text-slate-600 font-mono hover:text-blue-400 transition-colors text-left"
+                                    title="Show all items from this user">👤 {{ item.uploader_handle }}</button>
+                            {% else %}
+                            <span class="text-[10px] text-slate-600 font-mono">👤 ———</span>
+                            {% endif %}
                         </div>
                         <div class="mt-4 pt-4 border-t border-slate-800/50 flex items-center justify-between">
                             <!-- Vote buttons -->
@@ -98,13 +195,44 @@
                 {% else %}
                     <div class="col-span-full flex flex-col items-center justify-center py-20 opacity-40">
                         <svg class="w-16 h-16 text-slate-600 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"></path></svg>
-                        <p class="text-slate-400 font-medium">No community items sharing yet.</p>
+                        <p class="text-slate-400 font-medium">No community items shared yet.</p>
                     </div>
                 {% endif %}
-            </div>
+                    <!-- No results message (shown by JS when search yields nothing) -->
+                    <div id="community-no-results" class="col-span-full hidden flex flex-col items-center justify-center py-16 opacity-40">
+                        <svg class="w-12 h-12 text-slate-600 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0"></path></svg>
+                        <p class="text-slate-400 font-medium">No items match your search.</p>
+                    </div>
+                </div><!-- /community-grid -->
+                </div><!-- /sidebar+grid flex -->
+            </div><!-- /view-community -->
 
             <!-- Library Tab (Modules + Tools + Skills, list-style) -->
             <div id="view-library" class="view-content hidden flex flex-col gap-8">
+
+                <!-- Flows section -->
+                <div>
+                    <div class="flex items-center space-x-3 mb-3">
+                        <h2 class="text-xs font-bold uppercase tracking-widest text-slate-500">Flows</h2>
+                        <div class="flex-1 h-px bg-slate-800"></div>
+                        <a href="/" class="text-xs text-blue-400 hover:text-blue-300 font-semibold transition-colors">Open Editor →</a>
+                    </div>
+                    <div class="flex flex-col divide-y divide-slate-800/60 border border-slate-800/60 rounded-xl overflow-hidden">
+                        {% for flow_id, flow_data in flows.items() %}
+                        <div class="flex items-center justify-between px-4 py-3 bg-slate-950/30 hover:bg-slate-950/60 transition-colors">
+                            <div class="flex items-center space-x-3 min-w-0">
+                                <span class="flex-shrink-0 w-2 h-2 rounded-full bg-violet-400"></span>
+                                <span class="text-sm font-semibold text-white">{{ flow_data.name if flow_data.name is defined else flow_id }}</span>
+                            </div>
+                            <div class="flex items-center space-x-4 flex-shrink-0 ml-4">
+                                <span class="text-xs text-slate-500">{{ (flow_data.nodes | length) if flow_data.nodes is defined else 0 }} nodes</span>
+                            </div>
+                        </div>
+                        {% else %}
+                        <div class="px-4 py-6 text-center text-sm text-slate-600">No flows saved yet.</div>
+                        {% endfor %}
+                    </div>
+                </div>
 
                 <!-- Modules section -->
                 <div>
@@ -156,6 +284,31 @@
                         {% else %}
                         <div class="px-4 py-6 text-center text-sm text-slate-600">No tools available.</div>
                         {% endfor %}
+                    </div>
+                </div>
+
+                <!-- System Prompts section -->
+                <div>
+                    <div class="flex items-center space-x-3 mb-3">
+                        <h2 class="text-xs font-bold uppercase tracking-widest text-slate-500">System Prompt</h2>
+                        <div class="flex-1 h-px bg-slate-800"></div>
+                        <a href="/settings" class="text-xs text-blue-400 hover:text-blue-300 font-semibold transition-colors">Manage →</a>
+                    </div>
+                    <div class="flex flex-col divide-y divide-slate-800/60 border border-slate-800/60 rounded-xl overflow-hidden">
+                        <div class="flex items-center justify-between px-4 py-3 bg-slate-950/30">
+                            <div class="flex items-center space-x-3 min-w-0">
+                                <span class="flex-shrink-0 w-2 h-2 rounded-full {{ 'bg-emerald-400' if system_prompts_data.enabled else 'bg-slate-600' }}"></span>
+                                <span class="text-sm font-semibold text-white">Active System Prompt</span>
+                            </div>
+                            <div class="flex items-center space-x-4 flex-shrink-0 ml-4">
+                                {% if system_prompts_data.active %}
+                                <p class="text-xs text-slate-500 hidden md:block max-w-xs truncate">{{ system_prompts_data.active[:80] }}…</p>
+                                {% else %}
+                                <p class="text-xs text-slate-600">No prompt configured</p>
+                                {% endif %}
+                                <span class="text-xs font-bold {{ 'text-emerald-400' if system_prompts_data.enabled else 'text-slate-500' }}">{{ 'Active' if system_prompts_data.enabled else 'Disabled' }}</span>
+                            </div>
+                        </div>
                     </div>
                 </div>
 
@@ -218,8 +371,10 @@
                 <div>
                     <label class="block text-xs font-bold text-slate-400 uppercase tracking-wide mb-1">Category</label>
                     <select name="type" required class="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all">
+                        <option value="flow">Flow</option>
                         <option value="module">Module</option>
                         <option value="tool">Tool</option>
+                        <option value="system prompt">System Prompt</option>
                         <option value="skill">Skill</option>
                     </select>
                 </div>
@@ -243,6 +398,63 @@
     </div>
 
     <script>
+        // ── Community search + type + handle filter ────────────────────
+        let activeCommunityType = 'all';
+        let activeCommunityHandle = '';
+
+        function setCommunityType(type) {
+            activeCommunityType = type;
+            document.querySelectorAll('.type-filter-btn').forEach(btn => {
+                const active = btn.id === 'filter-' + type;
+                btn.className = 'type-filter-btn w-full text-left px-3 py-2 rounded-lg text-sm border transition-all '
+                    + (active ? 'font-semibold bg-blue-600 text-white border-blue-500'
+                              : 'font-medium bg-slate-800/40 text-slate-400 border-slate-700/40 hover:bg-slate-800 hover:text-white');
+            });
+            filterCommunity();
+        }
+
+        function filterByHandle(handle) {
+            activeCommunityHandle = handle;
+            const badge = document.getElementById('handle-filter-badge');
+            const label = document.getElementById('handle-filter-label');
+            if (badge) badge.classList.remove('hidden');
+            if (label) label.textContent = handle;
+            filterCommunity();
+        }
+
+        function clearHandleFilter() {
+            activeCommunityHandle = '';
+            const badge = document.getElementById('handle-filter-badge');
+            if (badge) badge.classList.add('hidden');
+            filterCommunity();
+        }
+
+        function filterCommunity() {
+            const query = (document.getElementById('community-search').value || '').toLowerCase().trim();
+            const cards = document.querySelectorAll('.community-card');
+            let visible = 0;
+            cards.forEach(card => {
+                const name = card.dataset.name || '';
+                const desc = card.dataset.description || '';
+                const type = card.dataset.type || '';
+                const handle = card.dataset.handle || '';
+                const matchesType = activeCommunityType === 'all' || type === activeCommunityType;
+                const matchesQuery = !query || name.includes(query) || desc.includes(query);
+                const matchesHandle = !activeCommunityHandle || handle === activeCommunityHandle;
+                const show = matchesType && matchesQuery && matchesHandle;
+                card.classList.toggle('hidden', !show);
+                if (show) visible++;
+            });
+            const total = cards.length;
+            const countEl = document.getElementById('community-count');
+            if (countEl) countEl.textContent = total > 0 ? (visible === total ? total + ' items' : visible + ' of ' + total) : '';
+            const noResults = document.getElementById('community-no-results');
+            if (noResults) noResults.classList.toggle('hidden', visible > 0 || total === 0);
+        }
+
+        // Initialise count on load
+        document.addEventListener('DOMContentLoaded', () => filterCommunity());
+
         function switchTab(viewId) {
             document.querySelectorAll('.view-content').forEach(el => el.classList.add('hidden'));
             document.getElementById('view-' + viewId).classList.remove('hidden');

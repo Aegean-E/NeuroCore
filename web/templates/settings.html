@@ -47,32 +47,6 @@
                                 <div class="text-xs text-slate-500 uppercase font-bold mb-1">System Time</div>
                                 <div class="text-sm text-slate-300 font-mono" hx-get="/system-time" hx-trigger="every 1s" hx-swap="innerHTML">{{ system_time }}</div>
                             </div>
-                            <div class="bg-slate-900 border border-slate-800 rounded-xl p-4">
-                                <div class="text-xs text-slate-500 uppercase font-bold mb-1">Instance ID</div>
-                                <div class="text-sm text-blue-400 font-mono font-bold select-all">{{ hardware_id }}</div>
-                                <p class="text-xs text-slate-600 mt-1">Your unique hardware-derived identifier. Private — never shared with other users.</p>
-                            </div>
-                            <div class="bg-slate-900 border border-amber-800/40 rounded-xl p-4">
-                                <div class="flex items-center justify-between mb-1">
-                                    <div class="text-xs text-amber-500 uppercase font-bold">Marketplace Decoder Key</div>
-                                    <button onclick="copyDecoderKey()" class="text-xs text-slate-400 hover:text-white bg-slate-800 hover:bg-slate-700 px-2 py-1 rounded-lg transition-all font-semibold">Copy</button>
-                                </div>
-                                <div id="decoder-key-display" class="text-xs text-amber-400/70 font-mono select-all tracking-wider break-all">{{ decoder_key[:16] }}••••••••••••••••••••••••••••••••••••••••••••••••</div>
-                                <div class="flex items-start space-x-1.5 mt-2">
-                                    <svg class="w-3.5 h-3.5 text-amber-600 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
-                                    <p class="text-xs text-amber-700">Back this up. If lost you permanently lose the ability to edit or delete your marketplace items. Do not share it.</p>
-                                </div>
-                                <!-- Import decoder from another machine -->
-                                <details class="mt-3">
-                                    <summary class="text-xs text-slate-500 hover:text-slate-400 cursor-pointer font-semibold select-none">Import key from another machine…</summary>
-                                    <div class="mt-2 flex items-center space-x-2">
-                                        <input id="decoder-import-input" type="text" placeholder="Paste 64-char hex key" maxlength="64"
-                                               class="flex-1 bg-slate-950 border border-slate-700 rounded-lg px-3 py-1.5 text-xs font-mono text-slate-300 focus:outline-none focus:ring-1 focus:ring-amber-600">
-                                        <button onclick="importDecoderKey()" class="text-xs font-bold bg-amber-950/40 text-amber-400 hover:bg-amber-950/60 border border-amber-800/40 px-3 py-1.5 rounded-lg transition-all">Import</button>
-                                    </div>
-                                    <p class="text-xs text-red-800 mt-1">Warning: this overwrites your current key. Make sure you copied the old one first.</p>
-                                </details>
-                            </div>
                             <div class="grid grid-cols-2 gap-4">
                                 <div class="bg-slate-900 border border-slate-800 rounded-xl p-4">
                                     <div class="text-xs text-slate-500 uppercase font-bold mb-1">Environment</div>
@@ -128,6 +102,42 @@
                         </div>
                     </form>
                     
+                    <div class="mt-8 border-t border-slate-800 pt-6">
+                        <h3 class="text-lg font-bold text-white mb-4">Marketplace Identity</h3>
+                        <div class="space-y-3">
+                            <div class="bg-slate-900 border border-slate-800 rounded-xl p-4">
+                                <div class="text-xs text-slate-500 uppercase font-bold mb-1">Instance ID</div>
+                                <div class="text-sm text-blue-400 font-mono font-bold select-all">{{ hardware_id }}</div>
+                                <p class="text-xs text-slate-600 mt-1">Your unique hardware-derived identifier. Private — never shared with other users.</p>
+                            </div>
+                            <div class="bg-slate-900 border border-slate-800 rounded-xl p-4">
+                                <div class="text-xs text-slate-500 uppercase font-bold mb-1">Public Handle</div>
+                                <div class="text-sm text-slate-300 font-mono font-bold select-all">{{ public_handle }}</div>
+                                <p class="text-xs text-slate-600 mt-1">What others see as your identity in the Marketplace. Derived from your decoder key — changes if you import a different key.</p>
+                            </div>
+                            <div class="bg-slate-900 border border-amber-800/40 rounded-xl p-4">
+                                <div class="flex items-center justify-between mb-1">
+                                    <div class="text-xs text-amber-500 uppercase font-bold">Marketplace Decoder Key</div>
+                                    <button onclick="copyDecoderKey()" class="text-xs text-slate-400 hover:text-white bg-slate-800 hover:bg-slate-700 px-2 py-1 rounded-lg transition-all font-semibold">Copy</button>
+                                </div>
+                                <div id="decoder-key-display" class="text-xs text-amber-400/70 font-mono select-all tracking-wider break-all">{{ decoder_key[:16] }}••••••••••••••••••••••••••••••••••••••••••••••••</div>
+                                <div class="flex items-start space-x-1.5 mt-2">
+                                    <svg class="w-3.5 h-3.5 text-amber-600 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                                    <p class="text-xs text-amber-700">Back this up. If lost you permanently lose the ability to edit or delete your marketplace items. Do not share it.</p>
+                                </div>
+                                <details class="mt-3">
+                                    <summary class="text-xs text-slate-500 hover:text-slate-400 cursor-pointer font-semibold select-none">Import key from another machine…</summary>
+                                    <div class="mt-2 flex items-center space-x-2">
+                                        <input id="decoder-import-input" type="text" placeholder="Paste 64-char hex key" maxlength="64"
+                                               class="flex-1 bg-slate-950 border border-slate-700 rounded-lg px-3 py-1.5 text-xs font-mono text-slate-300 focus:outline-none focus:ring-1 focus:ring-amber-600">
+                                        <button onclick="importDecoderKey()" class="text-xs font-bold bg-amber-950/40 text-amber-400 hover:bg-amber-950/60 border border-amber-800/40 px-3 py-1.5 rounded-lg transition-all">Import</button>
+                                    </div>
+                                    <p class="text-xs text-red-800 mt-1">Warning: this overwrites your current key. Make sure you copied the old one first.</p>
+                                </details>
+                            </div>
+                        </div>
+                    </div>
+
                     <div class="mt-8 border-t border-slate-800 pt-6">
                         <h3 class="text-lg font-bold text-white mb-4">Data Management</h3>
                         <div class="bg-slate-900 rounded-xl border border-slate-800 p-4 flex items-center justify-between mb-4">

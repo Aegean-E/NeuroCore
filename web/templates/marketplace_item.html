@@ -30,6 +30,7 @@
                 <span class="text-slate-700">/</span>
                 <span class="px-2.5 py-1 rounded-md text-xs font-bold uppercase tracking-wider bg-indigo-900/50 text-indigo-300 border border-indigo-800/50">{{ item.type }}</span>
                 <h1 class="text-lg font-bold text-white">{{ item.name }}</h1>
+                <span class="text-xs text-slate-600 font-mono">v{{ item_version }}</span>
             </div>
 
             <!-- Actions: votes + download + delete -->
@@ -60,6 +61,10 @@
                 </a>
 
                 {% if is_owner %}
+                <button onclick="openUpdateModal()"
+                        class="bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white px-4 py-1.5 rounded-lg text-sm font-bold border border-slate-700 transition-all">
+                    Publish Update
+                </button>
                 <button onclick="confirmDelete()"
                         class="bg-red-950/40 hover:bg-red-950/70 text-red-500 hover:text-red-400 px-4 py-1.5 rounded-lg text-sm font-bold border border-red-800/30 transition-all">
                     Delete
@@ -71,10 +76,26 @@
         <!-- Meta strip -->
         <div class="flex items-center space-x-6 px-6 py-3 border-b border-slate-800/60 bg-slate-950/30 flex-shrink-0 text-xs text-slate-500">
             <span>📄 {{ item.filename }}</span>
-            {% if is_owner %}<span class="text-emerald-600 font-semibold">✓ Your item</span>{% endif %}
+            <span>👤 {{ item.uploader_handle if item.uploader_handle is defined else '———' }}</span>
+            {% if is_owner %}<span class="text-emerald-500 font-semibold">✓ Your item</span>{% endif %}
             {% if item.uploaded_at %}<span>🕒 {{ item.uploaded_at }}</span>{% endif %}
             {% if item.description %}<span class="text-slate-400 truncate max-w-xl" title="{{ item.description }}">{{ item.description }}</span>{% endif %}
         </div>
+
+        {% if new_version_available %}
+        <!-- New version notice bar -->
+        <div class="flex items-center justify-between px-6 py-2.5 bg-amber-950/30 border-b border-amber-800/40 flex-shrink-0">
+            <div class="flex items-center space-x-2 text-sm text-amber-400">
+                <svg class="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
+                <span>Version <strong>v{{ item_version }}</strong> is available — you have v{{ downloaded_version }}.</span>
+            </div>
+            <a href="/marketplace/download/{{ item.id }}"
+               class="flex items-center space-x-1.5 bg-amber-700 hover:bg-amber-600 text-white px-3 py-1 rounded-lg text-xs font-bold transition-all">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
+                <span>Download update</span>
+            </a>
+        </div>
+        {% endif %}
 
         <!-- Body: file tree + content viewer -->
         <div class="flex flex-1 overflow-hidden">
@@ -120,6 +141,40 @@
         </div>
 
     </main>
+
+    <!-- Publish Update modal -->
+    <div id="update-modal" class="hidden fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+         onclick="if(event.target===this) closeUpdateModal()">
+        <div class="bg-slate-900 border border-slate-800 rounded-2xl max-w-md w-full p-6 shadow-2xl">
+            <div class="flex items-center space-x-3 mb-5">
+                <svg class="w-5 h-5 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"></path></svg>
+                <h3 class="text-lg font-bold text-white">Publish Update <span class="text-slate-500 text-sm font-normal">v{{ item_version }} → v{{ item_version + 1 }}</span></h3>
+            </div>
+            <form id="update-form" class="space-y-4">
+                <div>
+                    <label class="block text-xs font-bold text-slate-400 uppercase tracking-wide mb-1">Description</label>
+                    <textarea name="description" rows="2" placeholder="Leave blank to keep current"
+                              class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-sm text-slate-300 placeholder-slate-600 focus:outline-none focus:ring-1 focus:ring-blue-500">{{ item.description or '' }}</textarea>
+                </div>
+                <div>
+                    <label class="block text-xs font-bold text-slate-400 uppercase tracking-wide mb-1">New File <span class="text-slate-600 normal-case font-normal">(optional — replaces current)</span></label>
+                    <input type="file" name="file"
+                           class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-sm text-slate-400 file:mr-3 file:py-1 file:px-3 file:rounded-md file:border-0 file:text-xs file:font-semibold file:bg-blue-900/30 file:text-blue-400">
+                </div>
+                <div>
+                    <label class="block text-xs font-bold text-slate-400 uppercase tracking-wide mb-1">New Banner Image <span class="text-slate-600 normal-case font-normal">(optional)</span></label>
+                    <input type="file" name="image" accept="image/*"
+                           class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-sm text-slate-400 file:mr-3 file:py-1 file:px-3 file:rounded-md file:border-0 file:text-xs file:font-semibold file:bg-blue-900/30 file:text-blue-400">
+                </div>
+                <p class="text-xs text-slate-600">Users who downloaded a previous version will see an update notice. They choose whether to update.</p>
+                <div class="flex space-x-3 justify-end pt-2 border-t border-slate-800">
+                    <button type="button" onclick="closeUpdateModal()" class="px-4 py-2 rounded-lg text-sm font-bold text-slate-400 hover:bg-slate-800 transition-all">Cancel</button>
+                    <button type="button" id="confirm-update-btn" onclick="doUpdate()"
+                            class="bg-blue-600 hover:bg-blue-500 text-white px-5 py-2 rounded-lg text-sm font-bold transition-all">Publish</button>
+                </div>
+            </form>
+        </div>
+    </div>
 
     <!-- Delete confirmation modal -->
     <div id="delete-modal" class="hidden fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4"
@@ -190,6 +245,33 @@
         .catch(() => {
             document.getElementById('file-loading').classList.add('hidden');
             document.getElementById('file-content').textContent = 'Failed to load file.';
+        });
+    }
+
+    // ── Publish Update ────────────────────────────────────────────────
+    function openUpdateModal() { document.getElementById('update-modal').classList.remove('hidden'); }
+    function closeUpdateModal() { document.getElementById('update-modal').classList.add('hidden'); }
+    function doUpdate() {
+        const btn = document.getElementById('confirm-update-btn');
+        btn.textContent = 'Publishing…';
+        btn.disabled = true;
+        const form = document.getElementById('update-form');
+        const fd = new FormData(form);
+        fetch('/marketplace/update/{{ item.id }}', { method: 'POST', body: fd })
+        .then(r => r.json())
+        .then(data => {
+            if (data.status === 'success') {
+                window.location.reload();
+            } else {
+                btn.textContent = 'Publish';
+                btn.disabled = false;
+                alert('Update failed: ' + (data.detail || 'Unknown error'));
+            }
+        })
+        .catch(() => {
+            btn.textContent = 'Publish';
+            btn.disabled = false;
+            alert('Update failed.');
         });
     }
 
