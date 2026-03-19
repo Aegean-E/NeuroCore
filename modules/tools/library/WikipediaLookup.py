@@ -8,6 +8,7 @@ if not query:
 else:
     try:
         base_url = "https://en.wikipedia.org/w/api.php"
+        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"}
         search_params = {
             "action": "query",
             "list": "search",
@@ -15,7 +16,7 @@ else:
             "format": "json"
         }
         
-        resp = httpx.get(base_url, params=search_params, timeout=10.0)
+        resp = httpx.get(base_url, params=search_params, headers=headers, timeout=10.0)
         resp.raise_for_status()  # Raise exception for HTTP errors
         search_data = resp.json()
         
@@ -38,7 +39,7 @@ else:
             if mode == 'summary':
                 content_params["exintro"] = 1
             
-            resp = httpx.get(base_url, params=content_params, timeout=10.0)
+            resp = httpx.get(base_url, params=content_params, headers=headers, timeout=10.0)
             resp.raise_for_status()  # Raise exception for HTTP errors
             data = resp.json()
             

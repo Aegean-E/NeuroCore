@@ -48,43 +48,44 @@ safe_functions = {
 }
 
 
-class SafeEvaluator(ast.NodeVisitor):
+def evaluate_node(node, variables=None):
     """Safe AST-based expression evaluator."""
+    variables = variables or {}
     
-    def __init__(self):
-        self._variables = {}
-    
-    def visit_Name(self, node):
+    if isinstance(node, ast.Expression):
+        return evaluate_node(node.body, variables)
+        
+    if isinstance(node, ast.Name):
         if node.id in safe_constants:
             return safe_constants[node.id]
         if node.id in safe_functions:
             return safe_functions[node.id]
-        if node.id in self._variables:
-            return self._variables[node.id]
+        if node.id in variables:
+            return variables[node.id]
         raise ValueError(f"Unknown variable: {node.id}")
     
-    def visit_Constant(self, node):
+    if isinstance(node, ast.Constant):
         return node.value
     
-    def visit_BinOp(self, node):
-        left = self.visit(node.left)
-        right = self.visit(node.right)
+    if isinstance(node, ast.BinOp):
+        left = evaluate_node(node.left, variables)
+        right = evaluate_node(node.right, variables)
         op_type = type(node.op)
         if op_type not in ALLOWED_OPERATORS:
             raise ValueError(f"Operator not allowed: {op_type.__name__}")
         return ALLOWED_OPERATORS[op_type](left, right)
     
-    def visit_UnaryOp(self, node):
-        operand = self.visit(node.operand)
+    if isinstance(node, ast.UnaryOp):
+        operand = evaluate_node(node.operand, variables)
         op_type = type(node.op)
         if op_type not in ALLOWED_OPERATORS:
             raise ValueError(f"Operator not allowed: {op_type.__name__}")
         return ALLOWED_OPERATORS[op_type](operand)
     
-    def visit_Compare(self, node):
-        left = self.visit(node.left)
+    if isinstance(node, ast.Compare):
+        left = evaluate_node(node.left, variables)
         for op, comparator in zip(node.ops, node.comparators):
-            right = self.visit(comparator)
+            right = evaluate_node(comparator, variables)
             op_type = type(op)
             if op_type not in ALLOWED_OPERATORS:
                 raise ValueError(f"Operator not allowed: {op_type.__name__}")
@@ -93,22 +94,26 @@ class SafeEvaluator(ast.NodeVisitor):
             left = right
         return True
     
-    def visit_Call(self, node):
-        # Only allow calls to safe functions
+    if isinstance(node, ast.Call):
         if isinstance(node.func, ast.Name) and node.func.id in safe_functions:
-            args = [self.visit(arg) for arg in node.args]
+            args = [evaluate_node(arg, variables) for arg in node.args]
             return safe_functions[node.func.id](*args)
         raise ValueError(f"Function call not allowed: {node.func.id if isinstance(node.func, ast.Name) else 'unknown'}")
     
-    def generic_visit(self, node):
-        raise ValueError(f"Unsupported AST node: {type(node).__name__}")
+    raise ValueError(f"Unsupported AST node: {type(node).__name__}")
 
 
 try:
     # Basic security check
+    unsafe = False
+    for forbidden in ["__", "import", "lambda", "exec", "eval", "compile", "class", "def"]:
+        if forbidden in expression:
+            unsafe = True
+            break
+            
     if not expression:
         result = "Error: No expression provided."
-    elif any(forbidden in expression for forbidden in ["__", "import", "lambda", "exec", "eval", "compile", "class", "def"]):
+    elif unsafe:
         result = "Error: Unsafe expression detected."
     else:
         # Handle power operator ^ -> ** (common LLM mistake)
@@ -117,8 +122,7 @@ try:
         # Parse and evaluate safely using AST
         try:
             tree = ast.parse(expression, mode='eval')
-            evaluator = SafeEvaluator()
-            calc_result = evaluator.visit(tree.body)
+            calc_result = evaluate_node(tree)
             result = f"{calc_result}"
         except SyntaxError:
             result = "Error: Invalid expression syntax."

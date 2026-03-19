@@ -659,14 +659,15 @@ class ToolSandbox:
         
         # Prepare execution environment
         exec_globals = self._globals.copy()
-        exec_locals = local_vars or {}
+        if local_vars:
+            exec_globals.update(local_vars)
         
         # Execute
         result_container = {'result': None, 'error': None, 'output': ''}
         
         try:
-            exec(code, exec_globals, exec_locals)
-            result_container['result'] = exec_locals.get('result')
+            exec(code, exec_globals)
+            result_container['result'] = exec_globals.get('result')
         except Exception as e:
             result_container['error'] = e
         
