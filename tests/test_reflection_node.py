@@ -171,6 +171,21 @@ class TestReflectionBasic:
 
         assert "satisfied" in result
 
+    @pytest.mark.asyncio
+    async def test_default_prompt_includes_clarifying_question_instruction(self):
+        """The default reflection prompt should instruct the LLM to allow clarifying questions."""
+        executor = make_executor()
+        executor.llm.chat_completion = AsyncMock(
+            return_value=make_reflection_llm_response(satisfied=True)
+        )
+
+        await executor.receive(make_input())
+
+        call_args = executor.llm.chat_completion.call_args
+        messages = call_args.kwargs.get("messages", [])
+        system_content = messages[0].get("content", "")
+        assert "clarifying question" in system_content
+
 
 # ---------------------------------------------------------------------------
 # Improvement message injection

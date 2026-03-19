@@ -17,6 +17,10 @@ else:
         
         weather_data = response.json()
         
+        # wttr.in sometimes nests the result under a "data" key (e.g., when falling back to lat/lon resolution)
+        if 'data' in weather_data and isinstance(weather_data['data'], dict):
+            weather_data = weather_data['data']
+            
         # Extract relevant information
         current_condition = weather_data.get('current_condition', [{}])[0]
         temp_c = current_condition.get('temp_C')
