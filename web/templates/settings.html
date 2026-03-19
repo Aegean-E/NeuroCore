@@ -25,7 +25,7 @@
             <a href="#" onclick="switchTab(event, 'general')" class="settings-nav-link block px-3 py-2 rounded-lg bg-slate-800 text-white text-sm font-medium transition-all">General</a>
             <a href="#" onclick="switchTab(event, 'flow-execution')" class="settings-nav-link block px-3 py-2 rounded-lg text-slate-400 hover:bg-slate-800 hover:text-white text-sm font-medium transition-all">Flow Execution</a>
             <a href="#" onclick="switchTab(event, 'modules')" class="settings-nav-link block px-3 py-2 rounded-lg text-slate-400 hover:bg-slate-800 hover:text-white text-sm font-medium transition-all">Modules</a>
-            <div id="settings-modules-nav" hx-get="/settings/modules-nav" hx-trigger="modulesChanged from:body">
+            <div id="settings-modules-nav" class="flex flex-col gap-2" hx-get="/settings/modules-nav" hx-trigger="modulesChanged from:body">
                 {% include 'settings_modules_nav.html' %}
             </div>
         </aside>
@@ -169,6 +169,108 @@
                     <button onclick="document.getElementById('general-settings-form').requestSubmit()" class="bg-blue-600 hover:bg-blue-500 text-white px-8 py-3 rounded-xl text-sm font-semibold transition-all shadow-lg shadow-blue-500/20">
                         Save Settings
                     </button>
+                </div>
+            </div>
+
+            <!-- Skills Section -->
+            <div id="skills" class="settings-tab hidden flex flex-col h-full relative">
+                <div class="flex-grow overflow-y-auto custom-scrollbar p-8 scroll-smooth pb-24">
+                    <div class="mb-6">
+                        <h2 class="text-xl font-bold text-white">Skills</h2>
+                        <p class="text-sm text-slate-500">View current skills and their content.</p>
+                    </div>
+
+                    {% if skills %}
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                            {% for id, skill in skills.items() %}
+                                <div id="skill-card-{{ id }}" class="bg-slate-900 border border-slate-800 rounded-2xl p-5 hover:border-slate-700 hover:bg-slate-900/80 transition-all flex flex-col justify-between skills-card">
+                                    <div>
+                                        <div class="flex justify-between items-start mb-2">
+                                            <h3 class="text-base font-bold text-white">{{ skill.name or id }}</h3>
+                                            <button onclick="confirmDeleteSkill('{{ id }}', '{{ (skill.name or id)|replace('\'', '\\\'') }}')" class="text-red-500 hover:text-red-400 p-1.5 rounded-lg hover:bg-red-500/10 transition-all" title="Delete Skill">
+                                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-4v6M1 7h22M10 11V7a4 4 0 014-4h4a4 4 0 014 4v4"></path></svg>
+                                            </button>
+                                        </div>
+                                        <p class="text-xs text-slate-400 mb-4 line-clamp-3">{{ skill.description }}</p>
+                                    </div>
+                                    {% if skill.instructions %}
+                                        <div id="skill-instructions-{{ id }}" class="hidden">{{ skill.instructions }}</div>
+                                        <button onclick="openSkillModal('{{ (skill.name or id)|replace('\'', '\\\'') }}', document.getElementById('skill-instructions-{{ id }}').innerText)" class="w-full mt-2 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold py-2 rounded-lg border border-slate-700 transition-all">
+                                            View Instructions
+                                        </button>
+                                    {% endif %}
+                                </div>
+                            {% endfor %}
+                        </div>
+
+                        <!-- Skill Modal -->
+                        <div id="skill-modal" class="hidden fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-40 flex items-center justify-center p-4" onclick="if(event.target === this) closeSkillModal()">
+                            <div class="bg-slate-900 border border-slate-800 rounded-2xl max-w-2xl w-full max-h-[80vh] flex flex-col shadow-2xl">
+                                <div class="p-6 border-b border-slate-800 flex justify-between items-center">
+                                    <h3 id="modal-skill-title" class="text-lg font-bold text-white"></h3>
+                                    <button onclick="closeSkillModal()" class="text-slate-500 hover:text-white text-xl font-bold">&times;</button>
+                                </div>
+                                <div id="modal-skill-content" class="p-6 overflow-y-auto custom-scrollbar text-sm text-slate-300 whitespace-pre-wrap leading-relaxed"></div>
+                            </div>
+                        </div>
+
+                        <!-- Delete Confirmation Modal -->
+                        <div id="delete-skill-modal" class="hidden fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4" onclick="if(event.target === this) closeDeleteModal()">
+                            <div class="bg-slate-900 border border-slate-800 rounded-2xl max-w-sm w-full p-6 flex flex-col shadow-2xl">
+                                <div class="flex items-center space-x-3 text-red-500 mb-4">
+                                     <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>
+                                     <h3 class="text-lg font-bold text-white">Delete Skill?</h3>
+                                </div>
+                                <p class="text-sm text-slate-400 mb-6">Are you sure you want to delete <span id="delete-skill-name" class="font-semibold text-white"></span>? This action cannot be undone.</p>
+                                <div class="flex space-x-3 justify-end">
+                                     <button onclick="closeDeleteModal()" class="px-4 py-2 rounded-lg text-sm font-bold text-slate-400 hover:bg-slate-800 transition-all">Cancel</button>
+                                     <button id="confirm-delete-btn" class="bg-red-600 hover:bg-red-500 text-white px-4 py-2 rounded-lg text-sm font-bold transition-all shadow-lg shadow-red-500/20">Delete</button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <script>
+                        let activeDeleteId = '';
+
+                        function openSkillModal(title, content) {
+                            document.getElementById('modal-skill-title').innerText = title;
+                            document.getElementById('modal-skill-content').innerText = content;
+                            document.getElementById('skill-modal').classList.remove('hidden');
+                        }
+                        function closeSkillModal() {
+                            document.getElementById('skill-modal').classList.add('hidden');
+                        }
+
+                        function confirmDeleteSkill(id, name) {
+                            activeDeleteId = id;
+                            document.getElementById('delete-skill-name').innerText = name;
+                            document.getElementById('delete-skill-modal').classList.remove('hidden');
+                        }
+
+                        function closeDeleteModal() {
+                            document.getElementById('delete-skill-modal').classList.add('hidden');
+                            activeDeleteId = '';
+                        }
+
+                        document.getElementById('confirm-delete-btn').addEventListener('click', function() {
+                            if (!activeDeleteId) return;
+                            
+                            htmx.ajax('POST', '/settings/skills/delete/' + activeDeleteId, {
+                                target: '#skill-card-' + activeDeleteId,
+                                swap: 'outerHTML'
+                            }).then(() => {
+                                closeDeleteModal();
+                            }).catch(() => {
+                                alert('Failed to delete skill');
+                            });
+                        });
+                        </script>
+                    {% else %}
+                        <div class="flex flex-col items-center justify-center h-64 text-center">
+                            <svg class="w-16 h-16 text-slate-700 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.723 5.832 18.333 7.5 18.333c1.667 0 3.254.39 4.5 1.12m0-13.111C13.168 5.477 14.754 5 16.5 5c1.75 0 3.332.477 4.5 1.253v13C19.832 18.723 18.168 18.333 16.5 18.333c-1.667 0-3.254.39-4.5 1.12"></path></svg>
+                            <p class="text-slate-500">No skills currently available.</p>
+                        </div>
+                    {% endif %}
                 </div>
             </div>
 

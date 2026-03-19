@@ -940,18 +940,62 @@ async def delete_marketplace_item(item_id: str):
          
     return JSONResponse(content={"status": "success", "message": "Item deleted"})
 
+@router.post("/settings/skills/delete/{skill_id}")
+async def delete_skill(skill_id: str):
+    import os
+    skills_path = os.path.join("modules", "skills", "data", "skills_metadata.json")
+    if not os.path.exists(skills_path):
+         raise HTTPException(status_code=404, detail="Skills Metadata not found")
+        
+    try:
+         with open(skills_path, "r", encoding="utf-8") as f:
+             skills = json.load(f)
+    except Exception:
+         raise HTTPException(status_code=500, detail="Failed to read skills metadata")
+        
+    if skill_id not in skills:
+         raise HTTPException(status_code=404, detail="Skill not found")
+        
+    # Delete from JSON
+    del skills[skill_id]
+    with open(skills_path, "w", encoding="utf-8") as f:
+         json.dump(skills, f, indent=4)
+         
+    # Delete MD file
+    content_path = os.path.join("modules", "skills", "data", f"{skill_id}.md")
+    if os.path.exists(content_path):
+         os.remove(content_path)
+         
+    return JSONResponse(content={"status": "success", "message": "Skill deleted"})
+
 @router.get("/settings", response_class=HTMLResponse)
 async def get_settings(request: Request, settings_man: SettingsManager = Depends(get_settings_manager), module_manager: ModuleManager = Depends(get_module_manager)):
+    import os
     system_info = {
         "platform": platform.platform(),
         "python_version": sys.version.split()[0],
         "processor": platform.processor() or "Unknown"
     }
+    
+    skills = {}
+    skills_path = os.path.join("modules", "skills", "data", "skills_metadata.json")
+    if os.path.exists(skills_path):
+         try:
+             with open(skills_path, "r", encoding="utf-8") as f:
+                 skills = json.load(f)
+             for skill_id, skill_data in skills.items():
+                 content_path = os.path.join("modules", "skills", "data", f"{skill_id}.md")
+                 if os.path.exists(content_path):
+                      with open(content_path, "r", encoding="utf-8") as f_content:
+                          skill_data["instructions"] = f_content.read()
+         except Exception: pass
+         
     return templates.TemplateResponse(request, "settings.html", {
         "settings": settings_man.settings, "modules": module_manager.get_all_modules(),
         "system_time": datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S %Z"),
         "system_info": system_info,
-        "hardware_id": get_hardware_id()
+        "hardware_id": get_hardware_id(),
+        "skills": skills
     })
 
 @router.get("/system-time", response_class=HTMLResponse)
