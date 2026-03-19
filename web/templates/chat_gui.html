@@ -110,7 +110,7 @@
                     {% endif %}
 
                     <div class="bg-slate-800 p-4 rounded-2xl rounded-tl-none max-w-[80%] shadow-lg border border-slate-700/50">
-                        <div class="text-sm prose prose-invert whitespace-pre-wrap">{{ msg.content }}</div>
+                        <div class="text-sm prose prose-invert markdown-content">{{ msg.content }}</div>
                     </div>
                     {% endif %}
                 {% endfor %}
@@ -143,7 +143,7 @@
                     let mdBuffer = '';
                     let firstTokenReceived = false;
                     let startTime = Date.now();
-                    const source = new EventSource('/modules/chat/stream/{{ session.id }}');
+                    const source = new EventSource('/chat/stream/{{ session.id }}');
 
                     let timerInterval = setInterval(() => {
                         if (timerSpan) timerSpan.innerText = ((Date.now() - startTime) / 1000).toFixed(1);
@@ -164,7 +164,7 @@
                             const chunk = JSON.parse(event.data);
                             if (chunk.text) {
                                 mdBuffer += chunk.text;
-                                contentDiv.innerText = mdBuffer;
+                                contentDiv.innerHTML = marked.parse(mdBuffer);
                                 const scrollable = document.getElementById('chat-messages');
                                 if (scrollable) scrollable.scrollTop = scrollable.scrollHeight;
                             }
@@ -213,6 +213,8 @@
                             details.appendChild(body);
                             thinkingTrace.innerHTML = '';
                             thinkingTrace.appendChild(details);
+                            const scrollable = document.getElementById('chat-messages');
+                            if (scrollable) scrollable.scrollTop = scrollable.scrollHeight;
                         } catch(e) {}
                     });
 
@@ -350,3 +352,9 @@
         to { opacity: 1; transform: translateY(0); }
     }
 </style>
+
+<script>
+    document.querySelectorAll('.markdown-content').forEach(el => {
+        el.innerHTML = marked.parse(el.textContent);
+    });
+</script>

@@ -77,7 +77,7 @@
             const chunk = JSON.parse(event.data);
             if (chunk.text) {
                 mdBuffer += chunk.text;
-                contentDiv.innerText = mdBuffer;
+                contentDiv.innerHTML = marked.parse(mdBuffer);
                 scrollToBottom();
             }
         };
@@ -154,7 +154,7 @@
             if (chunk.text) {
                 const ph = contentDiv.querySelector('.stream-placeholder');
                 if (ph) ph.remove();
-                contentDiv.innerText = chunk.text;
+                contentDiv.innerHTML = marked.parse(chunk.text);
                 statusDiv.style.display = 'flex';
                 scrollToBottom();
             }

@@ -150,7 +150,7 @@ async def chat_gui(request: Request, session_id: str = Query(None)):
     return templates.TemplateResponse(request, "chat_gui.html", {
         "session": active_session,
         "estimated_tokens": estimated_tokens,
-        "active_stream": session_id in active_streams,
+        "active_stream": active_session and active_session["id"] in active_streams,
     })
 
 @router.get("/sessions", response_class=HTMLResponse)
