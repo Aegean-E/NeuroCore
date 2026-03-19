@@ -44,7 +44,7 @@
             <div id="view-community" class="view-content grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                 {% if catalog %}
                     {% for item in catalog %}
-                    <div onclick="openItemModal('{{ (item.name or '')|replace('\'', '\\\'') }}', '{{ (item.description or '')|replace('\'', '\\\'') }}', '{{ item.type }}', '{{ item.filename }}', '{{ item.id }}')" class="bg-slate-950/50 border border-slate-800 rounded-2xl p-6 flex flex-col justify-between hover:border-slate-700 hover:bg-slate-950/80 transition-all group shadow-lg overflow-hidden relative marketplace-card cursor-pointer">
+                    <div id="marketplace-card-{{ item.id }}" onclick="openItemModal('{{ (item.name or '')|replace('\'', '\\\'') }}', '{{ (item.description or '')|replace('\'', '\\\'') }}', '{{ item.type }}', '{{ item.filename }}', '{{ item.id }}')" class="bg-slate-950/50 border border-slate-800 rounded-2xl p-6 flex flex-col justify-between hover:border-slate-700 hover:bg-slate-950/80 transition-all group shadow-lg overflow-hidden relative marketplace-card cursor-pointer">
                         {% if item.image_filename %}
                         <div class="h-40 -mt-6 -mx-6 mb-4 overflow-hidden border-b border-slate-800/80">
                             <img src="/marketplace/image/{{ item.id }}" class="w-full h-full object-cover group-hover:scale-105 transition-all duration-300" alt="{{ item.name }}">
@@ -58,11 +58,14 @@
                             <h3 class="text-lg font-bold text-white group-hover:text-blue-400 transition-colors">{{ item.name }}</h3>
                             <p class="text-sm text-slate-400 mt-2 line-clamp-2 h-10">{{ item.description }}</p>
                         </div>
-                        <div class="mt-6 pt-4 border-t border-slate-800/50 flex items-center justify-between">
-                            <span class="text-xs text-slate-500 truncate max-w-[150px]" title="{{ item.filename }}">📄 {{ item.filename }}</span>
+                        <div class="mt-4 flex flex-col space-y-1">
+                            <span class="text-xs text-slate-500 truncate max-w-[200px]" title="{{ item.filename }}">📄 {{ item.filename }}</span>
+                            <span class="text-[10px] text-slate-500 font-mono tracking-tight">👤 ID: {{ item.uploader_id }}</span>
+                        </div>
+                        <div class="mt-4 pt-4 border-t border-slate-800/50 flex items-center justify-end space-x-2">
                             <div class="flex items-center space-x-2">
                                 {% if item.uploader_id == 'local_user' or item.uploader_id == hardware_id %}
-                                <button onclick="event.stopPropagation()" hx-post="/marketplace/delete/{{ item.id }}" hx-confirm="Are you sure you want to delete this upload from the Community lists?" hx-swap="outerHTML" hx-target="closest .marketplace-card" class="bg-red-950/30 hover:bg-red-950/50 text-red-500 hover:text-red-400 px-3 py-1.5 rounded-xl text-xs font-bold border border-red-800/20 transition-all">
+                                <button onclick="event.stopPropagation(); openDeleteMarketplaceModal('{{ item.id }}', '{{ (item.name or '')|replace('\'', '\\\'') }}')" class="bg-red-950/30 hover:bg-red-950/50 text-red-500 hover:text-red-400 px-3 py-1.5 rounded-xl text-xs font-bold border border-red-800/20 transition-all">
                                     Delete
                                 </button>
                                 {% endif %}
@@ -245,6 +248,43 @@
         function closeItemModal() {
             document.getElementById('item-view-modal').classList.add('hidden');
         }
+
+        let activeDeleteMarketplaceId = '';
+        function openDeleteMarketplaceModal(id, name) {
+            activeDeleteMarketplaceId = id;
+            document.getElementById('delete-item-name').innerText = name;
+            document.getElementById('delete-marketplace-modal').classList.remove('hidden');
+            
+            const confirmBtn = document.getElementById('confirm-delete-marketplace-btn');
+            confirmBtn.onclick = function() {
+                confirmBtn.innerText = "Deleting...";
+                confirmBtn.disabled = true;
+                
+                fetch('/marketplace/delete/' + activeDeleteMarketplaceId, {
+                    method: 'POST'
+                })
+                .then(response => {
+                    if (response.ok) {
+                         const cardById = document.getElementById('marketplace-card-' + activeDeleteMarketplaceId);
+                         if (cardById) cardById.remove();
+                         closeDeleteMarketplaceModal();
+                    } else {
+                        alert('Delete failed');
+                        confirmBtn.innerText = "Delete";
+                        confirmBtn.disabled = false;
+                    }
+                })
+                .catch(() => {
+                    alert('Delete failed error');
+                    confirmBtn.innerText = "Delete";
+                    confirmBtn.disabled = false;
+                });
+            };
+        }
+        function closeDeleteMarketplaceModal() {
+            document.getElementById('delete-marketplace-modal').classList.add('hidden');
+            activeDeleteMarketplaceId = '';
+        }
     </script>
 
     <!-- Item View Modal -->
@@ -270,6 +310,21 @@
                     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
                     <span>Download</span>
                 </a>
+            </div>
+        </div>
+    </div>
+
+    <!-- Delete Confirmation Modal -->
+    <div id="delete-marketplace-modal" class="hidden fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4" onclick="if(event.target === this) closeDeleteMarketplaceModal()">
+        <div class="bg-slate-900 border border-slate-800 rounded-2xl max-w-sm w-full p-6 flex flex-col shadow-2xl">
+            <div class="flex items-center space-x-3 text-red-500 mb-4">
+                 <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>
+                 <h3 class="text-lg font-bold text-white">Delete Item?</h3>
+            </div>
+            <p class="text-sm text-slate-400 mb-6">Are you sure you want to delete <span id="delete-item-name" class="font-semibold text-white"></span> from the Community lists? This action cannot be undone.</p>
+            <div class="flex space-x-3 justify-end">
+                 <button onclick="closeDeleteMarketplaceModal()" class="px-4 py-2 rounded-lg text-sm font-bold text-slate-400 hover:bg-slate-800 transition-all">Cancel</button>
+                 <button id="confirm-delete-marketplace-btn" class="bg-red-600 hover:bg-red-500 text-white px-4 py-2 rounded-lg text-sm font-bold transition-all shadow-lg shadow-red-500/20">Delete</button>
             </div>
         </div>
     </div>

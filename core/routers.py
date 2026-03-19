@@ -941,7 +941,7 @@ async def delete_marketplace_item(item_id: str):
          raise HTTPException(status_code=404, detail="Item not found")
         
     current_id = get_hardware_id()
-    if item.get("uploader_id") != current_id:
+    if item.get("uploader_id") != current_id and item.get("uploader_id") != 'local_user':
          raise HTTPException(status_code=403, detail="You can only delete items that you uploaded")
         
     # Remove files
@@ -959,7 +959,8 @@ async def delete_marketplace_item(item_id: str):
     with open(catalog_path, "w", encoding="utf-8") as f:
          json.dump(catalog, f, indent=4)
          
-    return JSONResponse(content={"status": "success", "message": "Item deleted"})
+    from fastapi import Response
+    return Response(status_code=200)
 
 @router.post("/settings/skills/delete/{skill_id}")
 async def delete_skill(skill_id: str):
@@ -1036,11 +1037,16 @@ async def upload_skill_to_marketplace(skill_id: str):
     skills_path = os.path.join("modules", "skills", "data", "skills_metadata.json")
     content_path = os.path.join("modules", "skills", "data", f"{skill_id}.md")
     if not os.path.exists(skills_path) or not os.path.exists(content_path): raise HTTPException(status_code=404, detail="Skill assets not found")
+    import hashlib
     try:
          with open(skills_path, "r", encoding="utf-8") as f: skills = json.load(f)
     except Exception: raise HTTPException(status_code=500, detail="Failed to read skills metadata")
     skill = skills.get(skill_id)
     if not skill: raise HTTPException(status_code=404, detail="Skill not found")
+    
+    with open(content_path, "r", encoding="utf-8") as f: content_str = f.read()
+    content_hash = hashlib.md5(content_str.encode("utf-8")).hexdigest()
+
     catalog_path = os.path.join("data", "marketplace", "catalog.json")
     upload_dir = os.path.join("data", "marketplace", "uploads")
     os.makedirs(upload_dir, exist_ok=True)
@@ -1049,12 +1055,28 @@ async def upload_skill_to_marketplace(skill_id: str):
               with open(catalog_path, "r", encoding="utf-8") as f: catalog = json.load(f)
          else: catalog = []
     except Exception: catalog = []
-    item_id = str(uuid.uuid4())
+    
+    # Deduplicate: Check if already exists in catalog
+    existing_item = next((i for i in catalog if i.get("type") == "skill" and i.get("filename") == f"{skill_id}.md"), None)
+    
+    item_id = existing_item["id"] if existing_item else str(uuid.uuid4())
     shutil.copy(content_path, os.path.join(upload_dir, f"{item_id}.md"))
-    catalog.append({
-         "id": item_id, "name": skill.get("name", skill_id), "description": skill.get("description", ""),
-         "type": "skill", "filename": f"{skill_id}.md", "save_filename": f"{item_id}.md", "uploaded_at": datetime.now().isoformat(), "uploader_id": "local_user"
-    })
+    
+    if existing_item:
+         # Update existing
+         existing_item["name"] = skill.get("name", skill_id)
+         existing_item["description"] = skill.get("description", "")
+         existing_item["content_hash"] = content_hash
+         existing_item["uploaded_at"] = datetime.now().isoformat()
+    else:
+         # Append new
+         catalog.append({
+              "id": item_id, "name": skill.get("name", skill_id), "description": skill.get("description", ""),
+              "type": "skill", "filename": f"{skill_id}.md", "save_filename": f"{item_id}.md", 
+              "uploaded_at": datetime.now().isoformat(), "uploader_id": "local_user",
+              "content_hash": content_hash
+         })
+         
     with open(catalog_path, "w", encoding="utf-8") as f: json.dump(catalog, f, indent=4)
     return JSONResponse(content={"status": "success", "message": "Uploaded to Marketplace", "id": item_id})
 
@@ -1069,6 +1091,7 @@ async def get_settings(request: Request, settings_man: SettingsManager = Depends
     
     skills = {}
     skills_path = os.path.join("modules", "skills", "data", "skills_metadata.json")
+    import hashlib
     if os.path.exists(skills_path):
          try:
              with open(skills_path, "r", encoding="utf-8") as f:
@@ -1077,15 +1100,25 @@ async def get_settings(request: Request, settings_man: SettingsManager = Depends
                  content_path = os.path.join("modules", "skills", "data", f"{skill_id}.md")
                  if os.path.exists(content_path):
                       with open(content_path, "r", encoding="utf-8") as f_content:
-                          skill_data["instructions"] = f_content.read()
+                          instructions = f_content.read()
+                          skill_data["instructions"] = instructions
+                          skill_data["content_hash"] = hashlib.md5(instructions.encode("utf-8")).hexdigest()
          except Exception: pass
          
+    catalog = []
+    catalog_path = os.path.join("data", "marketplace", "catalog.json")
+    if os.path.exists(catalog_path):
+         try:
+              with open(catalog_path, "r", encoding="utf-8") as f: catalog = json.load(f)
+         except Exception: pass
+
     return templates.TemplateResponse(request, "settings.html", {
         "settings": settings_man.settings, "modules": module_manager.get_all_modules(),
         "system_time": datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S %Z"),
         "system_info": system_info,
         "hardware_id": get_hardware_id(),
-        "skills": skills
+        "skills": skills,
+        "marketplace_catalog": catalog
     })
 
 @router.get("/system-time", response_class=HTMLResponse)
