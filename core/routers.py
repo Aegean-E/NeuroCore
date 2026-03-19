@@ -7,7 +7,7 @@ import logging
 import time
 from datetime import datetime
 from fastapi import APIRouter, Request, Form, Depends, HTTPException, Response, BackgroundTasks, UploadFile, File
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, FileResponse
 from fastapi.templating import Jinja2Templates
 
 from core.settings import SettingsManager, settings
@@ -43,6 +43,16 @@ def format_reasoning_content(content):
 
 
 templates.env.filters["format_reasoning"] = format_reasoning_content
+
+def get_hardware_id():
+    import uuid
+    import hashlib
+    try:
+        node = uuid.getnode()
+        # Fallback handling might return random node, but getnode() is usually stable.
+        return hashlib.sha256(str(node).encode()).hexdigest()[:16].upper()
+    except Exception:
+        return "UNKNOWN"
 
 # Centralized definition of config keys that should be hidden from the generic JSON editor
 HIDDEN_CONFIG_KEYS = {
@@ -743,6 +753,193 @@ async def run_flow_node(flow_id: str, node_id: str, request: Request, background
 
 # --- Settings ---
 
+
+# --- Marketplace ---
+
+@router.get("/marketplace", response_class=HTMLResponse)
+async def get_marketplace(request: Request, settings_man: SettingsManager = Depends(get_settings_manager), module_manager: ModuleManager = Depends(get_module_manager)):
+    import os
+    # 1. Local inventory
+    modules = module_manager.get_all_modules()
+    tools = {}
+    tools_path = os.path.join("modules", "tools", "tools.json")
+    if os.path.exists(tools_path):
+         try:
+             with open(tools_path, "r", encoding="utf-8") as f:
+                 tools = json.load(f)
+         except Exception: pass
+
+    skills = {}
+    skills_path = os.path.join("modules", "skills", "data", "skills_metadata.json")
+    if os.path.exists(skills_path):
+         try:
+             with open(skills_path, "r", encoding="utf-8") as f:
+                 skills = json.load(f)
+         except Exception: pass
+
+    # 2. Community Catalog
+    catalog = []
+    catalog_path = os.path.join("data", "marketplace", "catalog.json")
+    if os.path.exists(catalog_path):
+         try:
+             with open(catalog_path, "r", encoding="utf-8") as f:
+                 catalog = json.load(f)
+         except Exception: pass
+
+    return templates.TemplateResponse(request, "marketplace.html", {
+        "request": request,
+        "modules": modules,
+        "tools": tools,
+        "skills": skills,
+        "catalog": catalog,
+        "active_module": "marketplace",
+        "settings": settings_man.settings,
+        "hardware_id": get_hardware_id()
+    })
+
+@router.post("/marketplace/upload")
+async def upload_marketplace_item(
+    name: str = Form(...),
+    description: str = Form(""),
+    type: str = Form(...), # 'module', 'tool', 'skill'
+    file: UploadFile = File(...),
+    image: UploadFile = File(None)
+):
+    import uuid
+    import shutil
+    import os
+    
+    upload_dir = os.path.join("data", "marketplace", "uploads")
+    os.makedirs(upload_dir, exist_ok=True)
+    
+    item_id = str(uuid.uuid4())
+    
+    # Save Main File
+    ext = os.path.splitext(file.filename)[1]
+    save_filename = f"{item_id}{ext}"
+    save_path = os.path.join(upload_dir, save_filename)
+    with open(save_path, "wb") as f:
+        shutil.copyfileobj(file.file, f)
+        
+    # Save Image Banner Optional
+    image_filename = None
+    if image and image.filename:
+        img_ext = os.path.splitext(image.filename)[1]
+        image_filename = f"{item_id}_banner{img_ext}"
+        img_save_path = os.path.join(upload_dir, image_filename)
+        with open(img_save_path, "wb") as f:
+             shutil.copyfileobj(image.file, f)
+        
+    catalog_path = os.path.join("data", "marketplace", "catalog.json")
+    catalog = []
+    if os.path.exists(catalog_path):
+         try:
+             with open(catalog_path, "r", encoding="utf-8") as f:
+                 catalog = json.load(f)
+         except Exception: pass
+             
+    entry = {
+        "id": item_id,
+        "name": name,
+        "description": description,
+        "type": type.capitalize(),
+        "filename": file.filename,
+        "save_filename": save_filename,
+        "image_filename": image_filename,
+        "uploader_id": get_hardware_id(),
+        "created_at": datetime.now().strftime("%Y-%m-%d %H:%M")
+    }
+    catalog.append(entry)
+    
+    with open(catalog_path, "w", encoding="utf-8") as f:
+        json.dump(catalog, f, indent=4)
+        
+    return RedirectResponse(url="/marketplace", status_code=303)
+
+@router.get("/marketplace/image/{item_id}")
+async def get_marketplace_image(item_id: str):
+    import os
+    catalog_path = os.path.join("data", "marketplace", "catalog.json")
+    if not os.path.exists(catalog_path):
+         raise HTTPException(status_code=404, detail="Catalog not found")
+        
+    try:
+         with open(catalog_path, "r", encoding="utf-8") as f:
+             catalog = json.load(f)
+    except Exception:
+         raise HTTPException(status_code=500, detail="Failed to read catalog")
+        
+    item = next((i for i in catalog if i["id"] == item_id), None)
+    if not item or not item.get("image_filename"):
+         raise HTTPException(status_code=404, detail="Image not configured")
+        
+    file_path = os.path.join("data", "marketplace", "uploads", item["image_filename"])
+    if not os.path.exists(file_path):
+         raise HTTPException(status_code=404, detail="Image missing on disk")
+        
+    return FileResponse(file_path)
+
+@router.get("/marketplace/download/{item_id}")
+async def download_marketplace_item(item_id: str):
+    import os
+    catalog_path = os.path.join("data", "marketplace", "catalog.json")
+    if not os.path.exists(catalog_path):
+         raise HTTPException(status_code=404, detail="Catalog not found")
+        
+    try:
+         with open(catalog_path, "r", encoding="utf-8") as f:
+             catalog = json.load(f)
+    except Exception:
+         raise HTTPException(status_code=500, detail="Failed to read catalog")
+        
+    item = next((i for i in catalog if i["id"] == item_id), None)
+    if not item:
+         raise HTTPException(status_code=404, detail="Item not found")
+        
+    file_path = os.path.join("data", "marketplace", "uploads", item["save_filename"])
+    if not os.path.exists(file_path):
+         raise HTTPException(status_code=404, detail="File missing on disk")
+        
+    return FileResponse(file_path, filename=item["filename"])
+
+@router.post("/marketplace/delete/{item_id}")
+async def delete_marketplace_item(item_id: str):
+    import os
+    catalog_path = os.path.join("data", "marketplace", "catalog.json")
+    if not os.path.exists(catalog_path):
+         raise HTTPException(status_code=404, detail="Catalog not found")
+        
+    try:
+         with open(catalog_path, "r", encoding="utf-8") as f:
+             catalog = json.load(f)
+    except Exception:
+         raise HTTPException(status_code=500, detail="Failed to read catalog")
+        
+    item = next((i for i in catalog if i["id"] == item_id), None)
+    if not item:
+         raise HTTPException(status_code=404, detail="Item not found")
+        
+    current_id = get_hardware_id()
+    if item.get("uploader_id") != current_id:
+         raise HTTPException(status_code=403, detail="You can only delete items that you uploaded")
+        
+    # Remove files
+    upload_dir = os.path.join("data", "marketplace", "uploads")
+    if item.get("save_filename"):
+         fpath = os.path.join(upload_dir, item["save_filename"])
+         if os.path.exists(fpath): os.remove(fpath)
+            
+    if item.get("image_filename"):
+         fpath = os.path.join(upload_dir, item["image_filename"])
+         if os.path.exists(fpath): os.remove(fpath)
+            
+    # Update Catalog
+    catalog = [i for i in catalog if i["id"] != item_id]
+    with open(catalog_path, "w", encoding="utf-8") as f:
+         json.dump(catalog, f, indent=4)
+         
+    return JSONResponse(content={"status": "success", "message": "Item deleted"})
+
 @router.get("/settings", response_class=HTMLResponse)
 async def get_settings(request: Request, settings_man: SettingsManager = Depends(get_settings_manager), module_manager: ModuleManager = Depends(get_module_manager)):
     system_info = {
@@ -753,7 +950,8 @@ async def get_settings(request: Request, settings_man: SettingsManager = Depends
     return templates.TemplateResponse(request, "settings.html", {
         "settings": settings_man.settings, "modules": module_manager.get_all_modules(),
         "system_time": datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S %Z"),
-        "system_info": system_info
+        "system_info": system_info,
+        "hardware_id": get_hardware_id()
     })
 
 @router.get("/system-time", response_class=HTMLResponse)

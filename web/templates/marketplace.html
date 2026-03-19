@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Marketplace - NeuroCore</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/htmx.org@2.0.2"></script>
+    <style>
+        .custom-scrollbar::-webkit-scrollbar { width: 4px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #4a5568; border-radius: 2px; }
+    </style>
+</head>
+<body class="bg-slate-900 text-slate-100 min-h-screen flex flex-col font-sans">
+    
+    {% include 'navbar.html' %}
+
+    <main class="flex-grow container mx-auto p-6 flex flex-col gap-6 h-[calc(100vh-80px)] overflow-hidden">
+        
+        <!-- Header -->
+        <div class="flex justify-between items-center bg-slate-950/50 rounded-2xl border border-slate-800 p-6 shadow-xl">
+            <div>
+                <h1 class="text-3xl font-bold bg-gradient-to-r from-blue-400 to-indigo-500 bg-clip-text text-transparent">Marketplace</h1>
+                <p class="text-sm text-slate-400 mt-1">Discover, download, and share modules, tools, and skills.</p>
+            </div>
+            <button onclick="openUploadModal()" class="bg-blue-600 hover:bg-blue-500 text-white px-6 py-2.5 rounded-xl font-semibold text-sm transition-all shadow-lg shadow-blue-500/20 flex items-center space-x-2">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"></path></svg>
+                <span>Upload Item</span>
+            </button>
+        </div>
+
+        <!-- Navigation Tabs -->
+        <div class="flex space-x-2 bg-slate-950/40 p-1.5 rounded-xl border border-slate-800 self-start">
+            <button onclick="switchTab('community')" id="tab-community" class="tab-btn px-4 py-2 rounded-lg bg-blue-600 text-white text-sm font-semibold transition-all">Community</button>
+            <button onclick="switchTab('modules')" id="tab-modules" class="tab-btn px-4 py-2 rounded-lg text-slate-400 hover:bg-slate-800 hover:text-white text-sm font-medium transition-all">Modules</button>
+            <button onclick="switchTab('tools')" id="tab-tools" class="tab-btn px-4 py-2 rounded-lg text-slate-400 hover:bg-slate-800 hover:text-white text-sm font-medium transition-all">Tools</button>
+            <button onclick="switchTab('skills')" id="tab-skills" class="tab-btn px-4 py-2 rounded-lg text-slate-400 hover:bg-slate-800 hover:text-white text-sm font-medium transition-all">Skills</button>
+        </div>
+
+        <!-- Content Area -->
+        <div class="flex-grow overflow-y-auto custom-scrollbar pb-6">
+
+            <!-- Community Tab -->
+            <div id="view-community" class="view-content grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {% if catalog %}
+                    {% for item in catalog %}
+                    <div class="bg-slate-950/50 border border-slate-800 rounded-2xl p-6 flex flex-col justify-between hover:border-slate-700 hover:bg-slate-950/80 transition-all group shadow-lg overflow-hidden relative marketplace-card">
+                        {% if item.image_filename %}
+                        <div class="h-40 -mt-6 -mx-6 mb-4 overflow-hidden border-b border-slate-800/80">
+                            <img src="/marketplace/image/{{ item.id }}" class="w-full h-full object-cover group-hover:scale-105 transition-all duration-300" alt="{{ item.name }}">
+                        </div>
+                        {% endif %}
+                        <div>
+                            <div class="flex justify-between items-start mb-3">
+                                <span class="px-2.5 py-1 rounded-md text-xs font-bold uppercase tracking-wider bg-indigo-900/50 text-indigo-300 border border-indigo-800/50">{{ item.type }}</span>
+                                <span class="text-xs text-slate-500">{{ item.created_at }}</span>
+                            </div>
+                            <h3 class="text-lg font-bold text-white group-hover:text-blue-400 transition-colors">{{ item.name }}</h3>
+                            <p class="text-sm text-slate-400 mt-2 line-clamp-2 h-10">{{ item.description }}</p>
+                        </div>
+                        <div class="mt-6 pt-4 border-t border-slate-800/50 flex items-center justify-between">
+                            <span class="text-xs text-slate-500 truncate max-w-[150px]" title="{{ item.filename }}">📄 {{ item.filename }}</span>
+                            <div class="flex items-center space-x-2">
+                                {% if item.uploader_id == hardware_id %}
+                                <button hx-post="/marketplace/delete/{{ item.id }}" hx-confirm="Are you sure you want to delete this upload from the Community lists?" hx-swap="outerHTML" hx-target="closest .marketplace-card" class="bg-red-950/30 hover:bg-red-950/50 text-red-500 hover:text-red-400 px-3 py-1.5 rounded-xl text-xs font-bold border border-red-800/20 transition-all">
+                                    Delete
+                                </button>
+                                {% endif %}
+                                <a href="/marketplace/download/{{ item.id }}" class="bg-slate-800 hover:bg-slate-700 text-white px-4 py-1.5 rounded-lg text-xs font-bold border border-slate-700 transition-all flex items-center space-x-1">
+                                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
+                                    <span>Download</span>
+                                </a>
+                            </div>
+                        </div>
+                    </div>
+                    {% endfor %}
+                {% else %}
+                    <div class="col-span-full flex flex-col items-center justify-center py-20 opacity-40">
+                        <svg class="w-16 h-16 text-slate-600 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"></path></svg>
+                        <p class="text-slate-400 font-medium">No community items sharing yet.</p>
+                    </div>
+                {% endif %}
+            </div>
+
+            <!-- Modules Tab (Local) -->
+            <div id="view-modules" class="view-content hidden grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {% for module in modules %}
+                <div class="bg-slate-950/30 border border-slate-800/80 rounded-2xl p-6 flex flex-col justify-between hover:border-slate-700 transition-all shadow-md">
+                    <div>
+                        <div class="flex justify-between items-center mb-3">
+                            <span class="px-2 py-0.5 rounded-md text-xs font-bold uppercase {{ 'bg-emerald-900/40 text-emerald-400 border border-emerald-800/30' if module.enabled else 'bg-slate-800 text-slate-400' }}">
+                                {{ 'Active' if module.enabled else 'Disabled' }}
+                            </span>
+                        </div>
+                        <h3 class="text-lg font-bold text-white">{{ module.name }}</h3>
+                        <p class="text-xs text-slate-400 mt-1">ID: <code class="bg-slate-800 px-1 py-0.5 rounded text-blue-300">{{ module.id }}</code></p>
+                        <p class="text-sm text-slate-400 mt-3 line-clamp-2">{{ module.description }}</p>
+                    </div>
+                    <div class="mt-6 pt-4 border-t border-slate-800/40">
+                        <a href="/settings" class="text-xs text-blue-400 hover:text-blue-300 font-semibold flex items-center justify-end">Configure Settings →</a>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+
+            <!-- Tools Tab (Local) -->
+            <div id="view-tools" class="view-content hidden grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {% for t_name, t_data in tools.items() %}
+                <div class="bg-slate-950/30 border border-slate-800/80 rounded-2xl p-6 flex flex-col justify-between hover:border-slate-700 transition-all shadow-md">
+                    <div>
+                        <div class="flex justify-between items-center mb-3">
+                             <span class="px-2 py-0.5 rounded-md text-xs font-bold uppercase {{ 'bg-blue-900/40 text-blue-400 border border-blue-800/30' if t_data.enabled else 'bg-slate-800 text-slate-400' }}">
+                                {{ 'Enabled' if t_data.enabled else 'Disabled' }}
+                             </span>
+                        </div>
+                        <h3 class="text-lg font-bold text-white">{{ t_name }}</h3>
+                        <p class="text-sm text-slate-400 mt-2 line-clamp-3">{{ t_data.definition.function.description }}</p>
+                    </div>
+                    <div class="mt-6 pt-4 border-t border-slate-800/40">
+                         <a href="/settings" class="text-xs text-blue-400 hover:text-blue-300 font-semibold flex items-center justify-end">Manage Tools →</a>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+
+            <!-- Skills Tab (Local) -->
+            <div id="view-skills" class="view-content hidden grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {% for s_id, s_data in skills.items() %}
+                <div class="bg-slate-950/30 border border-slate-800/80 rounded-2xl p-6 flex flex-col justify-between hover:border-slate-700 transition-all shadow-md">
+                    <div>
+                        <div class="flex justify-between items-center mb-3">
+                             <span class="px-2 py-0.5 rounded-md text-xs font-bold bg-slate-800 text-slate-300 border border-slate-700">{{ s_data.category }}</span>
+                        </div>
+                        <h3 class="text-lg font-bold text-white">{{ s_data.name }}</h3>
+                        <p class="text-sm text-slate-400 mt-2 line-clamp-3">{{ s_data.description }}</p>
+                        {% if s_data.tags %}
+                        <div class="flex flex-wrap gap-1 mt-3">
+                            {% for tag in s_data.tags %}
+                            <span class="text-xs bg-slate-800/50 px-1.5 py-0.5 rounded border border-slate-700/50 text-slate-500">#{{ tag }}</span>
+                            {% endfor %}
+                        </div>
+                        {% endif %}
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+
+        </div>
+
+    </main>
+
+    <!-- Upload Modal -->
+    <div id="upload-modal" class="fixed inset-0 z-50 flex items-center justify-center hidden">
+        <!-- Backdrop -->
+        <div class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm transition-opacity" onclick="closeUploadModal()"></div>
+        
+        <!-- Panel -->
+        <div class="relative transform overflow-hidden rounded-2xl bg-slate-900 border border-slate-800 text-left shadow-2xl transition-all sm:w-full sm:max-w-md p-6 max-h-[90vh] flex flex-col">
+            <h3 class="text-lg font-bold text-white mb-4">Upload Marketplace Item</h3>
+            
+            <form action="/marketplace/upload" method="POST" enctype="multipart/form-data" class="space-y-4 flex-grow overflow-y-auto custom-scrollbar pr-2">
+                <div>
+                    <label class="block text-xs font-bold text-slate-400 uppercase tracking-wide mb-1">Item Name</label>
+                    <input type="text" name="name" required placeholder="e.g., advanced_calculator" class="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all">
+                </div>
+                <div>
+                    <label class="block text-xs font-bold text-slate-400 uppercase tracking-wide mb-1">Description</label>
+                    <textarea name="description" rows="3" placeholder="What does this do?" class="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"></textarea>
+                </div>
+                <div>
+                    <label class="block text-xs font-bold text-slate-400 uppercase tracking-wide mb-1">Category</label>
+                    <select name="type" required class="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all">
+                        <option value="module">Module</option>
+                        <option value="tool">Tool</option>
+                        <option value="skill">Skill</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-xs font-bold text-slate-400 uppercase tracking-wide mb-1">File</label>
+                    <input type="file" name="file" required class="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2 text-sm text-slate-400 file:mr-4 file:py-1 file:px-3 file:rounded-md file:border-0 file:text-xs file:font-semibold file:bg-blue-900/30 file:text-blue-400 hover:file:bg-blue-900/50">
+                    <p class="text-xs text-slate-500 mt-1">Upload `.zip`, `.py`, or `.md` configs.</p>
+                </div>
+                <div>
+                    <label class="block text-xs font-bold text-slate-400 uppercase tracking-wide mb-1">Banner Image (Optional)</label>
+                    <input type="file" name="image" accept="image/*" class="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2 text-sm text-slate-400 file:mr-4 file:py-1 file:px-3 file:rounded-md file:border-0 file:text-xs file:font-semibold file:bg-blue-900/30 file:text-blue-400 hover:file:bg-blue-900/50">
+                    <p class="text-xs text-slate-500 mt-1">Will be displayed as card cover header.</p>
+                </div>
+
+                <div class="mt-6 flex justify-end space-x-2 pt-4 border-t border-slate-800">
+                    <button type="button" onclick="closeUploadModal()" class="px-4 py-2 text-sm font-semibold text-slate-400 hover:bg-slate-800 rounded-xl transition-all">Cancel</button>
+                    <button type="submit" class="bg-blue-600 hover:bg-blue-500 text-white px-5 py-2 rounded-xl text-sm font-bold shadow-lg shadow-blue-500/10 transition-all">Upload</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        function switchTab(viewId) {
+            // Toggles views
+            document.querySelectorAll('.view-content').forEach(el => el.classList.add('hidden'));
+            document.getElementById('view-' + viewId).classList.remove('hidden');
+
+            // Toggles button styles
+            document.querySelectorAll('.tab-btn').forEach(el => {
+                el.classList.remove('bg-blue-600', 'text-white');
+                el.classList.add('text-slate-400', 'hover:bg-slate-800', 'hover:text-white', 'font-medium');
+            });
+            const activeBtn = document.getElementById('tab-' + viewId);
+            activeBtn.classList.add('bg-blue-600', 'text-white');
+            activeBtn.classList.remove('text-slate-400', 'hover:bg-slate-800', 'hover:text-white', 'font-medium');
+        }
+
+        function openUploadModal() {
+            document.getElementById('upload-modal').classList.remove('hidden');
+        }
+
+        function closeUploadModal() {
+            document.getElementById('upload-modal').classList.add('hidden');
+        }
+    </script>
+
+</body>
+</html>
