@@ -309,6 +309,7 @@ async def send_message(
                 runner = FlowRunner(flow_id=active_flow['id'])
                 initial_data = {"messages": active_session["history"], "_input_source": "chat"}
                 flow_result = await runner.run(initial_data, stream_queue=queue)
+                logger.info(f"[Chat] flow_result: {flow_result}")
                 
                 ai_response = flow_result.get("content", "")
                 if not ai_response:
@@ -342,6 +343,7 @@ async def send_message(
                     or (flow_result.get("response") or {}).get("usage")
                 )
                 if isinstance(usage, dict) and usage.get("total_tokens"):
+                    logger.info(f"[Chat] Adding tokens to session {session_id}: {usage}")
                     await asyncio.to_thread(session_manager.add_tokens, session_id, usage)
                     await queue.put({"type": "usage", "content": usage})
                     

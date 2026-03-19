@@ -627,6 +627,15 @@ class FlowRunner:
         
         async def run_impl():
             node_outputs = {}
+            total_usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+
+            def _accumulate_usage(item_output):
+                if isinstance(item_output, dict) and "usage" in item_output:
+                    u = item_output["usage"]
+                    if isinstance(u, dict):
+                        total_usage["prompt_tokens"] += u.get("prompt_tokens", 0)
+                        total_usage["completion_tokens"] += u.get("completion_tokens", 0)
+                        total_usage["total_tokens"] += u.get("total_tokens", 0)
             
             # Determine start nodes based on input source
             input_source = initial_input.get("_input_source") if isinstance(initial_input, dict) else None
@@ -726,6 +735,7 @@ class FlowRunner:
                                 break
 
                             node_outputs[bridge_node_id] = result
+                            _accumulate_usage(result)
                             if isinstance(result, dict):
                                 bridge_input = {**bridge_input, **result}
 
@@ -760,6 +770,7 @@ class FlowRunner:
                                     continue
 
                                 node_outputs[bridge_node_id] = result
+                                _accumulate_usage(result)
                                 if isinstance(result, dict):
                                     level_output.update(result)
 
@@ -900,6 +911,7 @@ class FlowRunner:
                             output.pop("_strip_messages", None)
 
                     node_outputs[node_id] = output
+                    _accumulate_usage(output)
 
                     if settings.get("debug_mode"):
                         debug_logger.log(self.flow_id, node_id, node_meta['name'], "end", {"output": output})
@@ -977,6 +989,8 @@ class FlowRunner:
                             )
                         except Exception:
                             pass
+                    if isinstance(out, dict) and total_usage.get("total_tokens", 0) > 0:
+                        out["usage"] = total_usage
                     return out
             
             # Save episode state if tracking (no successful output)
@@ -990,6 +1004,8 @@ class FlowRunner:
                 except Exception:
                     pass
             
+            if total_usage.get("total_tokens", 0) > 0:
+                return {"usage": total_usage}
             return {}
         
         # Execute with optional timeout

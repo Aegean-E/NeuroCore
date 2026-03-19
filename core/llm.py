@@ -180,7 +180,8 @@ class LLMBridge:
             "messages": messages,
             "temperature": final_temperature,
             "max_tokens": final_max_tokens,
-            "stream": True  # Enable streaming
+            "stream": True,
+            "stream_options": {"include_usage": True}
         }
 
         if tools:

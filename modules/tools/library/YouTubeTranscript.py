@@ -19,8 +19,8 @@ try:
              result = "Error: Could not extract video ID from URL."
         else:
             try:
-                transcript_list = YouTubeTranscriptApi.get_transcript(video_id)
-                full_text = " ".join([t['text'] for t in transcript_list])
+                transcript_list = YouTubeTranscriptApi().fetch(video_id)
+                full_text = " ".join([t.text for t in transcript_list])
                 
                 # Truncate if too long to prevent context overflow
                 max_length = 8000  # Characters
