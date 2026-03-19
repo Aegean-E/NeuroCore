@@ -48,7 +48,19 @@ def get_hardware_id():
     import uuid
     import hashlib
     import subprocess
-    import platform
+    import os
+
+    id_file = os.path.join("data", "hardware_id.txt")
+
+    # Return persisted ID so hardware changes never alter it
+    if os.path.exists(id_file):
+        try:
+            with open(id_file, "r") as f:
+                persisted = f.read().strip()
+            if persisted and len(persisted) >= 16:
+                return persisted
+        except Exception:
+            pass
 
     def get_cmd(cmd):
         try: return subprocess.check_output(cmd, shell=True, stderr=subprocess.DEVNULL).decode().strip()
@@ -70,13 +82,23 @@ def get_hardware_id():
         if len(useful) < 10:
             raise ValueError("Specs too short")
 
-        return hashlib.sha256(combined.encode()).hexdigest()[:24].upper()
+        hardware_id = hashlib.sha256(combined.encode()).hexdigest()[:24].upper()
     except Exception:
         try:
             node = uuid.getnode()
-            return hashlib.sha256(str(node).encode()).hexdigest()[:24].upper()
+            hardware_id = hashlib.sha256(str(node).encode()).hexdigest()[:24].upper()
         except Exception:
-            return "UNKNOWN"
+            hardware_id = "UNKNOWN"
+
+    # Persist so future calls never recompute
+    try:
+        os.makedirs("data", exist_ok=True)
+        with open(id_file, "w") as f:
+            f.write(hardware_id)
+    except Exception:
+        pass
+
+    return hardware_id
 
 # Centralized definition of config keys that should be hidden from the generic JSON editor
 HIDDEN_CONFIG_KEYS = {
@@ -90,6 +112,12 @@ HIDDEN_CONFIG_KEYS = {
         'discord_bot_token', 'discord_channel_id',
         'signal_api_url', 'signal_phone_number',
         'whatsapp_api_url', 'whatsapp_api_key', 'whatsapp_instance', 'whatsapp_phone_number',
+    ],
+    'email_bridge': [
+        'imap_host', 'imap_port', 'imap_use_ssl', 'imap_username', 'imap_password',
+        'imap_folder', 'imap_filter_sender', 'poll_interval', 'mark_as_read',
+        'smtp_host', 'smtp_port', 'smtp_use_tls', 'smtp_username', 'smtp_password',
+        'smtp_from_address', 'reply_to_address',
     ],
 }
 
@@ -480,6 +508,29 @@ async def save_module_config(request: Request, module_id: str, module_manager: M
                     new_config['compact_keep_last'] = int(form_data["compact_keep_last"])
                 except ValueError:
                     pass
+
+        elif module_id == "email_bridge":
+            current_module = module_manager.modules.get(module_id)
+            current_config = current_module.get('config', {}) if current_module else {}
+            new_config = current_config.copy()
+            section = form_data.get('_section', '')
+
+            for str_key in ('imap_host', 'imap_username', 'imap_password', 'imap_folder',
+                            'imap_filter_sender', 'smtp_host', 'smtp_username', 'smtp_password',
+                            'smtp_from_address', 'reply_to_address'):
+                if str_key in form_data:
+                    new_config[str_key] = form_data[str_key]
+            for int_key in ('imap_port', 'smtp_port', 'poll_interval'):
+                if int_key in form_data:
+                    try: new_config[int_key] = int(form_data[int_key])
+                    except ValueError: pass
+            # Booleans: only update for the section that was submitted
+            if section in ('imap', ''):
+                new_config['imap_use_ssl'] = form_data.get('imap_use_ssl') == 'true'
+                new_config['mark_as_read'] = form_data.get('mark_as_read') == 'true'
+            if section in ('smtp', ''):
+                new_config['smtp_use_tls'] = form_data.get('smtp_use_tls') == 'true'
+
         else:
 
             # Standard JSON config

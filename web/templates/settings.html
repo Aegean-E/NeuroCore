@@ -47,6 +47,11 @@
                                 <div class="text-xs text-slate-500 uppercase font-bold mb-1">System Time</div>
                                 <div class="text-sm text-slate-300 font-mono" hx-get="/system-time" hx-trigger="every 1s" hx-swap="innerHTML">{{ system_time }}</div>
                             </div>
+                            <div class="bg-slate-900 border border-slate-800 rounded-xl p-4">
+                                <div class="text-xs text-slate-500 uppercase font-bold mb-1">Instance ID</div>
+                                <div class="text-sm text-blue-400 font-mono font-bold select-all">{{ hardware_id }}</div>
+                                <p class="text-xs text-slate-600 mt-1">Your unique hardware-derived identifier used in the Marketplace. Once generated it never changes.</p>
+                            </div>
                             <div class="grid grid-cols-2 gap-4">
                                 <div class="bg-slate-900 border border-slate-800 rounded-xl p-4">
                                     <div class="text-xs text-slate-500 uppercase font-bold mb-1">Environment</div>
@@ -255,10 +260,6 @@
                                 <div class="p-6 border-b border-slate-800 flex justify-between items-center">
                                     <h3 id="modal-skill-title" class="text-lg font-bold text-white"></h3>
                                     <div class="flex items-center space-x-2">
-                                        <button id="modal-upload-btn" onclick="uploadToMarketplace()" class="bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold px-3 py-1.5 rounded-lg transition-all shadow-lg shadow-blue-500/20 flex items-center space-x-1">
-                                            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"></path></svg>
-                                            <span>Upload to Marketplace</span>
-                                        </button>
                                         <button id="modal-edit-btn" onclick="startEdit()" class="bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold px-3 py-1.5 rounded-lg border border-slate-700 transition-all">Edit</button>
                                         <button id="modal-save-btn" onclick="saveEdit()" class="hidden bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold px-3 py-1.5 rounded-lg transition-all shadow-lg shadow-indigo-500/20">Save</button>
                                         <button id="modal-cancel-edit-btn" onclick="cancelEdit()" class="hidden bg-slate-800 hover:bg-slate-700 text-slate-400 text-xs font-bold px-3 py-1.5 rounded-lg border border-slate-700 transition-all">Cancel</button>
@@ -428,11 +429,6 @@
                             });
                         }
                         
-                        function uploadToMarketplace() {
-                             // Kept for backward compatibility if needed, but we use OnCard now
-                             if (activeSkillId) uploadToMarketplaceOnCard(activeSkillId);
-                        }
-
                         function openCreateSkillModal() {
                             document.getElementById('create-skill-modal').classList.remove('hidden');
                         }
@@ -443,11 +439,31 @@
 
                         document.getElementById('create-skill-form')?.addEventListener('submit', function(e) {
                             e.preventDefault();
-                            const formData = new FormData(this);
-                            htmx.ajax('POST', '/settings/skills/create', { values: Object.fromEntries(formData.entries()) }).then(() => {
-                                closeCreateSkillModal();
-                                location.reload();
-                            }).catch(() => alert('Failed to create skill'));
+                            const submitBtn = this.querySelector('[type="submit"]');
+                            const originalText = submitBtn.textContent;
+                            submitBtn.textContent = 'Creating...';
+                            submitBtn.disabled = true;
+
+                            fetch('/settings/skills/create', {
+                                method: 'POST',
+                                body: new FormData(this)
+                            })
+                            .then(r => r.json())
+                            .then(data => {
+                                submitBtn.textContent = originalText;
+                                submitBtn.disabled = false;
+                                if (data.status === 'success') {
+                                    closeCreateSkillModal();
+                                    location.reload();
+                                } else {
+                                    showToast('Failed to create skill: ' + (data.detail || data.message || 'Unknown error'), 'error');
+                                }
+                            })
+                            .catch(() => {
+                                submitBtn.textContent = originalText;
+                                submitBtn.disabled = false;
+                                showToast('Failed to create skill', 'error');
+                            });
                         });
 
                         function confirmDeleteSkill(id, name) {
@@ -463,14 +479,28 @@
 
                         document.getElementById('confirm-delete-btn').addEventListener('click', function() {
                             if (!activeDeleteId) return;
-                            
-                            htmx.ajax('POST', '/settings/skills/delete/' + activeDeleteId, {
-                                target: '#skill-card-' + activeDeleteId,
-                                swap: 'outerHTML'
-                            }).then(() => {
-                                closeDeleteModal();
-                            }).catch(() => {
-                                alert('Failed to delete skill');
+                            const idToDelete = activeDeleteId;
+                            const btn = this;
+                            btn.disabled = true;
+                            btn.textContent = 'Deleting...';
+
+                            fetch('/settings/skills/delete/' + idToDelete, { method: 'POST' })
+                            .then(r => r.json())
+                            .then(data => {
+                                btn.disabled = false;
+                                btn.textContent = 'Delete';
+                                if (data.status === 'success') {
+                                    const card = document.getElementById('skill-card-' + idToDelete);
+                                    if (card) card.remove();
+                                    closeDeleteModal();
+                                } else {
+                                    showToast('Failed to delete: ' + (data.detail || data.message || 'Unknown error'), 'error');
+                                }
+                            })
+                            .catch(() => {
+                                btn.disabled = false;
+                                btn.textContent = 'Delete';
+                                showToast('Failed to delete skill', 'error');
                             });
                         });
                         </script>
@@ -493,10 +523,6 @@
                         </div>
                         
                         <div class="space-y-6">
-                            <div class="bg-slate-950/50 border border-slate-800/80 rounded-xl p-4">
-                                <div class="text-xs text-slate-500 uppercase font-bold mb-1">Instance ID</div>
-                                <div class="text-sm text-blue-400 font-mono font-bold">{{ hardware_id }}</div>
-                            </div>
                             <div class="bg-slate-900 border border-slate-800 rounded-xl p-6">
                                 <h3 class="text-lg font-bold text-white mb-4">Loop Protection</h3>
                                 <div>

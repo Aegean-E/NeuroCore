@@ -325,29 +325,28 @@
             
             <div class="space-y-6">
                 <div class="bg-slate-950/50 rounded-xl border border-slate-800 p-6">
-                    <h4 class="text-sm font-semibold text-slate-300 mb-4 uppercase tracking-wider">System Instruction</h4>
-                    <textarea name="system_prompt" rows="8" 
+                    <h4 class="text-sm font-semibold text-slate-300 mb-1 uppercase tracking-wider">Active System Instruction</h4>
+                    <p class="text-xs text-slate-500 mb-3">This is the <strong class="text-slate-400">live prompt</strong> currently injected into every conversation. Edit it here to change the AI's persona and behavior.</p>
+                    <textarea name="system_prompt" rows="8"
                               class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all custom-scrollbar">{{ module.config.system_prompt }}</textarea>
-                    <p class="text-xs text-slate-500 mt-3">
-                        The system prompt defines the AI's persona and behavior. This is injected into every conversation.
-                        <span class="text-amber-400">⚠️ Changes affect all conversations using this module.</span>
-                    </p>
+                    <p class="text-xs text-amber-400/80 mt-2">⚠️ Changes take effect immediately and affect all future conversations using this module.</p>
                 </div>
 
                 <div class="bg-slate-950/50 rounded-xl border border-slate-800 p-6">
-                    <h4 class="text-sm font-semibold text-slate-300 mb-4 uppercase tracking-wider">Enabled Capabilities</h4>
+                    <h4 class="text-sm font-semibold text-slate-300 mb-1 uppercase tracking-wider">Capability Restrictions</h4>
+                    <p class="text-xs text-slate-500 mb-4">Optionally restrict which tools and skills are available. Leave both fields empty to allow everything.</p>
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div>
-                            <label class="block text-sm font-medium text-slate-400 mb-2">Enabled Tools</label>
-                            <input type="text" name="enabled_tools" value="{{ module.config.enabled_tools | join(', ') if module.config.enabled_tools else '' }}" placeholder="tool1, tool2, tool3"
+                            <label class="block text-sm font-medium text-slate-400 mb-2">Restrict to Tools (optional)</label>
+                            <input type="text" name="enabled_tools" value="{{ module.config.enabled_tools | join(', ') if module.config.enabled_tools else '' }}" placeholder="Leave empty to allow all tools"
                                    class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all">
-                            <p class="text-xs text-slate-500 mt-2">Comma-separated list of tool names to enable for this system prompt. Leave empty to allow all tools.</p>
+                            <p class="text-xs text-slate-500 mt-2">Enter tool names separated by commas, e.g. <code class="text-slate-400">web_search, calculator</code>. Empty = no restriction.</p>
                         </div>
                         <div>
-                            <label class="block text-sm font-medium text-slate-400 mb-2">Enabled Skills</label>
-                            <input type="text" name="enabled_skills" value="{{ module.config.enabled_skills | join(', ') if module.config.enabled_skills else '' }}" placeholder="skill1, skill2"
+                            <label class="block text-sm font-medium text-slate-400 mb-2">Inject Skills (optional)</label>
+                            <input type="text" name="enabled_skills" value="{{ module.config.enabled_skills | join(', ') if module.config.enabled_skills else '' }}" placeholder="Leave empty to disable skill injection"
                                    class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all">
-                            <p class="text-xs text-slate-500 mt-2">Comma-separated list of skill IDs to inject into the system prompt. Leave empty to disable skills.</p>
+                            <p class="text-xs text-slate-500 mt-2">Enter skill IDs separated by commas, e.g. <code class="text-slate-400">code_reviewer, summarizer</code>. Empty = no skills injected.</p>
                         </div>
                     </div>
                 </div>
@@ -385,7 +384,191 @@
     </div>
     {% endif %}
 
-    {% if module.config and has_visible_config and module.id != 'agent_loop' and module.id != 'reflection' and module.id != 'planner' and module.id != 'system_prompt' and module.id != 'skills' %}
+    {% if module.id == 'email_bridge' and module.enabled %}
+    <div class="bg-slate-900 rounded-xl border border-slate-800 p-6 mt-6">
+        <h3 class="text-base font-semibold text-white mb-4">Email Bridge Settings</h3>
+
+        <!-- Tab bar -->
+        <div class="flex space-x-1 mb-6 bg-slate-950 rounded-lg p-1">
+            <button type="button" onclick="ebShowTab('imap')" id="eb-tab-imap"
+                    class="flex-1 py-2 px-3 rounded-md text-sm font-medium transition-colors bg-slate-700 text-white">
+                IMAP (Receive)
+            </button>
+            <button type="button" onclick="ebShowTab('smtp')" id="eb-tab-smtp"
+                    class="flex-1 py-2 px-3 rounded-md text-sm font-medium transition-colors text-slate-400 hover:text-white">
+                SMTP (Send)
+            </button>
+        </div>
+
+        <!-- IMAP tab -->
+        <div id="eb-panel-imap">
+            <form hx-post="/modules/{{ module.id }}/config"
+                  hx-swap="none"
+                  hx-on::after-request="const btn = this.querySelector('button[type=submit]'); const orig = btn.innerText; btn.innerText = 'Saved!'; btn.classList.remove('bg-blue-600', 'hover:bg-blue-500'); btn.classList.add('bg-emerald-600', 'hover:bg-emerald-500'); setTimeout(() => { btn.innerText = orig; btn.classList.add('bg-blue-600', 'hover:bg-blue-500'); btn.classList.remove('bg-emerald-600', 'hover:bg-emerald-500'); }, 2000);">
+                <input type="hidden" name="_section" value="imap">
+                <div class="space-y-4">
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <div class="md:col-span-2">
+                            <label class="block text-sm font-medium text-slate-400 mb-2">IMAP Server</label>
+                            <input type="text" name="imap_host" value="{{ module.config.imap_host }}" placeholder="imap.gmail.com"
+                                   class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-slate-400 mb-2">Port</label>
+                            <input type="number" name="imap_port" value="{{ module.config.imap_port }}" placeholder="993"
+                                   class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all">
+                        </div>
+                    </div>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-sm font-medium text-slate-400 mb-2">Email Address</label>
+                            <input type="text" name="imap_username" value="{{ module.config.imap_username }}" placeholder="you@gmail.com"
+                                   class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-slate-400 mb-2">Password / App Password</label>
+                            <input type="password" name="imap_password" value="{{ module.config.imap_password }}"
+                                   class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all">
+                            <p class="text-xs text-slate-500 mt-1">For Gmail, use an App Password (not your account password).</p>
+                        </div>
+                    </div>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-sm font-medium text-slate-400 mb-2">Folder / Mailbox</label>
+                            <input type="text" name="imap_folder" value="{{ module.config.imap_folder }}" placeholder="INBOX"
+                                   class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-slate-400 mb-2">Filter by Sender (optional)</label>
+                            <input type="text" name="imap_filter_sender" value="{{ module.config.imap_filter_sender }}" placeholder="boss@company.com"
+                                   class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all">
+                            <p class="text-xs text-slate-500 mt-1">Only process emails from this address. Leave empty to accept all.</p>
+                        </div>
+                    </div>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-sm font-medium text-slate-400 mb-2">Poll Interval (seconds)</label>
+                            <input type="number" name="poll_interval" value="{{ module.config.poll_interval }}" min="10" placeholder="60"
+                                   class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all">
+                            <p class="text-xs text-slate-500 mt-1">How often to check for new emails. Default: 60 seconds.</p>
+                        </div>
+                    </div>
+                    <div class="flex flex-col sm:flex-row gap-4">
+                        <label class="flex items-center space-x-3 cursor-pointer">
+                            <input type="checkbox" name="imap_use_ssl" value="true" {% if module.config.imap_use_ssl %}checked{% endif %}
+                                   class="w-5 h-5 rounded border-slate-700 bg-slate-950 text-blue-600 focus:ring-blue-500 focus:ring-offset-slate-900">
+                            <div>
+                                <span class="text-sm font-medium text-slate-300">Use SSL/TLS</span>
+                                <p class="text-xs text-slate-500">Enable for port 993. Disable for port 143 with STARTTLS.</p>
+                            </div>
+                        </label>
+                        <label class="flex items-center space-x-3 cursor-pointer">
+                            <input type="checkbox" name="mark_as_read" value="true" {% if module.config.mark_as_read %}checked{% endif %}
+                                   class="w-5 h-5 rounded border-slate-700 bg-slate-950 text-blue-600 focus:ring-blue-500 focus:ring-offset-slate-900">
+                            <div>
+                                <span class="text-sm font-medium text-slate-300">Mark as Read after processing</span>
+                                <p class="text-xs text-slate-500">Prevents the same email from being processed again.</p>
+                            </div>
+                        </label>
+                    </div>
+                </div>
+                <div class="mt-6 flex justify-end">
+                    <button type="submit" class="bg-blue-600 hover:bg-blue-500 text-white px-6 py-2 rounded-lg text-sm font-semibold transition-colors">Save IMAP Settings</button>
+                </div>
+            </form>
+        </div>
+
+        <!-- SMTP tab -->
+        <div id="eb-panel-smtp" class="hidden">
+            <form hx-post="/modules/{{ module.id }}/config"
+                  hx-swap="none"
+                  hx-on::after-request="const btn = this.querySelector('button[type=submit]'); const orig = btn.innerText; btn.innerText = 'Saved!'; btn.classList.remove('bg-blue-600', 'hover:bg-blue-500'); btn.classList.add('bg-emerald-600', 'hover:bg-emerald-500'); setTimeout(() => { btn.innerText = orig; btn.classList.add('bg-blue-600', 'hover:bg-blue-500'); btn.classList.remove('bg-emerald-600', 'hover:bg-emerald-500'); }, 2000);">
+                <input type="hidden" name="_section" value="smtp">
+                <div class="space-y-4">
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <div class="md:col-span-2">
+                            <label class="block text-sm font-medium text-slate-400 mb-2">SMTP Server</label>
+                            <input type="text" name="smtp_host" value="{{ module.config.smtp_host }}" placeholder="smtp.gmail.com"
+                                   class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-slate-400 mb-2">Port</label>
+                            <input type="number" name="smtp_port" value="{{ module.config.smtp_port }}" placeholder="587"
+                                   class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all">
+                        </div>
+                    </div>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-sm font-medium text-slate-400 mb-2">Email Address</label>
+                            <input type="text" name="smtp_username" value="{{ module.config.smtp_username }}" placeholder="you@gmail.com"
+                                   class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-slate-400 mb-2">Password / App Password</label>
+                            <input type="password" name="smtp_password" value="{{ module.config.smtp_password }}"
+                                   class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all">
+                        </div>
+                    </div>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-sm font-medium text-slate-400 mb-2">From Address</label>
+                            <input type="text" name="smtp_from_address" value="{{ module.config.smtp_from_address }}" placeholder="you@gmail.com"
+                                   class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all">
+                            <p class="text-xs text-slate-500 mt-1">The "From:" address on outgoing emails. Usually your email address.</p>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-slate-400 mb-2">Reply-To Address (optional)</label>
+                            <input type="text" name="reply_to_address" value="{{ module.config.reply_to_address }}" placeholder="another@email.com"
+                                   class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all">
+                            <p class="text-xs text-slate-500 mt-1">If set, recipients will reply to this address instead of the From address.</p>
+                        </div>
+                    </div>
+                    <div>
+                        <label class="flex items-center space-x-3 cursor-pointer">
+                            <input type="checkbox" name="smtp_use_tls" value="true" {% if module.config.smtp_use_tls %}checked{% endif %}
+                                   class="w-5 h-5 rounded border-slate-700 bg-slate-950 text-blue-600 focus:ring-blue-500 focus:ring-offset-slate-900">
+                            <div>
+                                <span class="text-sm font-medium text-slate-300">Use STARTTLS</span>
+                                <p class="text-xs text-slate-500">Enable for port 587 (recommended). Disable only for plain port 25.</p>
+                            </div>
+                        </label>
+                    </div>
+                    <div class="mt-2 bg-slate-950/50 rounded-lg p-4 border border-slate-700/50">
+                        <h4 class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Gmail Quick Setup</h4>
+                        <ul class="text-sm text-slate-300 space-y-1">
+                            <li>• Go to your Google Account → Security → 2-Step Verification → App passwords.</li>
+                            <li>• Generate an App Password and use it in the Password fields above.</li>
+                            <li>• IMAP: <span class="font-mono text-blue-400">imap.gmail.com:993</span> SSL on &nbsp;|&nbsp; SMTP: <span class="font-mono text-blue-400">smtp.gmail.com:587</span> TLS on.</li>
+                        </ul>
+                    </div>
+                </div>
+                <div class="mt-6 flex justify-end">
+                    <button type="submit" class="bg-blue-600 hover:bg-blue-500 text-white px-6 py-2 rounded-lg text-sm font-semibold transition-colors">Save SMTP Settings</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script>
+    function ebShowTab(name) {
+        ['imap', 'smtp'].forEach(function(p) {
+            var panel = document.getElementById('eb-panel-' + p);
+            var tab = document.getElementById('eb-tab-' + p);
+            if (p === name) {
+                panel.classList.remove('hidden');
+                tab.classList.add('bg-slate-700', 'text-white');
+                tab.classList.remove('text-slate-400', 'hover:text-white');
+            } else {
+                panel.classList.add('hidden');
+                tab.classList.remove('bg-slate-700', 'text-white');
+                tab.classList.add('text-slate-400', 'hover:text-white');
+            }
+        });
+    }
+    </script>
+    {% endif %}
+
+    {% if module.config and has_visible_config and module.id != 'agent_loop' and module.id != 'reflection' and module.id != 'planner' and module.id != 'system_prompt' and module.id != 'skills' and module.id != 'email_bridge' %}
     <div class="bg-slate-900 rounded-xl border border-slate-800 p-6 mt-6">
         <h3 class="font-semibold text-lg mb-4">Configuration</h3>
         <form hx-post="/modules/{{ module.id }}/config" hx-swap="none"
