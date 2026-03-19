@@ -114,6 +114,140 @@
                     </div>
                     {% endif %}
                 {% endfor %}
+                
+                {% if active_stream %}
+                <!-- Active Stream Catch-up Container -->
+                <div id="active-stream-container" class="space-y-4">
+                    <div id="thinking-trace-active" class="max-w-[85%]"></div>
+                    
+                    <div class="bg-slate-800 p-4 rounded-2xl rounded-tl-none max-w-[80%] shadow-lg border border-slate-700/50">
+                        <div class="text-sm prose prose-invert" id="ai-content-active">
+                            <span class="animate-pulse text-slate-500 stream-placeholder">Thinking...</span>
+                        </div>
+                        <div class="flex items-center justify-between mt-2 active-stream-status" style="display: none;">
+                            <div class="flex items-center gap-2 flex-wrap text-xs">
+                                <span class="text-slate-500">Time: <span class="stream-timer-active font-mono">0.0</span>s</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <script>
+                (function() {
+                    const contentDiv = document.getElementById('ai-content-active');
+                    const thinkingTrace = document.getElementById('thinking-trace-active');
+                    const statusDiv = document.querySelector('.active-stream-status');
+                    const timerSpan = document.querySelector('.stream-timer-active');
+                    if (!contentDiv) return;
+
+                    let mdBuffer = '';
+                    let firstTokenReceived = false;
+                    let startTime = Date.now();
+                    const source = new EventSource('/modules/chat/stream/{{ session.id }}');
+
+                    let timerInterval = setInterval(() => {
+                        if (timerSpan) timerSpan.innerText = ((Date.now() - startTime) / 1000).toFixed(1);
+                    }, 100);
+
+                    function escapeHtml(str) {
+                         return str ? String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') : '';
+                    }
+
+                    source.onmessage = function(event) {
+                        try {
+                            if (!firstTokenReceived) {
+                                const ph = contentDiv.querySelector('.stream-placeholder');
+                                if (ph) ph.remove();
+                                firstTokenReceived = true;
+                                if (statusDiv) statusDiv.style.display = 'flex';
+                            }
+                            const chunk = JSON.parse(event.data);
+                            if (chunk.text) {
+                                mdBuffer += chunk.text;
+                                contentDiv.innerText = mdBuffer;
+                                const scrollable = document.getElementById('chat-messages');
+                                if (scrollable) scrollable.scrollTop = scrollable.scrollHeight;
+                            }
+                        } catch(e) {}
+                    };
+
+                    source.addEventListener('thinking', function(event) {
+                        try {
+                            const steps = JSON.parse(event.data);
+                            if (!steps || steps.length === 0) return;
+
+                            const details = document.createElement('details');
+                            details.open = true;
+                            details.className = 'w-full rounded-xl border border-slate-700/60 bg-slate-900/60 overflow-hidden text-xs';
+
+                            const summary = document.createElement('summary');
+                            summary.className = 'flex items-center gap-2 px-3 py-2 cursor-pointer text-slate-400 hover:text-slate-200 select-none';
+                            summary.style.listStyle = 'none';
+                            summary.innerHTML =
+                                '<svg class="w-3.5 h-3.5 text-violet-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">' +
+                                '<path stroke-linecap="round" stroke-linejoin="round" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.347.5A3.498 3.498 0 0112 18.5a3.498 3.498 0 01-2.797-1.4l-.347-.5z"/>' +
+                                '</svg>' +
+                                '<span class="font-semibold text-violet-300">Thinking</span>' +
+                                '<span class="ml-auto text-slate-600">' + steps.length + ' step' + (steps.length !== 1 ? 's' : '') + '</span>';
+
+                            const body = document.createElement('div');
+                            body.className = 'border-t border-slate-700/40 divide-y divide-slate-800/60';
+
+                            steps.forEach(function(step) {
+                                const row = document.createElement('div');
+                                row.className = 'px-3 py-2 flex gap-2 items-start';
+                                if (step.type === 'tool_call') {
+                                    row.innerHTML = '<span class="shrink-0 mt-0.5 text-amber-400">&#9881;</span><div class="min-w-0 flex-1"><span class="font-semibold text-amber-300">' + escapeHtml(step.name) + '</span><code class="block text-slate-400 font-mono text-[10px] break-all mt-0.5">' + escapeHtml(step.content) + '</code></div>';
+                                } else if (step.type === 'tool_result') {
+                                    const ok = step.success !== false;
+                                    row.innerHTML = '<span class="shrink-0 mt-0.5 ' + (ok ? 'text-emerald-400' : 'text-red-400') + '">' + (ok ? '&#10004;' : '&#10008;') + '</span><div class="min-w-0 flex-1"><span class="font-semibold">' + escapeHtml(step.name) + '</span><code class="block text-slate-400 font-mono text-[10px] break-all mt-0.5">' + escapeHtml(step.content) + '</code></div>';
+                                } else if (step.type === 'reflection') {
+                                    row.innerHTML = '<span class="shrink-0 mt-0.5 text-sky-400">&#8635;</span><span class="text-sky-300 italic">' + escapeHtml(step.content) + '</span>';
+                                } else if (step.type === 'assistant') {
+                                    row.innerHTML = '<span class="shrink-0 mt-0.5 text-slate-500">&#8230;</span><span class="text-slate-400 italic">' + escapeHtml(step.content) + '</span>';
+                                }
+                                body.appendChild(row);
+                            });
+
+                            details.appendChild(summary);
+                            details.appendChild(body);
+                            thinkingTrace.innerHTML = '';
+                            thinkingTrace.appendChild(details);
+                        } catch(e) {}
+                    });
+
+                    source.addEventListener('replace', function(event) {
+                        try {
+                            const chunk = JSON.parse(event.data);
+                            if (chunk.text) {
+                                contentDiv.innerText = chunk.text;
+                                clearInterval(timerInterval);
+                                source.close();
+                                // Trigger htmx reload to get final static layout
+                                hxReload();
+                            }
+                        } catch(e){}
+                    });
+
+                    function hxReload() {
+                        const activeLink = document.querySelector('[hx-get*="/chat/gui?session_id={{ session.id }}"]');
+                        if (activeLink) activeLink.click();
+                        else window.location.reload();
+                    }
+
+                    source.addEventListener('done', function() {
+                        clearInterval(timerInterval);
+                        source.close();
+                        hxReload();
+                    });
+                     
+                    source.addEventListener('error', function() {
+                         clearInterval(timerInterval);
+                         source.close();
+                    });
+                })();
+                </script>
+                {% endif %}
             {% else %}
                 <div id="empty-chat" class="flex flex-col items-center justify-center h-full opacity-40 space-y-4 py-20">
                     <svg class="w-16 h-16 text-slate-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"></path></svg>

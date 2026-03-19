@@ -150,6 +150,7 @@ async def chat_gui(request: Request, session_id: str = Query(None)):
     return templates.TemplateResponse(request, "chat_gui.html", {
         "session": active_session,
         "estimated_tokens": estimated_tokens,
+        "active_stream": session_id in active_streams,
     })
 
 @router.get("/sessions", response_class=HTMLResponse)
@@ -393,6 +394,8 @@ async def send_message(
                 await queue.put({"type": "error", "content": str(e)})
             finally:
                 await queue.put(None)
+                if session_id in active_streams:
+                    del active_streams[session_id]
         
         # Start the background execution
         asyncio.create_task(run_flow_background())
@@ -446,8 +449,7 @@ async def stream_chat(session_id: str):
                     payload = json.dumps(chunk.get("content", []))
                     yield f"event: thinking\ndata: {payload}\n\n"
         finally:
-            if session_id in active_streams:
-                del active_streams[session_id]
+            pass  # Cleanup handled by run_flow_background or explicit endpoints
                 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
 

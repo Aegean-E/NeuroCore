@@ -1890,7 +1890,7 @@ class HybridAgentExecutor(AgentBaseExecutor):
     _EXCLUDED_TOOLS: frozenset = frozenset({"SetFinal"})
 
     # Fix 3: retrieval tools that should never trigger adaptive routing
-    _RETRIEVAL_TOOLS: frozenset = frozenset({"GetVariable", "Peek", "Search", "Chunk"})
+    _RETRIEVAL_TOOLS: frozenset = frozenset({"GetVariable", "Peek", "Search", "Chunk", "YouTubeTranscript"})
 
     _library_cache: dict = {"mtime": 0.0, "data": {}, "file_mtimes": {}}
 
