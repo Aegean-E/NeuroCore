@@ -968,6 +968,46 @@ async def delete_skill(skill_id: str):
          
     return JSONResponse(content={"status": "success", "message": "Skill deleted"})
 
+@router.post("/settings/skills/save/{skill_id}")
+async def save_skill(skill_id: str, instructions: str = Form(...)):
+    import os
+    content_path = os.path.join("modules", "skills", "data", f"{skill_id}.md")
+    try:
+         with open(content_path, "w", encoding="utf-8") as f:
+             f.write(instructions)
+    except Exception:
+         raise HTTPException(status_code=500, detail="Failed to save skill content")
+    return JSONResponse(content={"status": "success", "message": "Skill content saved"})
+
+@router.post("/settings/skills/create")
+async def create_skill(
+    name: str = Form(...),
+    description: str = Form(...),
+    category: str = Form("general"),
+    instructions: str = Form("")
+):
+    import os, re
+    from datetime import datetime
+    skill_id = re.sub(r'[^a-zA-Z0-9\s]', '', name).lower().replace(' ', '_')
+    if not skill_id: raise HTTPException(status_code=400, detail="Invalid skill name")
+    skills_path = os.path.join("modules", "skills", "data", "skills_metadata.json")
+    try:
+         if os.path.exists(skills_path):
+              with open(skills_path, "r", encoding="utf-8") as f: skills = json.load(f)
+         else: skills = {}
+    except Exception: skills = {}
+    if skill_id in skills: raise HTTPException(status_code=400, detail="Skill already exists")
+    skills[skill_id] = {
+         "name": name, "description": description, "category": category,
+         "tags": [], "created_at": datetime.now().isoformat(), "updated_at": datetime.now().isoformat()
+    }
+    try:
+         with open(skills_path, "w", encoding="utf-8") as f: json.dump(skills, f, indent=4)
+         content_path = os.path.join("modules", "skills", "data", f"{skill_id}.md")
+         with open(content_path, "w", encoding="utf-8") as f: f.write(instructions)
+    except Exception: raise HTTPException(status_code=500, detail="Failed to create skill assets")
+    return JSONResponse(content={"status": "success", "message": "Skill created", "id": skill_id})
+
 @router.get("/settings", response_class=HTMLResponse)
 async def get_settings(request: Request, settings_man: SettingsManager = Depends(get_settings_manager), module_manager: ModuleManager = Depends(get_module_manager)):
     import os

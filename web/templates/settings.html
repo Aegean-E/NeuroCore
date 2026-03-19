@@ -195,22 +195,37 @@
                                     </div>
                                     {% if skill.instructions %}
                                         <div id="skill-instructions-{{ id }}" class="hidden">{{ skill.instructions }}</div>
-                                        <button onclick="openSkillModal('{{ (skill.name or id)|replace('\'', '\\\'') }}', document.getElementById('skill-instructions-{{ id }}').innerText)" class="w-full mt-2 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold py-2 rounded-lg border border-slate-700 transition-all">
+                                        <button onclick="openSkillModal('{{ (skill.name or id)|replace('\'', '\\\'') }}', document.getElementById('skill-instructions-{{ id }}').innerText, '{{ id }}')" class="w-full mt-2 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold py-2 rounded-lg border border-slate-700 transition-all">
                                             View Instructions
                                         </button>
                                     {% endif %}
                                 </div>
                             {% endfor %}
+                            
+                            <!-- Create Skill Card -->
+                            <button onclick="openCreateSkillModal()" class="bg-slate-900/40 border-2 border-dashed border-slate-800 hover:border-indigo-500/40 hover:bg-slate-900/60 rounded-2xl p-6 flex flex-col items-center justify-center transition-all group min-h-[160px]">
+                                <div class="p-3 rounded-full bg-slate-800/80 group-hover:bg-indigo-500/10 group-hover:text-indigo-400 text-slate-500 transition-all mb-3">
+                                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path></svg>
+                                </div>
+                                <span class="text-sm font-bold text-slate-300 group-hover:text-indigo-400 transition-all">Create New Skill</span>
+                                <p class="text-xs text-slate-500 mt-1">Add custom prompt assets</p>
+                            </button>
                         </div>
 
                         <!-- Skill Modal -->
-                        <div id="skill-modal" class="hidden fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-40 flex items-center justify-center p-4" onclick="if(event.target === this) closeSkillModal()">
+                        <div id="skill-modal" class="hidden fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-40 flex items-center justify-center p-4" onclick="if(event.target === this) { closeSkillModal(); cancelEdit(); }">
                             <div class="bg-slate-900 border border-slate-800 rounded-2xl max-w-2xl w-full max-h-[80vh] flex flex-col shadow-2xl">
                                 <div class="p-6 border-b border-slate-800 flex justify-between items-center">
                                     <h3 id="modal-skill-title" class="text-lg font-bold text-white"></h3>
-                                    <button onclick="closeSkillModal()" class="text-slate-500 hover:text-white text-xl font-bold">&times;</button>
+                                    <div class="flex items-center space-x-2">
+                                        <button id="modal-edit-btn" onclick="startEdit()" class="bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold px-3 py-1.5 rounded-lg border border-slate-700 transition-all">Edit</button>
+                                        <button id="modal-save-btn" onclick="saveEdit()" class="hidden bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold px-3 py-1.5 rounded-lg transition-all shadow-lg shadow-indigo-500/20">Save</button>
+                                        <button id="modal-cancel-edit-btn" onclick="cancelEdit()" class="hidden bg-slate-800 hover:bg-slate-700 text-slate-400 text-xs font-bold px-3 py-1.5 rounded-lg border border-slate-700 transition-all">Cancel</button>
+                                        <button onclick="closeSkillModal(); cancelEdit();" class="text-slate-500 hover:text-white text-xl font-bold pl-2">&times;</button>
+                                    </div>
                                 </div>
                                 <div id="modal-skill-content" class="p-6 overflow-y-auto custom-scrollbar text-sm text-slate-300 whitespace-pre-wrap leading-relaxed"></div>
+                                <textarea id="modal-skill-edit-content" class="hidden p-6 w-full flex-grow bg-slate-950 text-slate-300 font-mono text-sm border-t border-slate-800 focus:outline-none resize-none custom-scrollbar leading-relaxed"></textarea>
                             </div>
                         </div>
 
@@ -229,17 +244,97 @@
                             </div>
                         </div>
 
+                        <!-- Create Skill Modal -->
+                        <div id="create-skill-modal" class="hidden fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4" onclick="if(event.target === this) closeCreateSkillModal()">
+                            <div class="bg-slate-900 border border-slate-800 rounded-2xl max-w-xl w-full p-6 flex flex-col shadow-2xl">
+                                <div class="flex justify-between items-center mb-4">
+                                     <h3 class="text-lg font-bold text-white">Create New Skill</h3>
+                                     <button onclick="closeCreateSkillModal()" class="text-slate-500 hover:text-white text-xl">&times;</button>
+                                </div>
+                                <form id="create-skill-form" class="space-y-4">
+                                     <div>
+                                         <label class="block text-xs font-bold text-slate-400 mb-1">Name</label>
+                                         <input type="text" name="name" required placeholder="e.g. Code Reviewer" class="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500">
+                                     </div>
+                                     <div>
+                                         <label class="block text-xs font-bold text-slate-400 mb-1">Description</label>
+                                         <input type="text" name="description" required placeholder="Short summary..." class="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500">
+                                     </div>
+                                     <div>
+                                         <label class="block text-xs font-bold text-slate-400 mb-1">Instructions / Prompt</label>
+                                         <textarea name="instructions" required rows="6" placeholder="Enter full instructions here..." class="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-sm text-white font-mono focus:outline-none focus:border-indigo-500 custom-scrollbar"></textarea>
+                                     </div>
+                                     <div class="flex justify-end space-x-3 pt-2">
+                                         <button type="button" onclick="closeCreateSkillModal()" class="px-4 py-2 rounded-lg text-sm font-bold text-slate-400 hover:bg-slate-800 transition-all">Cancel</button>
+                                         <button type="submit" class="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-lg text-sm font-bold transition-all shadow-lg shadow-indigo-500/20">Create</button>
+                                     </div>
+                                </form>
+                            </div>
+                        </div>
+
                         <script>
                         let activeDeleteId = '';
+                        let activeSkillId = '';
 
-                        function openSkillModal(title, content) {
+                        function openSkillModal(title, content, id) {
+                            activeSkillId = id;
                             document.getElementById('modal-skill-title').innerText = title;
                             document.getElementById('modal-skill-content').innerText = content;
                             document.getElementById('skill-modal').classList.remove('hidden');
                         }
                         function closeSkillModal() {
                             document.getElementById('skill-modal').classList.add('hidden');
+                            activeSkillId = '';
                         }
+
+                        function startEdit() {
+                            const view = document.getElementById('modal-skill-content');
+                            const edit = document.getElementById('modal-skill-edit-content');
+                            edit.value = view.innerText;
+                            view.classList.add('hidden');
+                            edit.classList.remove('hidden');
+                            document.getElementById('modal-edit-btn').classList.add('hidden');
+                            document.getElementById('modal-save-btn').classList.remove('hidden');
+                            document.getElementById('modal-cancel-edit-btn').classList.remove('hidden');
+                        }
+
+                        function cancelEdit() {
+                            document.getElementById('modal-skill-content').classList.remove('hidden');
+                            document.getElementById('modal-skill-edit-content').classList.add('hidden');
+                            document.getElementById('modal-edit-btn').classList.remove('hidden');
+                            document.getElementById('modal-save-btn').classList.add('hidden');
+                            document.getElementById('modal-cancel-edit-btn').classList.add('hidden');
+                        }
+
+                        function saveEdit() {
+                            const instructions = document.getElementById('modal-skill-edit-content').value;
+                            if (!activeSkillId) return;
+                            htmx.ajax('POST', '/settings/skills/save/' + activeSkillId, {
+                                values: { instructions: instructions }
+                            }).then(() => {
+                                document.getElementById('modal-skill-content').innerText = instructions;
+                                const hiddenDiv = document.getElementById('skill-instructions-' + activeSkillId);
+                                if (hiddenDiv) hiddenDiv.innerText = instructions;
+                                cancelEdit();
+                            }).catch(() => alert('Failed to save skill'));
+                        }
+
+                        function openCreateSkillModal() {
+                            document.getElementById('create-skill-modal').classList.remove('hidden');
+                        }
+                        function closeCreateSkillModal() {
+                            document.getElementById('create-skill-modal').classList.add('hidden');
+                            document.getElementById('create-skill-form').reset();
+                        }
+
+                        document.getElementById('create-skill-form')?.addEventListener('submit', function(e) {
+                            e.preventDefault();
+                            const formData = new FormData(this);
+                            htmx.ajax('POST', '/settings/skills/create', { values: Object.fromEntries(formData.entries()) }).then(() => {
+                                closeCreateSkillModal();
+                                location.reload();
+                            }).catch(() => alert('Failed to create skill'));
+                        });
 
                         function confirmDeleteSkill(id, name) {
                             activeDeleteId = id;
