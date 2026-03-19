@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ item.name }} — Marketplace</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/htmx.org@2.0.2"></script>
+    <style>
+        .custom-scrollbar::-webkit-scrollbar { width: 4px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #4a5568; border-radius: 2px; }
+        .file-tree-item:hover { background: rgba(148,163,184,0.07); }
+        .file-tree-item.active { background: rgba(59,130,246,0.15); border-left: 2px solid #3b82f6; }
+        pre { tab-size: 4; }
+    </style>
+</head>
+<body class="bg-slate-900 text-slate-100 min-h-screen flex flex-col font-sans">
+
+    {% include 'navbar.html' %}
+
+    <main class="flex-grow flex flex-col h-[calc(100vh-64px)] overflow-hidden">
+
+        <!-- Top bar -->
+        <div class="flex items-center justify-between px-6 py-4 border-b border-slate-800 bg-slate-950/60 flex-shrink-0">
+            <div class="flex items-center space-x-4">
+                <a href="/marketplace" class="flex items-center space-x-1.5 text-slate-400 hover:text-white text-sm font-medium transition-colors">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path></svg>
+                    <span>Marketplace</span>
+                </a>
+                <span class="text-slate-700">/</span>
+                <span class="px-2.5 py-1 rounded-md text-xs font-bold uppercase tracking-wider bg-indigo-900/50 text-indigo-300 border border-indigo-800/50">{{ item.type }}</span>
+                <h1 class="text-lg font-bold text-white">{{ item.name }}</h1>
+            </div>
+
+            <!-- Actions: votes + download + delete -->
+            <div class="flex items-center space-x-2">
+                <!-- Upvote -->
+                <button id="upvote-btn-{{ item.id }}"
+                        onclick="castVote('{{ item.id }}', 'up')"
+                        class="flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-sm font-bold border transition-all
+                               {% if item.voters is defined and item.voters.get(hardware_id) == 'up' %}bg-emerald-900/40 text-emerald-400 border-emerald-700/50{% else %}bg-slate-800 text-slate-400 hover:text-emerald-400 hover:border-emerald-700/40 border-slate-700{% endif %}"
+                        title="Upvote">
+                    <svg class="w-4 h-4" fill="{% if item.voters is defined and item.voters.get(hardware_id) == 'up' %}currentColor{% else %}none{% endif %}" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 15l7-7 7 7"></path></svg>
+                    <span id="upvote-count-{{ item.id }}">{{ item.upvotes if item.upvotes is defined else 0 }}</span>
+                </button>
+                <!-- Downvote -->
+                <button id="downvote-btn-{{ item.id }}"
+                        onclick="castVote('{{ item.id }}', 'down')"
+                        class="flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-sm font-bold border transition-all
+                               {% if item.voters is defined and item.voters.get(hardware_id) == 'down' %}bg-red-900/40 text-red-400 border-red-700/50{% else %}bg-slate-800 text-slate-400 hover:text-red-400 hover:border-red-700/40 border-slate-700{% endif %}"
+                        title="Downvote">
+                    <svg class="w-4 h-4" fill="{% if item.voters is defined and item.voters.get(hardware_id) == 'down' %}currentColor{% else %}none{% endif %}" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
+                    <span id="downvote-count-{{ item.id }}">{{ item.downvotes if item.downvotes is defined else 0 }}</span>
+                </button>
+
+                <a href="/marketplace/download/{{ item.id }}"
+                   class="flex items-center space-x-1.5 bg-blue-600 hover:bg-blue-500 text-white px-4 py-1.5 rounded-lg text-sm font-bold border border-blue-500 transition-all shadow-lg shadow-blue-500/20">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
+                    <span>Download</span>
+                </a>
+
+                {% if item.uploader_id == 'local_user' or item.uploader_id == hardware_id %}
+                <button onclick="confirmDelete()"
+                        class="bg-red-950/40 hover:bg-red-950/70 text-red-500 hover:text-red-400 px-4 py-1.5 rounded-lg text-sm font-bold border border-red-800/30 transition-all">
+                    Delete
+                </button>
+                {% endif %}
+            </div>
+        </div>
+
+        <!-- Meta strip -->
+        <div class="flex items-center space-x-6 px-6 py-3 border-b border-slate-800/60 bg-slate-950/30 flex-shrink-0 text-xs text-slate-500">
+            <span>📄 {{ item.filename }}</span>
+            <span>👤 {{ item.uploader_id }}</span>
+            {% if item.uploaded_at %}<span>🕒 {{ item.uploaded_at }}</span>{% endif %}
+            {% if item.description %}<span class="text-slate-400 truncate max-w-xl" title="{{ item.description }}">{{ item.description }}</span>{% endif %}
+        </div>
+
+        <!-- Body: file tree + content viewer -->
+        <div class="flex flex-1 overflow-hidden">
+
+            {% if is_zip and file_tree %}
+            <!-- File tree sidebar -->
+            <aside class="w-64 flex-shrink-0 border-r border-slate-800 bg-slate-950/50 overflow-y-auto custom-scrollbar py-2">
+                <div class="px-3 py-2 text-xs font-bold text-slate-500 uppercase tracking-wider">Files</div>
+                {% for entry in file_tree %}
+                    {% if entry.is_dir %}
+                    <div class="flex items-center space-x-1.5 px-3 py-1 text-xs text-slate-500 font-semibold uppercase tracking-wider"
+                         style="padding-left: {{ 12 + entry.depth * 12 }}px">
+                        <svg class="w-3.5 h-3.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20"><path d="M2 6a2 2 0 012-2h5l2 2h5a2 2 0 012 2v6a2 2 0 01-2 2H4a2 2 0 01-2-2V6z"></path></svg>
+                        <span class="truncate">{{ entry.name.rstrip('/').split('/')[-1] }}</span>
+                    </div>
+                    {% else %}
+                    <button onclick="loadFile('{{ item.id }}', '{{ entry.path }}')"
+                            id="tree-{{ loop.index }}"
+                            data-path="{{ entry.path }}"
+                            class="file-tree-item w-full text-left flex items-center space-x-1.5 py-1 text-xs text-slate-300 hover:text-white transition-colors {% if entry.path == initial_file %}active{% endif %}"
+                            style="padding-left: {{ 12 + entry.depth * 12 }}px; padding-right: 12px">
+                        <svg class="w-3.5 h-3.5 flex-shrink-0 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
+                        <span class="truncate">{{ entry.name.split('/')[-1] }}</span>
+                    </button>
+                    {% endif %}
+                {% endfor %}
+            </aside>
+            {% endif %}
+
+            <!-- Code / content viewer -->
+            <div class="flex-1 flex flex-col overflow-hidden">
+                <!-- File tab bar -->
+                <div class="flex items-center space-x-2 px-4 py-2 border-b border-slate-800/60 bg-slate-950/20 flex-shrink-0">
+                    <svg class="w-4 h-4 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
+                    <span id="active-filename" class="text-xs font-mono text-slate-300">{{ initial_file }}</span>
+                    <div id="file-loading" class="hidden ml-2 w-3.5 h-3.5 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+                </div>
+                <div class="flex-1 overflow-auto custom-scrollbar bg-slate-950">
+                    <pre id="file-content" class="text-xs text-slate-300 font-mono leading-relaxed p-6 whitespace-pre-wrap break-words">{{ initial_content }}</pre>
+                </div>
+            </div>
+
+        </div>
+
+    </main>
+
+    <!-- Delete confirmation modal -->
+    <div id="delete-modal" class="hidden fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+         onclick="if(event.target===this) closeDeleteModal()">
+        <div class="bg-slate-900 border border-slate-800 rounded-2xl max-w-sm w-full p-6 shadow-2xl">
+            <div class="flex items-center space-x-3 text-red-500 mb-4">
+                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>
+                <h3 class="text-lg font-bold text-white">Delete Item?</h3>
+            </div>
+            <p class="text-sm text-slate-400 mb-6">Are you sure you want to delete <span class="font-semibold text-white">{{ item.name }}</span> from the Marketplace? This cannot be undone.</p>
+            <div class="flex space-x-3 justify-end">
+                <button onclick="closeDeleteModal()" class="px-4 py-2 rounded-lg text-sm font-bold text-slate-400 hover:bg-slate-800 transition-all">Cancel</button>
+                <button id="confirm-delete-btn"
+                        onclick="doDelete()"
+                        class="bg-red-600 hover:bg-red-500 text-white px-4 py-2 rounded-lg text-sm font-bold transition-all">Delete</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+    // ── Vote ──────────────────────────────────────────────────────────
+    function castVote(itemId, direction) {
+        fetch('/marketplace/vote/' + itemId + '/' + direction, { method: 'POST' })
+        .then(r => r.json())
+        .then(data => {
+            if (data.status !== 'success') return;
+            document.getElementById('upvote-count-' + itemId).textContent = data.upvotes;
+            document.getElementById('downvote-count-' + itemId).textContent = data.downvotes;
+
+            const upBtn   = document.getElementById('upvote-btn-' + itemId);
+            const downBtn = document.getElementById('downvote-btn-' + itemId);
+            const activeUp   = 'bg-emerald-900/40 text-emerald-400 border-emerald-700/50';
+            const inactiveUp = 'bg-slate-800 text-slate-400 hover:text-emerald-400 hover:border-emerald-700/40 border-slate-700';
+            const activeDn   = 'bg-red-900/40 text-red-400 border-red-700/50';
+            const inactiveDn = 'bg-slate-800 text-slate-400 hover:text-red-400 hover:border-red-700/40 border-slate-700';
+
+            if (upBtn) {
+                const isUp = data.user_vote === 'up';
+                upBtn.className = 'flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-sm font-bold border transition-all ' + (isUp ? activeUp : inactiveUp);
+                upBtn.querySelector('svg').setAttribute('fill', isUp ? 'currentColor' : 'none');
+            }
+            if (downBtn) {
+                const isDn = data.user_vote === 'down';
+                downBtn.className = 'flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-sm font-bold border transition-all ' + (isDn ? activeDn : inactiveDn);
+                downBtn.querySelector('svg').setAttribute('fill', isDn ? 'currentColor' : 'none');
+            }
+        })
+        .catch(() => {});
+    }
+
+    // ── File tree ─────────────────────────────────────────────────────
+    function loadFile(itemId, path) {
+        document.getElementById('active-filename').textContent = path;
+        document.getElementById('file-loading').classList.remove('hidden');
+        document.getElementById('file-content').textContent = '';
+
+        // Highlight active in tree
+        document.querySelectorAll('.file-tree-item').forEach(el => {
+            el.classList.toggle('active', el.dataset.path === path);
+        });
+
+        fetch('/marketplace/item/' + itemId + '/file?path=' + encodeURIComponent(path))
+        .then(r => r.json())
+        .then(data => {
+            document.getElementById('file-loading').classList.add('hidden');
+            document.getElementById('file-content').textContent = data.status === 'success' ? data.content : 'Error: ' + (data.detail || 'unknown');
+        })
+        .catch(() => {
+            document.getElementById('file-loading').classList.add('hidden');
+            document.getElementById('file-content').textContent = 'Failed to load file.';
+        });
+    }
+
+    // ── Delete ────────────────────────────────────────────────────────
+    function confirmDelete() { document.getElementById('delete-modal').classList.remove('hidden'); }
+    function closeDeleteModal() { document.getElementById('delete-modal').classList.add('hidden'); }
+    function doDelete() {
+        const btn = document.getElementById('confirm-delete-btn');
+        btn.textContent = 'Deleting...';
+        btn.disabled = true;
+        fetch('/marketplace/delete/{{ item.id }}', { method: 'POST' })
+        .then(r => {
+            if (r.ok) { window.location.href = '/marketplace'; }
+            else {
+                btn.textContent = 'Delete';
+                btn.disabled = false;
+                alert('Delete failed');
+            }
+        })
+        .catch(() => {
+            btn.textContent = 'Delete';
+            btn.disabled = false;
+            alert('Delete failed');
+        });
+    }
+    </script>
+
+</body>
+</html>

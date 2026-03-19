@@ -100,6 +100,20 @@ def get_hardware_id():
 
     return hardware_id
 
+
+def get_public_user_id() -> str:
+    """
+    Derives a stable, opaque public identifier from the private Instance ID.
+    This is the ID stored in marketplace items and shown to other users.
+    It cannot be reversed to reveal the Instance ID.
+    """
+    import hashlib
+    instance_id = get_hardware_id()
+    # HMAC-style derivation with a fixed domain separator
+    raw = hashlib.sha256(f"neurocore-marketplace-v1:{instance_id}".encode()).hexdigest()
+    return raw[:20].upper()
+
+
 # Centralized definition of config keys that should be hidden from the generic JSON editor
 HIDDEN_CONFIG_KEYS = {
     'memory': ['save_default_confidence', 'save_confidence_threshold', 'recall_limit', 'recall_min_score', 'consolidation_threshold', 'auto_consolidation_hours', 'arbiter_model', 'arbiter_prompt', 'similarity_threshold', 'belief_ttl_days', 'recall_access_weight'],
@@ -869,7 +883,7 @@ async def get_marketplace(request: Request, settings_man: SettingsManager = Depe
         "catalog": catalog,
         "active_module": "marketplace",
         "settings": settings_man.settings,
-        "hardware_id": get_hardware_id()
+        "hardware_id": get_public_user_id()
     })
 
 @router.post("/marketplace/upload")
@@ -921,7 +935,7 @@ async def upload_marketplace_item(
         "filename": file.filename,
         "save_filename": save_filename,
         "image_filename": image_filename,
-        "uploader_id": get_hardware_id(),
+        "uploader_id": get_public_user_id(),
         "created_at": datetime.now().strftime("%Y-%m-%d %H:%M")
     }
     catalog.append(entry)
@@ -977,6 +991,113 @@ async def download_marketplace_item(item_id: str):
         
     return FileResponse(file_path, filename=item["filename"])
 
+@router.get("/marketplace/item/{item_id}", response_class=HTMLResponse)
+async def marketplace_item_detail(request: Request, item_id: str, module_manager: ModuleManager = Depends(get_module_manager), settings_man: SettingsManager = Depends(get_settings_manager)):
+    import os, zipfile
+    catalog_path = os.path.join("data", "marketplace", "catalog.json")
+    if not os.path.exists(catalog_path):
+        raise HTTPException(status_code=404, detail="Catalog not found")
+    try:
+        with open(catalog_path, "r", encoding="utf-8") as f:
+            catalog = json.load(f)
+    except Exception:
+        raise HTTPException(status_code=500, detail="Failed to read catalog")
+
+    item = next((i for i in catalog if i["id"] == item_id), None)
+    if not item:
+        raise HTTPException(status_code=404, detail="Item not found")
+
+    file_path = os.path.join("data", "marketplace", "uploads", item["save_filename"])
+    ext = os.path.splitext(item["save_filename"])[1].lower()
+    hardware_id = get_public_user_id()
+
+    # Build file tree for zips; single content for flat files
+    file_tree = []   # list of {"path": str, "name": str, "is_dir": bool}
+    initial_content = ""
+    initial_file = ""
+    is_zip = ext == ".zip"
+
+    if is_zip and os.path.exists(file_path):
+        try:
+            with zipfile.ZipFile(file_path, "r") as zf:
+                names = sorted(zf.namelist())
+                for name in names:
+                    file_tree.append({
+                        "path": name,
+                        "name": name,
+                        "is_dir": name.endswith("/"),
+                        "depth": name.rstrip("/").count("/"),
+                    })
+                # Load first non-directory file as default view
+                first_file = next((n for n in names if not n.endswith("/")), None)
+                if first_file:
+                    initial_file = first_file
+                    try:
+                        with zf.open(first_file) as fh:
+                            initial_content = fh.read(256 * 1024).decode("utf-8", errors="replace")
+                    except Exception:
+                        initial_content = ""
+        except Exception as e:
+            initial_content = f"Could not open zip: {e}"
+    elif os.path.exists(file_path):
+        initial_file = item.get("filename", item["save_filename"])
+        try:
+            if ext in (".md", ".txt", ".json", ".py", ".yaml", ".yml", ".toml", ".cfg", ".ini"):
+                with open(file_path, "r", encoding="utf-8", errors="replace") as f:
+                    initial_content = f.read()
+            else:
+                initial_content = f"Binary file ({ext}) — download to view."
+        except Exception as e:
+            initial_content = f"Could not read file: {e}"
+
+    return templates.TemplateResponse(request, "marketplace_item.html", {
+        "item": item,
+        "hardware_id": hardware_id,
+        "is_zip": is_zip,
+        "file_tree": file_tree,
+        "initial_content": initial_content,
+        "initial_file": initial_file,
+        "modules": module_manager.get_all_modules(),
+        "settings": settings_man.settings,
+    })
+
+@router.get("/marketplace/item/{item_id}/file")
+async def marketplace_item_file(item_id: str, path: str = ""):
+    import os, zipfile
+    catalog_path = os.path.join("data", "marketplace", "catalog.json")
+    try:
+        with open(catalog_path, "r", encoding="utf-8") as f:
+            catalog = json.load(f)
+    except Exception:
+        raise HTTPException(status_code=500, detail="Failed to read catalog")
+
+    item = next((i for i in catalog if i["id"] == item_id), None)
+    if not item:
+        raise HTTPException(status_code=404, detail="Item not found")
+
+    file_path = os.path.join("data", "marketplace", "uploads", item["save_filename"])
+    ext = os.path.splitext(item["save_filename"])[1].lower()
+
+    if ext == ".zip":
+        if not path:
+            raise HTTPException(status_code=400, detail="path required for zip items")
+        try:
+            with zipfile.ZipFile(file_path, "r") as zf:
+                with zf.open(path) as fh:
+                    content = fh.read(256 * 1024).decode("utf-8", errors="replace")
+            return JSONResponse(content={"status": "success", "content": content, "path": path})
+        except KeyError:
+            raise HTTPException(status_code=404, detail="File not found in zip")
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e))
+    else:
+        try:
+            with open(file_path, "r", encoding="utf-8", errors="replace") as f:
+                content = f.read()
+            return JSONResponse(content={"status": "success", "content": content, "path": item.get("filename", "")})
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e))
+
 @router.get("/marketplace/preview/{item_id}")
 async def preview_marketplace_item(item_id: str):
     import os, json
@@ -1015,7 +1136,7 @@ async def delete_marketplace_item(item_id: str):
     if not item:
          raise HTTPException(status_code=404, detail="Item not found")
         
-    current_id = get_hardware_id()
+    current_id = get_public_user_id()
     if item.get("uploader_id") != current_id and item.get("uploader_id") != 'local_user':
          raise HTTPException(status_code=403, detail="You can only delete items that you uploaded")
         
@@ -1033,9 +1154,73 @@ async def delete_marketplace_item(item_id: str):
     catalog = [i for i in catalog if i["id"] != item_id]
     with open(catalog_path, "w", encoding="utf-8") as f:
          json.dump(catalog, f, indent=4)
-         
+
     from fastapi import Response
     return Response(status_code=200)
+
+@router.post("/marketplace/vote/{item_id}/{direction}")
+async def vote_marketplace_item(item_id: str, direction: str):
+    import os
+    if direction not in ("up", "down"):
+        raise HTTPException(status_code=400, detail="Direction must be 'up' or 'down'")
+
+    catalog_path = os.path.join("data", "marketplace", "catalog.json")
+    if not os.path.exists(catalog_path):
+        raise HTTPException(status_code=404, detail="Catalog not found")
+
+    try:
+        with open(catalog_path, "r", encoding="utf-8") as f:
+            catalog = json.load(f)
+    except Exception:
+        raise HTTPException(status_code=500, detail="Failed to read catalog")
+
+    item = next((i for i in catalog if i["id"] == item_id), None)
+    if not item:
+        raise HTTPException(status_code=404, detail="Item not found")
+
+    voter_id = get_public_user_id()
+
+    # Initialise vote fields if missing
+    if "voters" not in item:
+        item["voters"] = {}
+    if "upvotes" not in item:
+        item["upvotes"] = 0
+    if "downvotes" not in item:
+        item["downvotes"] = 0
+
+    previous = item["voters"].get(voter_id)
+
+    if previous == direction:
+        # Same direction → remove vote (toggle off)
+        del item["voters"][voter_id]
+        if direction == "up":
+            item["upvotes"] = max(0, item["upvotes"] - 1)
+        else:
+            item["downvotes"] = max(0, item["downvotes"] - 1)
+        user_vote = None
+    else:
+        # Remove previous vote if any
+        if previous == "up":
+            item["upvotes"] = max(0, item["upvotes"] - 1)
+        elif previous == "down":
+            item["downvotes"] = max(0, item["downvotes"] - 1)
+        # Apply new vote
+        item["voters"][voter_id] = direction
+        if direction == "up":
+            item["upvotes"] += 1
+        else:
+            item["downvotes"] += 1
+        user_vote = direction
+
+    with open(catalog_path, "w", encoding="utf-8") as f:
+        json.dump(catalog, f, indent=4)
+
+    return JSONResponse(content={
+        "status": "success",
+        "upvotes": item["upvotes"],
+        "downvotes": item["downvotes"],
+        "user_vote": user_vote
+    })
 
 @router.post("/settings/skills/delete/{skill_id}")
 async def delete_skill(skill_id: str):
@@ -1148,7 +1333,7 @@ async def upload_skill_to_marketplace(skill_id: str):
          catalog.append({
               "id": item_id, "name": skill.get("name", skill_id), "description": skill.get("description", ""),
               "type": "skill", "filename": f"{skill_id}.md", "save_filename": f"{item_id}.md", 
-              "uploaded_at": datetime.now().isoformat(), "uploader_id": get_hardware_id(),
+              "uploaded_at": datetime.now().isoformat(), "uploader_id": get_public_user_id(),
               "content_hash": content_hash
          })
          

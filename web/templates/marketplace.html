@@ -32,9 +32,7 @@
         <!-- Navigation Tabs -->
         <div class="flex space-x-2 bg-slate-950/40 p-1.5 rounded-xl border border-slate-800 self-start">
             <button onclick="switchTab('community')" id="tab-community" class="tab-btn px-4 py-2 rounded-lg bg-blue-600 text-white text-sm font-semibold transition-all">Community</button>
-            <button onclick="switchTab('modules')" id="tab-modules" class="tab-btn px-4 py-2 rounded-lg text-slate-400 hover:bg-slate-800 hover:text-white text-sm font-medium transition-all">Modules</button>
-            <button onclick="switchTab('tools')" id="tab-tools" class="tab-btn px-4 py-2 rounded-lg text-slate-400 hover:bg-slate-800 hover:text-white text-sm font-medium transition-all">Tools</button>
-            <button onclick="switchTab('skills')" id="tab-skills" class="tab-btn px-4 py-2 rounded-lg text-slate-400 hover:bg-slate-800 hover:text-white text-sm font-medium transition-all">Skills</button>
+            <button onclick="switchTab('library')" id="tab-library" class="tab-btn px-4 py-2 rounded-lg text-slate-400 hover:bg-slate-800 hover:text-white text-sm font-medium transition-all">Library</button>
         </div>
 
         <!-- Content Area -->
@@ -44,7 +42,8 @@
             <div id="view-community" class="view-content grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                 {% if catalog %}
                     {% for item in catalog %}
-                    <div id="marketplace-card-{{ item.id }}" onclick="openItemModal('{{ (item.name or '')|replace('\'', '\\\'') }}', '{{ (item.description or '')|replace('\'', '\\\'') }}', '{{ item.type }}', '{{ item.filename }}', '{{ item.id }}')" class="bg-slate-950/50 border border-slate-800 rounded-2xl p-6 flex flex-col justify-between hover:border-slate-700 hover:bg-slate-950/80 transition-all group shadow-lg overflow-hidden relative marketplace-card cursor-pointer">
+                    {% set user_vote = item.voters.get(hardware_id) if item.voters is defined else None %}
+                    <div id="marketplace-card-{{ item.id }}" onclick="window.location.href='/marketplace/item/{{ item.id }}'" class="bg-slate-950/50 border border-slate-800 rounded-2xl p-6 flex flex-col justify-between hover:border-slate-700 hover:bg-slate-950/80 transition-all group shadow-lg overflow-hidden relative marketplace-card cursor-pointer">
                         {% if item.image_filename %}
                         <div class="h-40 -mt-6 -mx-6 mb-4 overflow-hidden border-b border-slate-800/80">
                             <img src="/marketplace/image/{{ item.id }}" class="w-full h-full object-cover group-hover:scale-105 transition-all duration-300" alt="{{ item.name }}">
@@ -62,7 +61,27 @@
                             <span class="text-xs text-slate-500 truncate max-w-[200px]" title="{{ item.filename }}">📄 {{ item.filename }}</span>
                             <span class="text-[10px] text-slate-500 font-mono tracking-tight">👤 ID: {{ item.uploader_id }}</span>
                         </div>
-                        <div class="mt-4 pt-4 border-t border-slate-800/50 flex items-center justify-end space-x-2">
+                        <div class="mt-4 pt-4 border-t border-slate-800/50 flex items-center justify-between">
+                            <!-- Vote buttons -->
+                            <div class="flex items-center space-x-1">
+                                <button id="upvote-btn-{{ item.id }}"
+                                        onclick="event.stopPropagation(); castVote('{{ item.id }}', 'up')"
+                                        class="flex items-center space-x-1 px-2.5 py-1.5 rounded-lg text-xs font-bold border transition-all
+                                               {{ 'bg-emerald-900/40 text-emerald-400 border-emerald-700/50' if user_vote == 'up' else 'bg-slate-800/60 text-slate-400 hover:text-emerald-400 hover:border-emerald-700/40 border-slate-700/50' }}"
+                                        title="Upvote">
+                                    <svg class="w-3.5 h-3.5" fill="{{ 'currentColor' if user_vote == 'up' else 'none' }}" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 15l7-7 7 7"></path></svg>
+                                    <span id="upvote-count-{{ item.id }}">{{ item.upvotes if item.upvotes is defined else 0 }}</span>
+                                </button>
+                                <button id="downvote-btn-{{ item.id }}"
+                                        onclick="event.stopPropagation(); castVote('{{ item.id }}', 'down')"
+                                        class="flex items-center space-x-1 px-2.5 py-1.5 rounded-lg text-xs font-bold border transition-all
+                                               {{ 'bg-red-900/40 text-red-400 border-red-700/50' if user_vote == 'down' else 'bg-slate-800/60 text-slate-400 hover:text-red-400 hover:border-red-700/40 border-slate-700/50' }}"
+                                        title="Downvote">
+                                    <svg class="w-3.5 h-3.5" fill="{{ 'currentColor' if user_vote == 'down' else 'none' }}" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
+                                    <span id="downvote-count-{{ item.id }}">{{ item.downvotes if item.downvotes is defined else 0 }}</span>
+                                </button>
+                            </div>
+                            <!-- Actions -->
                             <div class="flex items-center space-x-2">
                                 {% if item.uploader_id == 'local_user' or item.uploader_id == hardware_id %}
                                 <button onclick="event.stopPropagation(); openDeleteMarketplaceModal('{{ item.id }}', '{{ (item.name or '')|replace('\'', '\\\'') }}')" class="bg-red-950/30 hover:bg-red-950/50 text-red-500 hover:text-red-400 px-3 py-1.5 rounded-xl text-xs font-bold border border-red-800/20 transition-all">
@@ -85,67 +104,94 @@
                 {% endif %}
             </div>
 
-            <!-- Modules Tab (Local) -->
-            <div id="view-modules" class="view-content hidden grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                {% for module in modules %}
-                <div class="bg-slate-950/30 border border-slate-800/80 rounded-2xl p-6 flex flex-col justify-between hover:border-slate-700 transition-all shadow-md">
-                    <div>
-                        <div class="flex justify-between items-center mb-3">
-                            <span class="px-2 py-0.5 rounded-md text-xs font-bold uppercase {{ 'bg-emerald-900/40 text-emerald-400 border border-emerald-800/30' if module.enabled else 'bg-slate-800 text-slate-400' }}">
-                                {{ 'Active' if module.enabled else 'Disabled' }}
-                            </span>
-                        </div>
-                        <h3 class="text-lg font-bold text-white">{{ module.name }}</h3>
-                        <p class="text-xs text-slate-400 mt-1">ID: <code class="bg-slate-800 px-1 py-0.5 rounded text-blue-300">{{ module.id }}</code></p>
-                        <p class="text-sm text-slate-400 mt-3 line-clamp-2">{{ module.description }}</p>
-                    </div>
-                    <div class="mt-6 pt-4 border-t border-slate-800/40">
-                        <a href="/settings" class="text-xs text-blue-400 hover:text-blue-300 font-semibold flex items-center justify-end">Configure Settings →</a>
-                    </div>
-                </div>
-                {% endfor %}
-            </div>
+            <!-- Library Tab (Modules + Tools + Skills, list-style) -->
+            <div id="view-library" class="view-content hidden flex flex-col gap-8">
 
-            <!-- Tools Tab (Local) -->
-            <div id="view-tools" class="view-content hidden grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                {% for t_name, t_data in tools.items() %}
-                <div class="bg-slate-950/30 border border-slate-800/80 rounded-2xl p-6 flex flex-col justify-between hover:border-slate-700 transition-all shadow-md">
-                    <div>
-                        <div class="flex justify-between items-center mb-3">
-                             <span class="px-2 py-0.5 rounded-md text-xs font-bold uppercase {{ 'bg-blue-900/40 text-blue-400 border border-blue-800/30' if t_data.enabled else 'bg-slate-800 text-slate-400' }}">
-                                {{ 'Enabled' if t_data.enabled else 'Disabled' }}
-                             </span>
-                        </div>
-                        <h3 class="text-lg font-bold text-white">{{ t_name }}</h3>
-                        <p class="text-sm text-slate-400 mt-2 line-clamp-3">{{ t_data.definition.function.description }}</p>
+                <!-- Modules section -->
+                <div>
+                    <div class="flex items-center space-x-3 mb-3">
+                        <h2 class="text-xs font-bold uppercase tracking-widest text-slate-500">Modules</h2>
+                        <div class="flex-1 h-px bg-slate-800"></div>
+                        <a href="/settings" class="text-xs text-blue-400 hover:text-blue-300 font-semibold transition-colors">Manage →</a>
                     </div>
-                    <div class="mt-6 pt-4 border-t border-slate-800/40">
-                         <a href="/settings" class="text-xs text-blue-400 hover:text-blue-300 font-semibold flex items-center justify-end">Manage Tools →</a>
+                    <div class="flex flex-col divide-y divide-slate-800/60 border border-slate-800/60 rounded-xl overflow-hidden">
+                        {% for module in modules %}
+                        <div class="flex items-center justify-between px-4 py-3 bg-slate-950/30 hover:bg-slate-950/60 transition-colors">
+                            <div class="flex items-center space-x-3 min-w-0">
+                                <span class="flex-shrink-0 w-2 h-2 rounded-full {{ 'bg-emerald-400' if module.enabled else 'bg-slate-600' }}"></span>
+                                <div class="min-w-0">
+                                    <span class="text-sm font-semibold text-white">{{ module.name }}</span>
+                                    <code class="ml-2 text-xs text-slate-500 bg-slate-800/60 px-1.5 py-0.5 rounded">{{ module.id }}</code>
+                                </div>
+                            </div>
+                            <div class="flex items-center space-x-4 flex-shrink-0 ml-4">
+                                <p class="text-xs text-slate-500 hidden md:block max-w-xs truncate">{{ module.description }}</p>
+                                <span class="text-xs font-bold {{ 'text-emerald-400' if module.enabled else 'text-slate-500' }}">{{ 'Active' if module.enabled else 'Disabled' }}</span>
+                            </div>
+                        </div>
+                        {% else %}
+                        <div class="px-4 py-6 text-center text-sm text-slate-600">No modules installed.</div>
+                        {% endfor %}
                     </div>
                 </div>
-                {% endfor %}
-            </div>
 
-            <!-- Skills Tab (Local) -->
-            <div id="view-skills" class="view-content hidden grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                {% for s_id, s_data in skills.items() %}
-                <div class="bg-slate-950/30 border border-slate-800/80 rounded-2xl p-6 flex flex-col justify-between hover:border-slate-700 transition-all shadow-md">
-                    <div>
-                        <div class="flex justify-between items-center mb-3">
-                             <span class="px-2 py-0.5 rounded-md text-xs font-bold bg-slate-800 text-slate-300 border border-slate-700">{{ s_data.category }}</span>
+                <!-- Tools section -->
+                <div>
+                    <div class="flex items-center space-x-3 mb-3">
+                        <h2 class="text-xs font-bold uppercase tracking-widest text-slate-500">Tools</h2>
+                        <div class="flex-1 h-px bg-slate-800"></div>
+                        <a href="/settings" class="text-xs text-blue-400 hover:text-blue-300 font-semibold transition-colors">Manage →</a>
+                    </div>
+                    <div class="flex flex-col divide-y divide-slate-800/60 border border-slate-800/60 rounded-xl overflow-hidden">
+                        {% for t_name, t_data in tools.items() %}
+                        <div class="flex items-center justify-between px-4 py-3 bg-slate-950/30 hover:bg-slate-950/60 transition-colors">
+                            <div class="flex items-center space-x-3 min-w-0">
+                                <span class="flex-shrink-0 w-2 h-2 rounded-full {{ 'bg-blue-400' if t_data.enabled else 'bg-slate-600' }}"></span>
+                                <span class="text-sm font-semibold text-white">{{ t_name }}</span>
+                            </div>
+                            <div class="flex items-center space-x-4 flex-shrink-0 ml-4">
+                                <p class="text-xs text-slate-500 hidden md:block max-w-xs truncate">{{ t_data.definition.function.description }}</p>
+                                <span class="text-xs font-bold {{ 'text-blue-400' if t_data.enabled else 'text-slate-500' }}">{{ 'Enabled' if t_data.enabled else 'Disabled' }}</span>
+                            </div>
                         </div>
-                        <h3 class="text-lg font-bold text-white">{{ s_data.name }}</h3>
-                        <p class="text-sm text-slate-400 mt-2 line-clamp-3">{{ s_data.description }}</p>
-                        {% if s_data.tags %}
-                        <div class="flex flex-wrap gap-1 mt-3">
-                            {% for tag in s_data.tags %}
-                            <span class="text-xs bg-slate-800/50 px-1.5 py-0.5 rounded border border-slate-700/50 text-slate-500">#{{ tag }}</span>
-                            {% endfor %}
-                        </div>
-                        {% endif %}
+                        {% else %}
+                        <div class="px-4 py-6 text-center text-sm text-slate-600">No tools available.</div>
+                        {% endfor %}
                     </div>
                 </div>
-                {% endfor %}
+
+                <!-- Skills section -->
+                <div>
+                    <div class="flex items-center space-x-3 mb-3">
+                        <h2 class="text-xs font-bold uppercase tracking-widest text-slate-500">Skills</h2>
+                        <div class="flex-1 h-px bg-slate-800"></div>
+                        <a href="/settings" class="text-xs text-blue-400 hover:text-blue-300 font-semibold transition-colors">Manage →</a>
+                    </div>
+                    <div class="flex flex-col divide-y divide-slate-800/60 border border-slate-800/60 rounded-xl overflow-hidden">
+                        {% for s_id, s_data in skills.items() %}
+                        <div class="flex items-center justify-between px-4 py-3 bg-slate-950/30 hover:bg-slate-950/60 transition-colors">
+                            <div class="flex items-center space-x-3 min-w-0">
+                                <span class="flex-shrink-0 w-2 h-2 rounded-full bg-purple-400"></span>
+                                <span class="text-sm font-semibold text-white">{{ s_data.name }}</span>
+                                <span class="text-xs bg-slate-800/60 text-slate-400 px-1.5 py-0.5 rounded border border-slate-700/40 flex-shrink-0">{{ s_data.category }}</span>
+                            </div>
+                            <div class="flex items-center space-x-4 flex-shrink-0 ml-4">
+                                <p class="text-xs text-slate-500 hidden md:block max-w-xs truncate">{{ s_data.description }}</p>
+                                {% if s_data.tags %}
+                                <div class="hidden lg:flex items-center space-x-1">
+                                    {% for tag in s_data.tags[:3] %}
+                                    <span class="text-xs bg-slate-800/40 px-1.5 py-0.5 rounded text-slate-600">#{{ tag }}</span>
+                                    {% endfor %}
+                                </div>
+                                {% endif %}
+                            </div>
+                        </div>
+                        {% else %}
+                        <div class="px-4 py-6 text-center text-sm text-slate-600">No skills available.</div>
+                        {% endfor %}
+                    </div>
+                </div>
+
             </div>
 
         </div>
@@ -199,17 +245,15 @@
 
     <script>
         function switchTab(viewId) {
-            // Toggles views
             document.querySelectorAll('.view-content').forEach(el => el.classList.add('hidden'));
             document.getElementById('view-' + viewId).classList.remove('hidden');
 
-            // Toggles button styles
             document.querySelectorAll('.tab-btn').forEach(el => {
-                el.classList.remove('bg-blue-600', 'text-white');
+                el.classList.remove('bg-blue-600', 'text-white', 'font-semibold');
                 el.classList.add('text-slate-400', 'hover:bg-slate-800', 'hover:text-white', 'font-medium');
             });
             const activeBtn = document.getElementById('tab-' + viewId);
-            activeBtn.classList.add('bg-blue-600', 'text-white');
+            activeBtn.classList.add('bg-blue-600', 'text-white', 'font-semibold');
             activeBtn.classList.remove('text-slate-400', 'hover:bg-slate-800', 'hover:text-white', 'font-medium');
         }
 
@@ -221,32 +265,41 @@
             document.getElementById('upload-modal').classList.add('hidden');
         }
 
-        function openItemModal(name, description, type, filename, id) {
-            document.getElementById('modal-item-name').innerText = name;
-            document.getElementById('modal-item-description').innerText = description;
-            document.getElementById('modal-item-badge').innerText = type;
-            document.getElementById('modal-item-download').href = '/marketplace/download/' + id;
-            document.getElementById('item-view-modal').classList.remove('hidden');
-            
-            const previewEl = document.getElementById('modal-item-preview');
-            previewEl.innerText = "Loading content...";
-            
-            fetch('/marketplace/preview/' + id)
-            .then(response => response.json())
+        function castVote(itemId, direction) {
+            fetch('/marketplace/vote/' + itemId + '/' + direction, { method: 'POST' })
+            .then(r => r.json())
             .then(data => {
-                if (data.status === 'success') {
-                    previewEl.innerText = data.content;
-                } else {
-                    previewEl.innerText = "Error loading content: " + (data.message || 'Unknown');
+                if (data.status !== 'success') return;
+
+                // Update counts
+                const upCount = document.getElementById('upvote-count-' + itemId);
+                const downCount = document.getElementById('downvote-count-' + itemId);
+                if (upCount) upCount.textContent = data.upvotes;
+                if (downCount) downCount.textContent = data.downvotes;
+
+                // Update button active states
+                const upBtn = document.getElementById('upvote-btn-' + itemId);
+                const downBtn = document.getElementById('downvote-btn-' + itemId);
+
+                const activeUp   = 'bg-emerald-900/40 text-emerald-400 border-emerald-700/50';
+                const inactiveUp = 'bg-slate-800/60 text-slate-400 hover:text-emerald-400 hover:border-emerald-700/40 border-slate-700/50';
+                const activeDn   = 'bg-red-900/40 text-red-400 border-red-700/50';
+                const inactiveDn = 'bg-slate-800/60 text-slate-400 hover:text-red-400 hover:border-red-700/40 border-slate-700/50';
+
+                if (upBtn) {
+                    const isUp = data.user_vote === 'up';
+                    upBtn.className = upBtn.className.replace(/bg-\S+|text-\S+|border-\S+|hover:\S+/g, '').trim();
+                    upBtn.className = 'flex items-center space-x-1 px-2.5 py-1.5 rounded-lg text-xs font-bold border transition-all ' + (isUp ? activeUp : inactiveUp);
+                    upBtn.querySelector('svg').setAttribute('fill', isUp ? 'currentColor' : 'none');
+                }
+                if (downBtn) {
+                    const isDn = data.user_vote === 'down';
+                    downBtn.className = downBtn.className.replace(/bg-\S+|text-\S+|border-\S+|hover:\S+/g, '').trim();
+                    downBtn.className = 'flex items-center space-x-1 px-2.5 py-1.5 rounded-lg text-xs font-bold border transition-all ' + (isDn ? activeDn : inactiveDn);
+                    downBtn.querySelector('svg').setAttribute('fill', isDn ? 'currentColor' : 'none');
                 }
             })
-            .catch(() => {
-                previewEl.innerText = "No preview available or failed to load.";
-            });
-        }
-        
-        function closeItemModal() {
-            document.getElementById('item-view-modal').classList.add('hidden');
+            .catch(() => {});
         }
 
         let activeDeleteMarketplaceId = '';
@@ -297,33 +350,6 @@
             activeDeleteMarketplaceId = '';
         }
     </script>
-
-    <!-- Item View Modal -->
-    <div id="item-view-modal" class="hidden fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4" onclick="if(event.target === this) closeItemModal()">
-        <div class="bg-slate-900 border border-slate-800 rounded-2xl max-w-xl w-full flex flex-col shadow-2xl overflow-hidden">
-            <div class="p-6 border-b border-slate-800 flex justify-between items-center bg-slate-950/40">
-                <div class="flex items-center space-x-3">
-                    <span id="modal-item-badge" class="px-2.5 py-1 rounded-md text-xs font-bold uppercase bg-indigo-900/50 text-indigo-300 border border-indigo-800/50"></span>
-                    <h3 id="modal-item-name" class="text-xl font-bold text-white"></h3>
-                </div>
-                <button onclick="closeItemModal()" class="text-slate-500 hover:text-white text-xl">&times;</button>
-            </div>
-            <div class="p-6 flex-grow overflow-y-auto custom-scrollbar">
-                <p id="modal-item-description" class="text-sm text-slate-400 mb-6 leading-relaxed"></p>
-                <div class="p-4 bg-slate-950 border border-slate-800 rounded-xl">
-                    <h4 class="text-xs font-bold text-slate-300 mb-2">Content / Preview</h4>
-                    <div id="modal-item-preview" class="text-xs text-slate-400 font-mono whitespace-pre-wrap leading-relaxed max-h-60 overflow-y-auto custom-scrollbar">Loading content...</div>
-                </div>
-            </div>
-            <div class="p-6 border-t border-slate-800 flex justify-end space-x-3 bg-slate-950/20">
-                <button onclick="closeItemModal()" class="px-4 py-2 rounded-lg text-sm font-bold text-slate-400 hover:bg-slate-800 transition-all">Close</button>
-                <a id="modal-item-download" href="#" class="bg-blue-600 hover:bg-blue-500 text-white px-5 py-2 rounded-lg text-sm font-bold transition-all shadow-lg shadow-blue-500/20 flex items-center space-x-2">
-                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
-                    <span>Download</span>
-                </a>
-            </div>
-        </div>
-    </div>
 
     <!-- Delete Confirmation Modal -->
     <div id="delete-marketplace-modal" class="hidden fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4" onclick="if(event.target === this) closeDeleteMarketplaceModal()">
