@@ -4,6 +4,7 @@ import threading
 from core.settings import SettingsManager, settings as settings_manager
 from core.llm import LLMBridge
 from core.module_manager import ModuleManager
+from core.research_manager import ResearchManager, get_research_manager_instance
 
 
 # Module-level cached LLM bridge instance
@@ -82,3 +83,8 @@ def get_llm_bridge(settings: SettingsManager = Depends(get_settings_manager)) ->
 def get_module_manager(request: Request) -> ModuleManager:
     """Dependency to get the module manager instance from the app state."""
     return request.app.state.module_manager
+
+
+def get_research_manager() -> ResearchManager:
+    """Dependency to get the global ResearchManager singleton."""
+    return get_research_manager_instance()

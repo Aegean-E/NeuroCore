@@ -12,11 +12,12 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, File
 from fastapi.templating import Jinja2Templates
 
 from core.settings import SettingsManager, settings
-from core.dependencies import get_settings_manager, get_module_manager, get_llm_bridge, require_debug_mode
+from core.dependencies import get_settings_manager, get_module_manager, get_llm_bridge, require_debug_mode, get_research_manager
 from core.module_manager import ModuleManager
 from core.flow_manager import flow_manager
 from core.llm import LLMBridge
 from core.debug import debug_logger
+from core.research_manager import ResearchManager
 
 logger = logging.getLogger(__name__)
 
@@ -2640,12 +2641,618 @@ async def get_default_config(module_id: str, module_manager: ModuleManager = Dep
     # Extract default values from config schema
     config_schema = module_data.get('config', {})
     default_config = {}
-    
+
     for key, value in config_schema.items():
         if isinstance(value, dict) and 'value' in value:
             default_config[key] = value['value']
         else:
             # For flat config values (like in chat module)
             default_config[key] = value
-    
+
     return JSONResponse(content=default_config)
+
+
+# --- Research ---
+
+@router.get("/research", response_class=HTMLResponse)
+async def get_research(request: Request, settings_man: SettingsManager = Depends(get_settings_manager), module_manager: ModuleManager = Depends(get_module_manager)):
+    modules = module_manager.get_all_modules()
+    return templates.TemplateResponse(request, "research.html", {
+        "modules": modules,
+        "settings": settings_man.settings,
+    })
+
+
+@router.get("/research/stats", response_class=HTMLResponse)
+async def get_research_stats(request: Request, rm: ResearchManager = Depends(get_research_manager)):
+    stats = rm.get_stats()
+    return templates.TemplateResponse(request, "research_stats.html", {"stats": stats})
+
+
+# --- Hypotheses ---
+
+@router.get("/research/hypotheses", response_class=HTMLResponse)
+async def list_hypotheses(request: Request, status: str = "", domain: str = "", rm: ResearchManager = Depends(get_research_manager)):
+    hypotheses = rm.get_hypotheses(status=status or None, domain=domain or None)
+    return templates.TemplateResponse(request, "research_hypotheses.html", {"hypotheses": hypotheses})
+
+
+@router.get("/research/hypotheses/{hypothesis_id}/edit", response_class=HTMLResponse)
+async def edit_hypothesis_form(request: Request, hypothesis_id: str, rm: ResearchManager = Depends(get_research_manager)):
+    h = rm.get_hypothesis(hypothesis_id)
+    if not h:
+        raise HTTPException(status_code=404, detail="Hypothesis not found")
+    return templates.TemplateResponse(request, "research_hypothesis_edit.html", {"h": h})
+
+
+@router.post("/research/hypotheses", response_class=HTMLResponse)
+async def create_hypothesis(
+    request: Request,
+    title: str = Form(...),
+    statement: str = Form(...),
+    hypothesis_type: str = Form("correlation"),
+    domain: str = Form("general"),
+    independent_variable: str = Form(""),
+    dependent_variable: str = Form(""),
+    notes: str = Form(""),
+    rm: ResearchManager = Depends(get_research_manager),
+):
+    rm.create_hypothesis({
+        "title": title,
+        "statement": statement,
+        "hypothesis_type": hypothesis_type,
+        "domain": domain,
+        "independent_variable": independent_variable or None,
+        "dependent_variable": dependent_variable or None,
+        "notes": notes or None,
+    })
+    hypotheses = rm.get_hypotheses()
+    return templates.TemplateResponse(request, "research_hypotheses.html", {"hypotheses": hypotheses})
+
+
+@router.put("/research/hypotheses/{hypothesis_id}", response_class=HTMLResponse)
+async def update_hypothesis(
+    request: Request,
+    hypothesis_id: str,
+    title: str = Form(...),
+    statement: str = Form(...),
+    hypothesis_type: str = Form("correlation"),
+    status: str = Form("proposed"),
+    domain: str = Form("general"),
+    independent_variable: str = Form(""),
+    dependent_variable: str = Form(""),
+    notes: str = Form(""),
+    rm: ResearchManager = Depends(get_research_manager),
+):
+    rm.update_hypothesis(hypothesis_id, {
+        "title": title,
+        "statement": statement,
+        "hypothesis_type": hypothesis_type,
+        "status": status,
+        "domain": domain,
+        "independent_variable": independent_variable or None,
+        "dependent_variable": dependent_variable or None,
+        "notes": notes or None,
+    })
+    hypotheses = rm.get_hypotheses()
+    return templates.TemplateResponse(request, "research_hypotheses.html", {"hypotheses": hypotheses})
+
+
+@router.delete("/research/hypotheses/{hypothesis_id}")
+async def delete_hypothesis(hypothesis_id: str, rm: ResearchManager = Depends(get_research_manager)):
+    deleted = rm.delete_hypothesis(hypothesis_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Hypothesis not found")
+    return Response(status_code=200)
+
+
+# --- Articles ---
+
+@router.get("/research/articles", response_class=HTMLResponse)
+async def list_articles(request: Request, domain: str = "", article_type: str = "", q: str = "", rm: ResearchManager = Depends(get_research_manager)):
+    articles = rm.get_articles(domain=domain or None, article_type=article_type or None)
+    if q:
+        q_lower = q.lower()
+        articles = [
+            a for a in articles
+            if q_lower in a["title"].lower()
+            or any(q_lower in author.lower() for author in (a.get("authors") or []))
+        ]
+    return templates.TemplateResponse(request, "research_articles.html", {"articles": articles})
+
+
+@router.post("/research/articles", response_class=HTMLResponse)
+async def create_article(
+    request: Request,
+    title: str = Form(...),
+    authors: str = Form(""),
+    year: str = Form(""),
+    journal: str = Form(""),
+    doi: str = Form(""),
+    url: str = Form(""),
+    abstract: str = Form(""),
+    article_type: str = Form("research"),
+    domain: str = Form("general"),
+    notes: str = Form(""),
+    rm: ResearchManager = Depends(get_research_manager),
+):
+    authors_list = [a.strip() for a in authors.split(",") if a.strip()] if authors else []
+    rm.create_article({
+        "title": title,
+        "authors": authors_list,
+        "year": int(year) if year.strip() else None,
+        "journal": journal or None,
+        "doi": doi or None,
+        "url": url or None,
+        "abstract": abstract or None,
+        "article_type": article_type,
+        "domain": domain,
+        "notes": notes or None,
+    })
+    articles = rm.get_articles()
+    return templates.TemplateResponse(request, "research_articles.html", {"articles": articles})
+
+
+@router.delete("/research/articles/{article_id}")
+async def delete_article(article_id: str, rm: ResearchManager = Depends(get_research_manager)):
+    deleted = rm.delete_article(article_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Article not found")
+    return Response(status_code=200)
+
+
+# --- Study Designs ---
+
+@router.get("/research/study-designs", response_class=HTMLResponse)
+async def list_study_designs(request: Request, hypothesis_id: str = "", status: str = "", rm: ResearchManager = Depends(get_research_manager)):
+    studies = rm.get_study_designs(hypothesis_id=hypothesis_id or None, status=status or None)
+    return templates.TemplateResponse(request, "research_studies.html", {"studies": studies})
+
+
+@router.post("/research/study-designs", response_class=HTMLResponse)
+async def create_study_design(
+    request: Request,
+    title: str = Form(...),
+    study_type: str = Form(...),
+    population: str = Form(...),
+    sample_size: str = Form(""),
+    sampling_method: str = Form("random"),
+    design_type: str = Form(""),
+    control_group: str = Form(""),
+    randomization: str = Form(""),
+    blinding: str = Form(""),
+    notes: str = Form(""),
+    rm: ResearchManager = Depends(get_research_manager),
+):
+    rm.create_study_design({
+        "title": title,
+        "study_type": study_type,
+        "population": population,
+        "sample_size": int(sample_size) if sample_size.strip() else None,
+        "sampling_method": sampling_method,
+        "design_type": design_type or None,
+        "control_group": control_group == "true",
+        "randomization": randomization == "true",
+        "blinding": blinding or None,
+        "notes": notes or None,
+    })
+    studies = rm.get_study_designs()
+    return templates.TemplateResponse(request, "research_studies.html", {"studies": studies})
+
+
+@router.put("/research/study-designs/{study_id}")
+async def update_study_design(study_id: str, status: str = Form(...), notes: str = Form(""), rm: ResearchManager = Depends(get_research_manager)):
+    updated = rm.update_study_design(study_id, {"status": status, "notes": notes or None})
+    if not updated:
+        raise HTTPException(status_code=404, detail="Study design not found")
+    return JSONResponse(content={"status": "success"})
+
+
+@router.delete("/research/study-designs/{study_id}")
+async def delete_study_design(study_id: str, rm: ResearchManager = Depends(get_research_manager)):
+    deleted = rm.delete_study_design(study_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Study design not found")
+    return Response(status_code=200)
+
+
+# --- Findings ---
+
+@router.get("/research/findings", response_class=HTMLResponse)
+async def list_findings(request: Request, hypothesis_id: str = "", study_id: str = "", significance: str = "", rm: ResearchManager = Depends(get_research_manager)):
+    findings = rm.get_findings(hypothesis_id=hypothesis_id or None, study_id=study_id or None)
+    if significance:
+        findings = [f for f in findings if f["significance"] == significance]
+    return templates.TemplateResponse(request, "research_findings.html", {"findings": findings})
+
+
+@router.post("/research/findings", response_class=HTMLResponse)
+async def create_finding(
+    request: Request,
+    title: str = Form(...),
+    summary: str = Form(...),
+    conclusion: str = Form(...),
+    statistical_test: str = Form(""),
+    p_value: str = Form(""),
+    effect_size: str = Form(""),
+    significance: str = Form("not_significant"),
+    status: str = Form("preliminary"),
+    notes: str = Form(""),
+    rm: ResearchManager = Depends(get_research_manager),
+):
+    rm.create_finding({
+        "title": title,
+        "summary": summary,
+        "conclusion": conclusion,
+        "statistical_test": statistical_test or None,
+        "p_value": float(p_value) if p_value.strip() else None,
+        "effect_size": float(effect_size) if effect_size.strip() else None,
+        "significance": significance,
+        "status": status,
+        "notes": notes or None,
+    })
+    findings = rm.get_findings()
+    return templates.TemplateResponse(request, "research_findings.html", {"findings": findings})
+
+
+@router.delete("/research/findings/{finding_id}")
+async def delete_finding(finding_id: str, rm: ResearchManager = Depends(get_research_manager)):
+    deleted = rm.delete_finding(finding_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Finding not found")
+    return Response(status_code=200)
+
+
+# --- Paper Writer ---
+
+@router.post("/research/paper/draft")
+async def draft_paper(
+    title: str = Form(""),
+    domain: str = Form("general"),
+    section: str = Form("abstract"),
+    context: str = Form(...),
+    style: str = Form("academic"),
+    llm: LLMBridge = Depends(get_llm_bridge),
+    settings_man: SettingsManager = Depends(get_settings_manager),
+):
+    section_labels = {
+        "abstract": "Abstract",
+        "introduction": "Introduction",
+        "literature_review": "Literature Review",
+        "methodology": "Methodology",
+        "results": "Results",
+        "discussion": "Discussion",
+        "conclusion": "Conclusion",
+        "full_paper": "Full Paper",
+    }
+    style_instructions = {
+        "academic": "Write in formal academic prose with precise language, third-person perspective, and passive voice where appropriate.",
+        "technical": "Write in precise technical language with clear structure and exact terminology.",
+        "concise": "Write concisely. Be brief and direct. Avoid padding.",
+        "detailed": "Write in comprehensive detail, covering all aspects thoroughly.",
+    }
+    section_label = section_labels.get(section, section)
+    style_instruction = style_instructions.get(style, "Write in academic style.")
+    paper_title = f'Paper title: "{title}"\n' if title else ""
+    prompt = (
+        f"You are an expert academic writer in the field of {domain}.\n"
+        f"{paper_title}"
+        f"Write the {section_label} section for a research paper.\n\n"
+        f"Context and key points provided by the researcher:\n{context}\n\n"
+        f"{style_instruction}\n"
+        f"Output only the {section_label} text itself, no meta-commentary."
+    )
+    messages = [{"role": "user", "content": prompt}]
+    try:
+        response = await llm.chat(
+            messages=messages,
+            model=settings_man.get("default_model", ""),
+            temperature=0.7,
+            max_tokens=settings_man.get("max_tokens", 2048),
+        )
+        draft = response.get("choices", [{}])[0].get("message", {}).get("content", "")
+        return JSONResponse(content={"draft": draft})
+    except Exception as e:
+        return JSONResponse(content={"error": str(e)})
+
+
+# --- Experiments (Interventions / Metrics / Logs / Events / Analysis) ---
+
+@router.get("/research/experiments", response_class=HTMLResponse)
+async def get_experiments(request: Request, rm: ResearchManager = Depends(get_research_manager)):
+    interventions = rm.get_interventions()
+    return templates.TemplateResponse(request, "research_experiments.html", {"interventions": interventions})
+
+
+@router.post("/research/interventions", response_class=HTMLResponse)
+async def create_intervention(
+    request: Request,
+    name: str = Form(...),
+    description: str = Form(""),
+    start_date: str = Form(...),
+    end_date_projected: str = Form(""),
+    end_date_actual: str = Form(""),
+    notes: str = Form(""),
+    rm: ResearchManager = Depends(get_research_manager),
+):
+    rm.create_intervention({
+        "name": name,
+        "description": description or None,
+        "start_date": start_date,
+        "end_date_projected": end_date_projected or None,
+        "end_date_actual": end_date_actual or None,
+        "notes": notes or None,
+    })
+    return Response(status_code=200)
+
+
+@router.put("/research/interventions/{intervention_id}")
+async def update_intervention(
+    intervention_id: str,
+    end_date_actual: str = Form(""),
+    name: str = Form(""),
+    description: str = Form(""),
+    start_date: str = Form(""),
+    end_date_projected: str = Form(""),
+    notes: str = Form(""),
+    rm: ResearchManager = Depends(get_research_manager),
+):
+    data = {}
+    if end_date_actual:
+        data["end_date_actual"] = end_date_actual
+    if name:
+        data["name"] = name
+    if description:
+        data["description"] = description
+    if start_date:
+        data["start_date"] = start_date
+    if end_date_projected:
+        data["end_date_projected"] = end_date_projected
+    if notes:
+        data["notes"] = notes
+    updated = rm.update_intervention(intervention_id, data)
+    if not updated:
+        raise HTTPException(status_code=404, detail="Intervention not found")
+    return JSONResponse(content={"status": "success"})
+
+
+@router.delete("/research/interventions/{intervention_id}")
+async def delete_intervention(intervention_id: str, rm: ResearchManager = Depends(get_research_manager)):
+    deleted = rm.delete_intervention(intervention_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Intervention not found")
+    return Response(status_code=200)
+
+
+@router.get("/research/interventions/{intervention_id}/export")
+async def export_intervention_csv(intervention_id: str, rm: ResearchManager = Depends(get_research_manager)):
+    iv = rm.get_intervention(intervention_id)
+    if not iv:
+        raise HTTPException(status_code=404, detail="Intervention not found")
+    csv_data = rm.export_csv(intervention_id)
+    filename = iv["name"].replace(" ", "_").lower() + "_data.csv"
+    return Response(
+        content=csv_data,
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.get("/research/metrics", response_class=HTMLResponse)
+async def list_metrics_html(request: Request, rm: ResearchManager = Depends(get_research_manager)):
+    metrics = rm.get_metrics()
+    return templates.TemplateResponse(request, "research_metrics_list.html", {"metrics": metrics})
+
+
+@router.get("/research/metrics/json")
+async def list_metrics_json(rm: ResearchManager = Depends(get_research_manager)):
+    return JSONResponse(content=rm.get_metrics())
+
+
+@router.post("/research/metrics")
+async def create_metric(
+    name: str = Form(...),
+    description: str = Form(""),
+    unit: str = Form(""),
+    rm: ResearchManager = Depends(get_research_manager),
+):
+    try:
+        metric = rm.create_metric({"name": name, "description": description or None, "unit": unit or None})
+        return JSONResponse(content=metric)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.delete("/research/metrics/{metric_id}")
+async def delete_metric(metric_id: str, rm: ResearchManager = Depends(get_research_manager)):
+    deleted = rm.delete_metric(metric_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Metric not found")
+    return Response(status_code=200)
+
+
+@router.post("/research/metric-logs")
+async def log_metric(
+    intervention_id: str = Form(...),
+    metric_name: str = Form(...),
+    log_date: str = Form(...),
+    value: str = Form(...),
+    notes: str = Form(""),
+    rm: ResearchManager = Depends(get_research_manager),
+):
+    try:
+        entry = rm.log_metric({
+            "intervention_id": intervention_id,
+            "metric_name": metric_name,
+            "log_date": log_date,
+            "value": float(value),
+            "notes": notes or None,
+        })
+        return JSONResponse(content=entry)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.get("/research/metric-logs/{intervention_id}", response_class=HTMLResponse)
+async def get_metric_logs(request: Request, intervention_id: str, metric: str = "", rm: ResearchManager = Depends(get_research_manager)):
+    logs = rm.get_metric_logs(intervention_id, metric_name=metric or None)
+    return templates.TemplateResponse(request, "research_logs_list.html", {"logs": logs})
+
+
+@router.delete("/research/metric-logs/{log_id}")
+async def delete_metric_log(log_id: str, rm: ResearchManager = Depends(get_research_manager)):
+    deleted = rm.delete_metric_log(log_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Log entry not found")
+    return Response(status_code=200)
+
+
+@router.post("/research/events")
+async def log_event(
+    intervention_id: str = Form(...),
+    name: str = Form(...),
+    event_datetime: str = Form(...),
+    severity: str = Form("low"),
+    notes: str = Form(""),
+    rm: ResearchManager = Depends(get_research_manager),
+):
+    event = rm.log_event({
+        "intervention_id": intervention_id,
+        "name": name,
+        "event_datetime": event_datetime,
+        "severity": severity,
+        "notes": notes or None,
+    })
+    return JSONResponse(content=event)
+
+
+@router.get("/research/events/{intervention_id}", response_class=HTMLResponse)
+async def get_events(request: Request, intervention_id: str, rm: ResearchManager = Depends(get_research_manager)):
+    events = rm.get_events(intervention_id)
+    return templates.TemplateResponse(request, "research_events_list.html", {"events": events})
+
+
+@router.delete("/research/events/{event_id}")
+async def delete_event(event_id: str, rm: ResearchManager = Depends(get_research_manager)):
+    deleted = rm.delete_event(event_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Event not found")
+    return Response(status_code=200)
+
+
+@router.post("/research/experiments/analyze")
+async def analyze_experiment(
+    intervention_id: str = Form(...),
+    metric_name: str = Form(...),
+    start_date: str = Form(...),
+    baseline_days: int = Form(14),
+    intervention_days: int = Form(14),
+    alpha: float = Form(0.05),
+    rm: ResearchManager = Depends(get_research_manager),
+):
+    from datetime import date, timedelta
+    from core.statistics_engine import intervention_analysis
+
+    try:
+        start = date.fromisoformat(start_date)
+    except ValueError:
+        return JSONResponse(content={"error": f"Invalid start date: {start_date}"})
+
+    baseline_start = start - timedelta(days=baseline_days)
+    intervention_end = start + timedelta(days=intervention_days)
+
+    all_logs = rm.get_metric_logs(intervention_id, metric_name=metric_name)
+
+    baseline_vals = [
+        log["value"] for log in all_logs
+        if baseline_start <= date.fromisoformat(log["log_date"]) < start
+    ]
+    intervention_vals = [
+        log["value"] for log in all_logs
+        if start <= date.fromisoformat(log["log_date"]) <= intervention_end
+    ]
+
+    if len(baseline_vals) < 2:
+        return JSONResponse(content={"error": f"Not enough baseline data (found {len(baseline_vals)} points, need ≥ 2). Log data before the start date."})
+    if len(intervention_vals) < 2:
+        return JSONResponse(content={"error": f"Not enough intervention data (found {len(intervention_vals)} points, need ≥ 2). Log data after the start date."})
+
+    try:
+        result = intervention_analysis(baseline_vals, intervention_vals, alpha=alpha)
+        return JSONResponse(content=result)
+    except Exception as e:
+        return JSONResponse(content={"error": str(e)})
+
+
+# --- Ad-hoc Statistics ---
+
+@router.post("/research/statistics/analyze")
+async def analyze_statistics(
+    type: str = Form(...),
+    data_a: str = Form(...),
+    data_b: str = Form(""),
+    mu: float = Form(0.0),
+    alpha: float = Form(0.05),
+    confidence: float = Form(0.95),
+):
+    import core.statistics_engine as se
+
+    try:
+        a = se.parse_data(data_a)
+    except ValueError as e:
+        return JSONResponse(content={"error": f"Dataset A: {e}"})
+
+    b = None
+    if data_b.strip():
+        try:
+            b = se.parse_data(data_b)
+        except ValueError as e:
+            return JSONResponse(content={"error": f"Dataset B: {e}"})
+
+    try:
+        if type == "descriptive":
+            result = se.descriptive_stats(a)
+            result["test"] = "Descriptive Statistics"
+        elif type == "one_sample_ttest":
+            result = se.one_sample_ttest(a, mu=mu, alpha=alpha)
+        elif type == "two_sample_ttest":
+            if b is None:
+                return JSONResponse(content={"error": "Dataset B is required."})
+            result = se.two_sample_ttest(a, b, equal_var=False, alpha=alpha)
+        elif type == "paired_ttest":
+            if b is None:
+                return JSONResponse(content={"error": "Dataset B is required."})
+            result = se.paired_ttest(a, b, alpha=alpha)
+        elif type == "mann_whitney":
+            if b is None:
+                return JSONResponse(content={"error": "Dataset B is required."})
+            result = se.mann_whitney(a, b, alpha=alpha)
+        elif type == "pearson":
+            if b is None:
+                return JSONResponse(content={"error": "Dataset B is required."})
+            result = se.pearson_correlation(a, b, alpha=alpha)
+        elif type == "spearman":
+            if b is None:
+                return JSONResponse(content={"error": "Dataset B is required."})
+            result = se.spearman_correlation(a, b, alpha=alpha)
+        elif type == "chi_square":
+            result = se.chi_square_goodness(a, expected=b, alpha=alpha)
+        elif type == "anova":
+            if b is None:
+                return JSONResponse(content={"error": "At least 2 groups required. Put group 2 in Dataset B."})
+            result = se.one_way_anova(a, b, alpha=alpha)
+        elif type == "confidence_interval":
+            result = se.confidence_interval(a, confidence=confidence)
+            result["test"] = "Confidence Interval"
+        elif type == "intervention":
+            if b is None:
+                return JSONResponse(content={"error": "Dataset B (intervention) is required."})
+            result = se.intervention_analysis(a, b, alpha=alpha)
+        else:
+            return JSONResponse(content={"error": f"Unknown test type: {type}"})
+
+        return JSONResponse(content=result)
+    except ValueError as e:
+        return JSONResponse(content={"error": str(e)})
+    except Exception as e:
+        return JSONResponse(content={"error": f"Analysis failed: {e}"})
