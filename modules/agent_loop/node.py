@@ -2777,26 +2777,38 @@ class GoalPursuitExecutor(HybridAgentExecutor):
             pass
         return []
 
-    async def _create_plan(self, user_request: str, config: dict, lessons: str = "") -> list:
+    async def _create_plan(
+        self,
+        user_request: str,
+        config: dict,
+        lessons: str = "",
+        tools_summary: str = "",
+    ) -> list:
         """Call LLM to create an initial step-by-step plan."""
         max_steps = int(config.get("max_steps", 10))
         prompt = config.get("planning_prompt", self._DEFAULT_PLANNING_PROMPT)
         prompt = prompt.replace("{request}", user_request).replace("{max_steps}", str(max_steps))
-        if lessons:
-            # Inject lessons before the final JSON-only instruction so the model
-            # still sees "JSON array only" as the last instruction.
-            json_instruction = "Respond with a JSON array only. No prose."
-            lessons_block = (
-                f"Lessons from past runs of similar goals "
-                f"(take these into account when structuring your plan):\n{lessons}"
+
+        # Inject tools + lessons before the final JSON-only instruction so the
+        # model still sees "JSON array only" as the last directive.
+        json_instruction = "Respond with a JSON array only. No prose."
+        inserts = []
+        if tools_summary:
+            inserts.append(
+                "Available tools (plan steps around these — don't invent actions "
+                "that no tool can perform):\n" + tools_summary
             )
+        if lessons:
+            inserts.append(
+                "Lessons from past runs of similar goals "
+                "(take these into account when structuring your plan):\n" + lessons
+            )
+        if inserts:
+            block = "\n\n".join(inserts)
             if json_instruction in prompt:
-                prompt = prompt.replace(
-                    json_instruction,
-                    f"{lessons_block}\n\n{json_instruction}",
-                )
+                prompt = prompt.replace(json_instruction, f"{block}\n\n{json_instruction}")
             else:
-                prompt += f"\n\n{lessons_block}"
+                prompt += f"\n\n{block}"
         model = config.get("model") or settings.get("default_model")
         response = await self._llm_with_retry(
             messages=[
@@ -4015,6 +4027,17 @@ class GoalPursuitExecutor(HybridAgentExecutor):
                 await stream_queue.put({"type": "thinking", "content": list(thinking_steps)})
 
         async def _create_plan_with_trace() -> list:
+            # Build a compact tools summary so the planner knows what's available
+            tools_summary = ""
+            if tools_list:
+                lines = []
+                for tool_def in tools_list:
+                    name = tool_def.get("function", {}).get("name", "")
+                    desc = tool_def.get("function", {}).get("description", "")
+                    if name:
+                        lines.append(f"- {name}: {desc[:120]}" if desc else f"- {name}")
+                tools_summary = "\n".join(lines)
+
             # Fetch past goal_reflection lessons and compress if needed
             lessons_list = await self._fetch_goal_lessons(config)
             lessons = ""
@@ -4029,7 +4052,9 @@ class GoalPursuitExecutor(HybridAgentExecutor):
                     ),
                 })
 
-            plan = await self._create_plan(user_goal, config, lessons=lessons)
+            plan = await self._create_plan(
+                user_goal, config, lessons=lessons, tools_summary=tools_summary
+            )
             self._log_agent_event("goal_pursuit_plan_created", {
                 "steps": len(plan),
                 "goal_preview": user_goal[:100],

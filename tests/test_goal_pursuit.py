@@ -1178,9 +1178,9 @@ async def test_lessons_injected_into_planning_prompt():
     captured_prompts = []
     original_create_plan = ex._create_plan.__func__
 
-    async def capturing_create_plan(self, user_request, config, lessons=""):
+    async def capturing_create_plan(self, user_request, config, lessons="", tools_summary=""):
         captured_prompts.append(lessons)
-        return await original_create_plan(self, user_request, config, lessons=lessons)
+        return await original_create_plan(self, user_request, config, lessons=lessons, tools_summary=tools_summary)
 
     with patch.object(type(ex), "_create_plan", capturing_create_plan), \
          patch.object(ex, "_fetch_goal_lessons", return_value=["Past lesson: use tool X."]), \
