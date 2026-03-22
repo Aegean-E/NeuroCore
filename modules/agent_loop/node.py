@@ -3052,14 +3052,16 @@ class GoalPursuitExecutor(HybridAgentExecutor, RLMAgentLoopExecutor):
         config: dict,
         lessons: str = "",
         tools_summary: str = "",
+        pattern_insights: str = "",
+        planning_assumptions: str = "",
     ) -> list:
         """Call LLM to create an initial step-by-step plan."""
         max_steps = int(config.get("max_steps", 10))
         prompt = config.get("planning_prompt", self._DEFAULT_PLANNING_PROMPT)
         prompt = prompt.replace("{request}", user_request).replace("{max_steps}", str(max_steps))
 
-        # Inject tools + lessons before the final JSON-only instruction so the
-        # model still sees "JSON array only" as the last directive.
+        # Inject tools + lessons + metacognition context before the final
+        # JSON-only instruction so the model still sees "JSON array only" last.
         json_instruction = "Respond with a JSON array only. No prose."
         inserts = []
         if tools_summary:
@@ -3067,11 +3069,19 @@ class GoalPursuitExecutor(HybridAgentExecutor, RLMAgentLoopExecutor):
                 "Available tools (plan steps around these — don't invent actions "
                 "that no tool can perform):\n" + tools_summary
             )
+        if pattern_insights:
+            inserts.append(
+                "Pattern insights from past runs (recurring failures, success "
+                "patterns, warning signs — structure your plan to avoid known "
+                "failure modes):\n" + pattern_insights
+            )
         if lessons:
             inserts.append(
                 "Lessons from past runs of similar goals "
                 "(take these into account when structuring your plan):\n" + lessons
             )
+        if planning_assumptions:
+            inserts.append(planning_assumptions)
         if inserts:
             block = "\n\n".join(inserts)
             if json_instruction in prompt:
@@ -3411,6 +3421,16 @@ class GoalPursuitExecutor(HybridAgentExecutor, RLMAgentLoopExecutor):
                     f"Do NOT re-derive or re-search for information already known:\n"
                     f"{insight_lines}"
                 )
+            # Metacognition warning — injected when the no-progress spiral is detected.
+            meta_warning = repl_state.get("_metacognition_warning", "")
+            if meta_warning:
+                parts.append(meta_warning)
+            # Mid-run assessment — strategic correction after the first wave.
+            mid_assessment = repl_state.get("_mid_run_assessment", "")
+            if mid_assessment:
+                parts.append(
+                    f"## Strategic Self-Assessment\n{mid_assessment}"
+                )
         step_risk = step.get("risk", "low")
         step_reversible = step.get("reversible", True)
         risk_note = ""
@@ -3675,6 +3695,177 @@ class GoalPursuitExecutor(HybridAgentExecutor, RLMAgentLoopExecutor):
 
         logger.info(f"[GoalPursuit] Compressed {compressed_count} step result(s) for synthesis")
         return compressed_count
+
+    # ------------------------------------------------------------------
+    # Metacognition helpers
+    # ------------------------------------------------------------------
+
+    async def _assess_task_clarity(self, user_goal: str, config: dict) -> dict:
+        """Lightweight pre-plan assessment of task specificity.
+
+        Identifies critical unknowns that would block correct execution and
+        safe assumptions the agent can make to proceed despite ambiguity.
+
+        Returns:
+            {
+              "is_actionable": bool,
+              "critical_unknowns": [str],   # blockers if not addressed
+              "safe_assumptions": [str],    # reasonable defaults that allow proceeding
+            }
+
+        On failure, returns {"is_actionable": True, ...} so planning is not
+        blocked by a failed clarity check.
+        """
+        model = config.get("model") or settings.get("default_model")
+        resp = await self._llm_with_retry(
+            messages=[{
+                "role": "user",
+                "content": (
+                    "Assess this task before autonomous execution.\n\n"
+                    f"Task: {user_goal}\n\n"
+                    "Answer:\n"
+                    "1. Can this be executed autonomously without clarification?\n"
+                    "2. What CRITICAL unknowns (if any) would prevent correct execution "
+                    "(missing scope, ambiguous targets, contradictory requirements)?\n"
+                    "3. What SAFE ASSUMPTIONS can be made to proceed despite any ambiguity?\n\n"
+                    "Reply with JSON only:\n"
+                    '{"is_actionable": true/false, '
+                    '"critical_unknowns": ["...", "..."], '
+                    '"safe_assumptions": ["...", "..."]}'
+                ),
+            }],
+            model=model,
+            temperature=0.0,
+            max_tokens=300,
+            tools=[],
+            max_retries=2,
+            retry_delay=1.0,
+        )
+        _default = {"is_actionable": True, "critical_unknowns": [], "safe_assumptions": []}
+        if not resp or "choices" not in resp:
+            return _default
+        raw = resp["choices"][0]["message"].get("content", "").strip()
+        try:
+            import re as _re
+            m = _re.search(r'\{.*\}', raw, _re.DOTALL)
+            if m:
+                parsed = json.loads(m.group())
+                return {
+                    "is_actionable": bool(parsed.get("is_actionable", True)),
+                    "critical_unknowns": [str(u) for u in parsed.get("critical_unknowns", [])],
+                    "safe_assumptions": [str(a) for a in parsed.get("safe_assumptions", [])],
+                }
+        except Exception:
+            pass
+        return _default
+
+    async def _mid_run_assessment(
+        self,
+        completed_steps: list,
+        remaining_steps: list,
+        repl_state: dict,
+        config: dict,
+        user_goal: str,
+    ) -> str:
+        """Self-assessment run once after the first wave completes.
+
+        Reviews whether the approach is producing meaningful progress toward
+        the goal and identifies any strategic corrections needed before the
+        remaining steps execute.  Result is stored in
+        ``repl_state["_mid_run_assessment"]`` and injected into subsequent
+        step system prompts.
+        """
+        insights = repl_state.get("_run_insights", [])
+        insights_str = (
+            "\n".join(f"  - {i}" for i in insights)
+            if insights
+            else "  (no concrete findings yet)"
+        )
+        completed_str = "\n".join(
+            f"  ✓ Step {s.get('step')}: {s.get('action')}"
+            for s in completed_steps
+        )
+        remaining_str = "\n".join(
+            f"  → Step {s.get('step')}: {s.get('action')}"
+            for s in remaining_steps[:5]
+        )
+        model = config.get("model") or settings.get("default_model")
+        resp = await self._llm_with_retry(
+            messages=[{
+                "role": "user",
+                "content": (
+                    "Mid-run self-assessment for an autonomous agent.\n\n"
+                    f"Goal: {user_goal}\n\n"
+                    f"Completed steps:\n{completed_str}\n\n"
+                    f"Concrete findings so far:\n{insights_str}\n\n"
+                    f"Remaining steps:\n{remaining_str}\n\n"
+                    "In 2-3 sentences answer:\n"
+                    "1. Is the current approach making meaningful progress toward the goal?\n"
+                    "2. Is there a fundamental strategic error that needs correction?\n"
+                    "3. What one specific adjustment (if any) would most improve the "
+                    "remaining execution?\n\n"
+                    "Be concrete and critical. Do not summarise what was already done."
+                ),
+            }],
+            model=model,
+            temperature=0.1,
+            max_tokens=200,
+            tools=[],
+            max_retries=2,
+            retry_delay=1.0,
+        )
+        if resp and "choices" in resp:
+            return (resp["choices"][0]["message"].get("content") or "").strip()
+        return ""
+
+    async def _extract_failure_patterns(
+        self,
+        lessons_list: list,
+        config: dict,
+    ) -> str:
+        """Infer recurring patterns from past goal-execution lessons.
+
+        Unlike ``_compress_lessons`` (which summarises for token efficiency),
+        this call asks the LLM to reason *across* lessons: what consistently
+        fails, what consistently works, and what warning signs predict failure.
+        Only called when enough data points exist (>= 3 lessons).
+
+        Returns a bullet-point pattern summary injected into the planning
+        prompt as a distinct "Pattern insights" section.
+        """
+        if len(lessons_list) < 3:
+            return ""
+        lessons_text = "\n\n".join(
+            f"Lesson {i + 1}:\n"
+            + (l.get("content", str(l)) if isinstance(l, dict) else str(l))
+            for i, l in enumerate(lessons_list[:20])
+        )
+        model = config.get("model") or settings.get("default_model")
+        resp = await self._llm_with_retry(
+            messages=[{
+                "role": "user",
+                "content": (
+                    "Analyze these past goal execution lessons and extract "
+                    "PATTERNS — not summaries of individual lessons, but "
+                    "recurring trends across all of them.\n\n"
+                    f"{lessons_text}\n\n"
+                    "Identify in 3-5 bullet points:\n"
+                    "• Recurring failure modes (tools or approaches that repeatedly fail)\n"
+                    "• Approaches that consistently succeed\n"
+                    "• Warning signs that appear before failures\n\n"
+                    "Be specific and actionable. Patterns only — no per-lesson summaries."
+                ),
+            }],
+            model=model,
+            temperature=0.1,
+            max_tokens=300,
+            tools=[],
+            max_retries=2,
+            retry_delay=1.0,
+        )
+        if resp and "choices" in resp:
+            return (resp["choices"][0]["message"].get("content") or "").strip()
+        return ""
 
     # ------------------------------------------------------------------
     # Synthesis
@@ -4900,6 +5091,57 @@ class GoalPursuitExecutor(HybridAgentExecutor, RLMAgentLoopExecutor):
                     except Exception as e:
                         logger.warning(f"[GoalPursuit] Episode checkpoint failed: {e}")
 
+                # ── Metacognition: no-progress spiral detection ────────────
+                # If we've replanned >= half the allowed depth and still have zero
+                # concrete findings, the agent is likely stuck in a strategy that
+                # will never produce results.  Flag this so subsequent steps see a
+                # warning and reconsider their approach before acting.
+                _insights_so_far = len(repl_state.get("_run_insights", []))
+                _spiral_threshold = max(1, max_replan_depth // 2)
+                if replan_count >= _spiral_threshold and _insights_so_far == 0:
+                    repl_state["_metacognition_warning"] = (
+                        f"⚠️ METACOGNITION: This run has replanned {replan_count} time(s) "
+                        f"but accumulated 0 concrete findings. The current strategy may be "
+                        f"fundamentally misaligned with the task. Before issuing tool calls, "
+                        f"verify that your core approach is sound and actually achievable "
+                        f"with the available tools."
+                    )
+                    logger.warning(
+                        "[GoalPursuit] No-progress spiral detected after "
+                        f"{replan_count} replans with 0 insights"
+                    )
+
+                # ── Mid-run self-assessment (runs once, after first wave) ──
+                # After the first successful wave completes and more steps remain,
+                # ask the agent to evaluate whether the approach is on track.
+                # Controlled by enable_mid_run_assessment (default True).
+                _enable_mra = bool(config.get("enable_mid_run_assessment", True))
+                _first_wave_done = (
+                    len(completed_steps) > 0
+                    and not repl_state.get("_mid_run_assessment_done", False)
+                    and bool(remaining_steps)
+                )
+                if _enable_mra and _first_wave_done:
+                    try:
+                        assessment = await self._mid_run_assessment(
+                            completed_steps=completed_steps,
+                            remaining_steps=remaining_steps,
+                            repl_state=repl_state,
+                            config=config,
+                            user_goal=user_goal,
+                        )
+                        repl_state["_mid_run_assessment"] = assessment
+                        repl_state["_mid_run_assessment_done"] = True
+                        if assessment:
+                            await _push_thinking({
+                                "type": "tool_call",
+                                "name": "MidRunAssessment",
+                                "content": assessment[:300],
+                            })
+                            logger.info("[GoalPursuit] Mid-run assessment completed")
+                    except Exception as _mra_e:
+                        logger.debug(f"[GoalPursuit] Mid-run assessment failed: {_mra_e}")
+
             # Step 3: synthesize final answer
             if completed_steps and enable_synthesis and len(completed_steps) > 1:
                 # Pre-compress large step results so synthesizer context stays manageable
@@ -5040,20 +5282,69 @@ class GoalPursuitExecutor(HybridAgentExecutor, RLMAgentLoopExecutor):
 
             # Fetch past goal_reflection lessons and compress if needed
             lessons_list = await self._fetch_goal_lessons(config)
-            lessons = ""
+
+            # Run task clarity check, lesson compression, and pattern extraction
+            # in parallel to avoid sequential LLM call overhead.
+            clarity_task = asyncio.ensure_future(
+                self._assess_task_clarity(user_goal, config)
+            )
+            compress_task = asyncio.ensure_future(
+                self._compress_lessons(lessons_list, config) if lessons_list else asyncio.sleep(0)
+            )
+            patterns_task = asyncio.ensure_future(
+                self._extract_failure_patterns(lessons_list, config)
+                if len(lessons_list) >= 3
+                else asyncio.sleep(0)
+            )
+            clarity_result, compressed_lessons, pattern_insights = await asyncio.gather(
+                clarity_task, compress_task, patterns_task, return_exceptions=True
+            )
+            # Guard against task failures
+            clarity = clarity_result if isinstance(clarity_result, dict) else {}
+            lessons = compressed_lessons if isinstance(compressed_lessons, str) else ""
+            pattern_insights = pattern_insights if isinstance(pattern_insights, str) else ""
+
             if lessons_list:
-                lessons = await self._compress_lessons(lessons_list, config)
                 await _push_thinking({
                     "type": "tool_call",
                     "name": "LoadLessons",
                     "content": (
                         f"Loaded {len(lessons_list)} past lesson(s) for planning"
                         + (" (compressed)" if len(lessons_list) > 1 else "")
+                        + (f" | Patterns: {pattern_insights[:80]}..." if pattern_insights else "")
+                    ),
+                })
+
+            # Build planning assumptions from task clarity check.
+            planning_assumptions = ""
+            if clarity.get("safe_assumptions") or clarity.get("critical_unknowns"):
+                lines = []
+                if clarity.get("critical_unknowns"):
+                    lines.append(
+                        "Critical unknowns (address in plan if possible): "
+                        + "; ".join(clarity["critical_unknowns"][:3])
+                    )
+                if clarity.get("safe_assumptions"):
+                    lines.append(
+                        "Proceeding with these assumptions: "
+                        + "; ".join(clarity["safe_assumptions"][:3])
+                    )
+                planning_assumptions = "Planning context:\n" + "\n".join(lines)
+                await _push_thinking({
+                    "type": "tool_call",
+                    "name": "TaskClarityCheck",
+                    "content": (
+                        f"Actionable: {clarity.get('is_actionable', True)}\n"
+                        + planning_assumptions
                     ),
                 })
 
             plan = await self._create_plan(
-                user_goal, config, lessons=lessons, tools_summary=tools_summary
+                user_goal, config,
+                lessons=lessons,
+                tools_summary=tools_summary,
+                pattern_insights=pattern_insights,
+                planning_assumptions=planning_assumptions,
             )
             self._log_agent_event("goal_pursuit_plan_created", {
                 "steps": len(plan),

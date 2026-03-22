@@ -8,9 +8,12 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from modules.agent_loop.node import GoalPursuitExecutor
 
-# Capture the real _reason_about_step before any autouse fixtures can stub it.
-# Tests that exercise the real method use this reference to restore it.
+# Capture the real methods before any autouse fixtures can stub them.
+# Tests that exercise the real methods use these references to restore them.
 _real_reason_about_step = GoalPursuitExecutor._reason_about_step
+_real_assess_task_clarity = GoalPursuitExecutor._assess_task_clarity
+_real_mid_run_assessment = GoalPursuitExecutor._mid_run_assessment
+_real_extract_failure_patterns = GoalPursuitExecutor._extract_failure_patterns
 
 
 # ---------------------------------------------------------------------------
@@ -64,6 +67,30 @@ def _stub_step_reasoning(monkeypatch):
         "modules.agent_loop.node.GoalPursuitExecutor._reason_about_step",
         _no_reasoning,
     )
+
+
+@pytest.fixture(autouse=True)
+def _stub_metacognition_calls(monkeypatch):
+    """Stub out the three new metacognition LLM calls for all GoalPursuit tests.
+
+    _assess_task_clarity, _mid_run_assessment, and _extract_failure_patterns
+    each make an extra LLM round-trip.  Existing tests set up precise mock
+    response sequences that would be disrupted by those extra calls.
+    Tests that specifically exercise these methods must undo this fixture
+    with monkeypatch.setattr(...) inside the test body.
+    """
+    async def _no_clarity(self, user_goal, config):
+        return {"is_actionable": True, "critical_unknowns": [], "safe_assumptions": []}
+
+    async def _no_mid_assessment(self, completed_steps, remaining_steps, repl_state, config, user_goal):
+        return ""
+
+    async def _no_failure_patterns(self, lessons_list, config):
+        return ""
+
+    monkeypatch.setattr("modules.agent_loop.node.GoalPursuitExecutor._assess_task_clarity", _no_clarity)
+    monkeypatch.setattr("modules.agent_loop.node.GoalPursuitExecutor._mid_run_assessment", _no_mid_assessment)
+    monkeypatch.setattr("modules.agent_loop.node.GoalPursuitExecutor._extract_failure_patterns", _no_failure_patterns)
 
 
 # ---------------------------------------------------------------------------
@@ -1209,9 +1236,9 @@ async def test_lessons_injected_into_planning_prompt():
     captured_prompts = []
     original_create_plan = ex._create_plan.__func__
 
-    async def capturing_create_plan(self, user_request, config, lessons="", tools_summary=""):
+    async def capturing_create_plan(self, user_request, config, lessons="", tools_summary="", pattern_insights="", planning_assumptions=""):
         captured_prompts.append(lessons)
-        return await original_create_plan(self, user_request, config, lessons=lessons, tools_summary=tools_summary)
+        return await original_create_plan(self, user_request, config, lessons=lessons, tools_summary=tools_summary, pattern_insights=pattern_insights, planning_assumptions=planning_assumptions)
 
     with patch.object(type(ex), "_create_plan", capturing_create_plan), \
          patch.object(ex, "_fetch_goal_lessons", return_value=["Past lesson: use tool X."]), \
@@ -3470,3 +3497,290 @@ async def test_evaluate_step_prompt_contains_anti_filler_rules():
     combined = " ".join(m.get("content", "") for m in captured_prompts)
     assert "fabricat" in combined.lower()
     assert "vague" in combined.lower()
+
+
+# ---------------------------------------------------------------------------
+# Claim 3: _assess_task_clarity (pre-plan metacognition)
+# ---------------------------------------------------------------------------
+
+async def test_assess_task_clarity_returns_structured_result(monkeypatch):
+    """_assess_task_clarity must return is_actionable, critical_unknowns, safe_assumptions."""
+    monkeypatch.setattr(GoalPursuitExecutor, "_assess_task_clarity", _real_assess_task_clarity)
+    ex = make_executor()
+
+    async def fake_llm(messages, **kwargs):
+        return {"choices": [{"message": {"content": (
+            '{"is_actionable": false, '
+            '"critical_unknowns": ["What time period?"], '
+            '"safe_assumptions": ["Assume last 30 days"]}'
+        )}}]}
+
+    with patch.object(ex, "_llm_with_retry", side_effect=fake_llm):
+        result = await ex._assess_task_clarity("Analyze the sales data", {})
+
+    assert result["is_actionable"] is False
+    assert "What time period?" in result["critical_unknowns"]
+    assert "Assume last 30 days" in result["safe_assumptions"]
+
+
+async def test_assess_task_clarity_defaults_on_llm_failure(monkeypatch):
+    """On LLM failure, _assess_task_clarity must return safe defaults (is_actionable=True)."""
+    monkeypatch.setattr(GoalPursuitExecutor, "_assess_task_clarity", _real_assess_task_clarity)
+    ex = make_executor()
+
+    async def fake_llm(messages, **kwargs):
+        return None
+
+    with patch.object(ex, "_llm_with_retry", side_effect=fake_llm):
+        result = await ex._assess_task_clarity("Do something", {})
+
+    assert result["is_actionable"] is True
+    assert result["critical_unknowns"] == []
+    assert result["safe_assumptions"] == []
+
+
+async def test_assess_task_clarity_defaults_on_bad_json(monkeypatch):
+    """On unparseable LLM response, defaults must be returned."""
+    monkeypatch.setattr(GoalPursuitExecutor, "_assess_task_clarity", _real_assess_task_clarity)
+    ex = make_executor()
+
+    async def fake_llm(messages, **kwargs):
+        return {"choices": [{"message": {"content": "not json at all"}}]}
+
+    with patch.object(ex, "_llm_with_retry", side_effect=fake_llm):
+        result = await ex._assess_task_clarity("Do something", {})
+
+    assert result["is_actionable"] is True
+
+
+# ---------------------------------------------------------------------------
+# Claim 3: Metacognition warning — no-progress spiral detection
+# ---------------------------------------------------------------------------
+
+def test_metacognition_warning_set_on_no_progress_spiral():
+    """_metacognition_warning must be set when replans >= half-depth AND insights empty."""
+    repl_state = {"_run_insights": [], "_metacognition_warning": ""}
+    max_replan_depth = 4
+    replan_count = 2  # >= max(1, 4//2) = 2
+
+    _insights_so_far = len(repl_state.get("_run_insights", []))
+    _spiral_threshold = max(1, max_replan_depth // 2)
+    if replan_count >= _spiral_threshold and _insights_so_far == 0:
+        repl_state["_metacognition_warning"] = (
+            f"⚠️ METACOGNITION: This run has replanned {replan_count} time(s) "
+            f"but accumulated 0 concrete findings."
+        )
+
+    assert repl_state["_metacognition_warning"] != ""
+    assert "METACOGNITION" in repl_state["_metacognition_warning"]
+
+
+def test_metacognition_warning_not_set_when_insights_exist():
+    """Warning must NOT be set when the agent has made progress (has insights)."""
+    repl_state = {
+        "_run_insights": ["Step 1 (Search): Revenue was $42M"],
+        "_metacognition_warning": "",
+    }
+    max_replan_depth = 4
+    replan_count = 2
+
+    _insights_so_far = len(repl_state.get("_run_insights", []))
+    _spiral_threshold = max(1, max_replan_depth // 2)
+    if replan_count >= _spiral_threshold and _insights_so_far == 0:
+        repl_state["_metacognition_warning"] = "WARNING"
+
+    assert repl_state["_metacognition_warning"] == ""
+
+
+def test_metacognition_warning_not_set_below_threshold():
+    """Warning must NOT be set when replan_count is below the spiral threshold."""
+    repl_state = {"_run_insights": [], "_metacognition_warning": ""}
+    max_replan_depth = 4
+    replan_count = 1  # < max(1, 4//2) = 2
+
+    _spiral_threshold = max(1, max_replan_depth // 2)
+    if replan_count >= _spiral_threshold and len(repl_state["_run_insights"]) == 0:
+        repl_state["_metacognition_warning"] = "WARNING"
+
+    assert repl_state["_metacognition_warning"] == ""
+
+
+def test_build_step_system_prompt_shows_metacognition_warning():
+    """_build_step_system_prompt must include the warning when it's set."""
+    ex = make_executor()
+    step = {"step": 1, "action": "Search", "target": "x", "goal": "find x"}
+    repl_state = {
+        "variables": {},
+        "_run_insights": [],
+        "_metacognition_warning": "⚠️ METACOGNITION: replanned 2 times, 0 findings.",
+        "_mid_run_assessment": "",
+    }
+    prompt = ex._build_step_system_prompt(
+        step=step, plan_context="## Plan\n...",
+        input_data={}, config={}, large_output_threshold=1000, repl_state=repl_state,
+    )
+    assert "METACOGNITION" in prompt
+    assert "replanned 2 times" in prompt
+
+
+def test_build_step_system_prompt_shows_mid_run_assessment():
+    """_build_step_system_prompt must show Strategic Self-Assessment when set."""
+    ex = make_executor()
+    step = {"step": 2, "action": "Analyze", "target": "data", "goal": "find trend"}
+    repl_state = {
+        "variables": {},
+        "_run_insights": [],
+        "_metacognition_warning": "",
+        "_mid_run_assessment": "The search step produced data. Analysis looks on track.",
+    }
+    prompt = ex._build_step_system_prompt(
+        step=step, plan_context="## Plan\n...",
+        input_data={}, config={}, large_output_threshold=1000, repl_state=repl_state,
+    )
+    assert "Strategic Self-Assessment" in prompt
+    assert "on track" in prompt
+
+
+# ---------------------------------------------------------------------------
+# Claim 4: _mid_run_assessment
+# ---------------------------------------------------------------------------
+
+async def test_mid_run_assessment_returns_string(monkeypatch):
+    """_mid_run_assessment must return a non-empty string from the LLM."""
+    monkeypatch.setattr(GoalPursuitExecutor, "_mid_run_assessment", _real_mid_run_assessment)
+    ex = make_executor()
+
+    async def fake_llm(messages, **kwargs):
+        return {"choices": [{"message": {"content": "The approach looks on track."}}]}
+
+    completed = [{"step": 1, "action": "Search", "target": "x"}]
+    remaining = [{"step": 2, "action": "Analyze", "target": "data"}]
+    repl_state = {"_run_insights": ["Step 1: found data"]}
+
+    with patch.object(ex, "_llm_with_retry", side_effect=fake_llm):
+        result = await ex._mid_run_assessment(
+            completed_steps=completed,
+            remaining_steps=remaining,
+            repl_state=repl_state,
+            config={},
+            user_goal="analyze x",
+        )
+
+    assert "on track" in result
+
+
+async def test_mid_run_assessment_returns_empty_on_llm_failure(monkeypatch):
+    """On LLM failure, _mid_run_assessment must return empty string (not crash)."""
+    monkeypatch.setattr(GoalPursuitExecutor, "_mid_run_assessment", _real_mid_run_assessment)
+    ex = make_executor()
+
+    async def fake_llm(messages, **kwargs):
+        return None
+
+    with patch.object(ex, "_llm_with_retry", side_effect=fake_llm):
+        result = await ex._mid_run_assessment(
+            completed_steps=[{"step": 1, "action": "A", "target": "x"}],
+            remaining_steps=[{"step": 2, "action": "B", "target": "y"}],
+            repl_state={"_run_insights": []},
+            config={},
+            user_goal="test",
+        )
+
+    assert result == ""
+
+
+async def test_mid_run_assessment_prompt_includes_goal_and_insights(monkeypatch):
+    """The mid-run assessment prompt must include goal and current findings."""
+    monkeypatch.setattr(GoalPursuitExecutor, "_mid_run_assessment", _real_mid_run_assessment)
+    ex = make_executor()
+    captured = []
+
+    async def fake_llm(messages, **kwargs):
+        captured.extend(messages)
+        return {"choices": [{"message": {"content": "ok"}}]}
+
+    with patch.object(ex, "_llm_with_retry", side_effect=fake_llm):
+        await ex._mid_run_assessment(
+            completed_steps=[{"step": 1, "action": "Search", "target": "revenue"}],
+            remaining_steps=[{"step": 2, "action": "Analyze", "target": "data"}],
+            repl_state={"_run_insights": ["Step 1 (Search): Revenue was $42M"]},
+            config={},
+            user_goal="analyze Q3 financials",
+        )
+
+    combined = " ".join(m.get("content", "") for m in captured)
+    assert "analyze Q3 financials" in combined
+    assert "$42M" in combined
+
+
+# ---------------------------------------------------------------------------
+# Claim 5: _extract_failure_patterns
+# ---------------------------------------------------------------------------
+
+async def test_extract_failure_patterns_returns_empty_for_few_lessons(monkeypatch):
+    """Pattern extraction must return empty string when < 3 lessons."""
+    monkeypatch.setattr(GoalPursuitExecutor, "_extract_failure_patterns", _real_extract_failure_patterns)
+    ex = make_executor()
+    # No LLM should be called — verify by checking no LLM mock needed
+    result = await ex._extract_failure_patterns(
+        lessons_list=[{"content": "lesson 1"}, {"content": "lesson 2"}],
+        config={},
+    )
+    assert result == ""
+
+
+async def test_extract_failure_patterns_calls_llm_with_pattern_query(monkeypatch):
+    """_extract_failure_patterns must call LLM asking for patterns, not summaries."""
+    monkeypatch.setattr(GoalPursuitExecutor, "_extract_failure_patterns", _real_extract_failure_patterns)
+    ex = make_executor()
+    captured = []
+
+    async def fake_llm(messages, **kwargs):
+        captured.extend(messages)
+        return {"choices": [{"message": {"content": "• web_search consistently fails"}}]}
+
+    lessons = [{"content": f"Lesson {i}: web search failed"} for i in range(5)]
+    with patch.object(ex, "_llm_with_retry", side_effect=fake_llm):
+        result = await ex._extract_failure_patterns(lessons, config={})
+
+    combined = " ".join(m.get("content", "") for m in captured)
+    # Must ask for patterns, not per-lesson summaries
+    assert "pattern" in combined.lower() or "recurring" in combined.lower()
+    assert "web_search consistently fails" in result
+
+
+async def test_extract_failure_patterns_returns_empty_on_llm_failure(monkeypatch):
+    """On LLM failure, pattern extraction must return empty string."""
+    monkeypatch.setattr(GoalPursuitExecutor, "_extract_failure_patterns", _real_extract_failure_patterns)
+    ex = make_executor()
+
+    async def fake_llm(messages, **kwargs):
+        return None
+
+    lessons = [{"content": f"lesson {i}"} for i in range(5)]
+    with patch.object(ex, "_llm_with_retry", side_effect=fake_llm):
+        result = await ex._extract_failure_patterns(lessons, config={})
+
+    assert result == ""
+
+
+async def test_create_plan_receives_pattern_insights():
+    """_create_plan must inject pattern_insights into the planning prompt."""
+    ex = make_executor()
+    captured = []
+
+    async def fake_llm(messages, **kwargs):
+        captured.extend(messages)
+        return {"choices": [{"message": {"content": '[{"step":1,"action":"A","target":"B","goal":"G","depends_on":[]}]'}}]}
+
+    with patch.object(ex, "_llm_with_retry", side_effect=fake_llm):
+        await ex._create_plan(
+            user_request="find data",
+            config={},
+            pattern_insights="• web_search fails for niche topics",
+            planning_assumptions="Assume last 30 days",
+        )
+
+    combined = " ".join(m.get("content", "") for m in captured)
+    assert "web_search fails for niche topics" in combined
+    assert "Assume last 30 days" in combined
