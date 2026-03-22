@@ -461,6 +461,14 @@ class AgentBaseExecutor:
         repl_state["sub_call_count"] = repl_state.get("sub_call_count", 0) + 1
         old_depth = repl_state.get("recursion_depth", 0)
         repl_state["recursion_depth"] = old_depth + 1
+        # Reserve the cost estimate BEFORE awaiting the LLM call.  This closes
+        # the check-then-act window: parallel steps that share repl_state both
+        # see the updated total before their own LLM calls begin, so the cost
+        # guard at the top of this function is not bypassed when sub-calls from
+        # two concurrent steps are interleaved at the await point.
+        estimated_tokens = len(prompt) // 4 + max_tokens
+        _cost_delta = (estimated_tokens / 1000) * 0.001
+        repl_state["estimated_cost"] = repl_state.get("estimated_cost", 0.0) + _cost_delta
         try:
             response = await self.llm.chat_completion(
                 messages=[{"role": "user", "content": prompt}],
@@ -470,11 +478,6 @@ class AgentBaseExecutor:
             repl_state["recursion_depth"] = old_depth
             if response and "choices" in response:
                 content = response["choices"][0]["message"].get("content", "")
-                estimated_tokens = len(prompt) // 4 + max_tokens
-                repl_state["estimated_cost"] = (
-                    repl_state.get("estimated_cost", 0.0)
-                    + (estimated_tokens / 1000) * 0.001
-                )
                 return {
                     "tool_call_id": "",
                     "role": "tool",
@@ -2773,8 +2776,11 @@ class GoalPursuitExecutor(HybridAgentExecutor, RLMAgentLoopExecutor):
                 }
 
             # Standard pause mode — wait for user input.
+            # Key by the current asyncio task so parallel steps each own their
+            # question slot and cannot overwrite each other's question.
             if question:
-                repl_state["_pending_question"] = question
+                _task_id = id(asyncio.current_task())
+                repl_state.setdefault("_pending_questions", {})[_task_id] = question
             return {
                 "tool_call_id": tool_call.get("id", ""),
                 "role": "tool",
@@ -3126,14 +3132,24 @@ class GoalPursuitExecutor(HybridAgentExecutor, RLMAgentLoopExecutor):
         failure_reason: str,
         config: dict,
         tool_history: list = None,
+        repl_state: dict = None,
     ) -> list:
         """Generate a revised plan for remaining work after a step failure."""
         max_steps = int(config.get("max_steps", 10))
+        replan_result_max_chars = int(config.get("replan_result_max_chars", 600))
         if completed_steps:
             lines = []
+            variables = (repl_state or {}).get("variables", {})
             for i, step in enumerate(completed_steps):
                 r = step_results[i] if i < len(step_results) else {}
-                extracted = r.get("extracted_result", "")[:150]
+                step_num = step.get("step", i + 1)
+                # Prefer the full step output stored in repl_state variables;
+                # fall back to the evaluator's extracted_result (much shorter).
+                var_key = f"step_{step_num}_result"
+                if var_key in variables:
+                    extracted = str(variables[var_key])[:replan_result_max_chars]
+                else:
+                    extracted = r.get("extracted_result", "")[:replan_result_max_chars]
                 suffix = f" → {extracted}" if extracted else ""
                 lines.append(f"  ✓ {step.get('action', '?')}: {step.get('target', '')}{suffix}")
             completed_summary = "\n".join(lines)
@@ -3584,16 +3600,35 @@ class GoalPursuitExecutor(HybridAgentExecutor, RLMAgentLoopExecutor):
     def _context_pressure(self, repl_state: dict, max_context_tokens: int) -> float:
         """Estimate context pressure as a fraction in [0.0, 1.0].
 
-        Measured as the total token-equivalent of accumulated stdout output
-        across all completed steps.  When pressure is high the step executor
-        should switch from the hybrid loop (full outputs inline) to the RLM
-        loop (metadata stubs only) to keep the LLM context bounded.
+        Two signals are combined via max():
 
-        This is intentionally cheap — a single list comprehension — so it can
-        be called before every step without noticeable overhead.
+        * **RLM pressure** — accumulated stdout bytes from RLM-mode steps.
+          Each RLM step appends its LLM outputs to ``repl_state["stdout_history"]``.
+
+        * **Hybrid pressure** — peak inline conversation size from recent
+          hybrid-mode steps.  After each hybrid step the total byte-length of
+          ``step_messages`` is recorded in ``repl_state["_hybrid_output_history"]``.
+          This captures the within-step inline tool output that the RLM metric
+          cannot see (hybrid steps do not write to ``stdout_history``).
+
+        Using the peak of the last 3 hybrid steps rather than a cumulative sum
+        avoids penalising plans where only one heavy step occurred.
         """
+        _max = max(1, max_context_tokens)
+
+        # RLM signal: total accumulated stdout across RLM steps.
         stdout_chars = sum(len(s) for s in repl_state.get("stdout_history", []))
-        return min(1.0, (stdout_chars // 4) / max(1, max_context_tokens))
+        rlm_pressure = min(1.0, (stdout_chars // 4) / _max)
+
+        # Hybrid signal: peak inline context from recent hybrid steps.
+        hybrid_history = repl_state.get("_hybrid_output_history", [])
+        if hybrid_history:
+            peak_chars = max(hybrid_history[-3:])
+            hybrid_pressure = min(1.0, (peak_chars // 4) / _max)
+        else:
+            hybrid_pressure = 0.0
+
+        return max(rlm_pressure, hybrid_pressure)
 
     # ------------------------------------------------------------------
     # Main entry point
@@ -3859,6 +3894,18 @@ class GoalPursuitExecutor(HybridAgentExecutor, RLMAgentLoopExecutor):
                 )
 
                 # ── Pre-step chain-of-thought reasoning ──────────────────
+                # Build reasoning history from accumulated internal history
+                # (last 3 entries) plus any externally-supplied context.
+                _internal_history = repl_state.get("_step_reasoning_history", [])
+                _ext_context = input_data.get("reasoning_context", "")
+                _reasoning_history = "\n".join(_internal_history[-3:])
+                if _ext_context:
+                    _reasoning_history = (
+                        f"{_ext_context}\n{_reasoning_history}"
+                        if _reasoning_history
+                        else _ext_context
+                    )
+
                 reasoning = ""
                 if enable_step_reasoning:
                     try:
@@ -3868,11 +3915,15 @@ class GoalPursuitExecutor(HybridAgentExecutor, RLMAgentLoopExecutor):
                             config,
                             user_goal,
                             tools_list=tools_list,
-                            reasoning_history=input_data.get("reasoning_context", ""),
+                            reasoning_history=_reasoning_history,
                         )
                     except Exception as _re:
                         logger.debug(f"[GoalPursuit] Pre-step reasoning failed: {_re}")
                     if reasoning:
+                        # Persist so future steps can learn from this one.
+                        repl_state.setdefault("_step_reasoning_history", []).append(
+                            f"Step {step.get('step')} ({step.get('action', '')}): {reasoning}"
+                        )
                         await _push_thinking({
                             "type": "tool_call",
                             "name": f"Reasoning (step {step.get('step')})",
@@ -4004,6 +4055,18 @@ class GoalPursuitExecutor(HybridAgentExecutor, RLMAgentLoopExecutor):
                 total_iterations += iters
                 iteration_count += iters
 
+                # Record hybrid inline context size for future pressure estimation.
+                # Hybrid steps do not write to stdout_history, so we track their
+                # conversation size separately.  The peak of recent values is used
+                # by _context_pressure to detect heavy-output workloads early.
+                if not _use_rlm and not _step_timed_out:
+                    _inline_chars = sum(
+                        len(str(m.get("content", ""))) for m in step_messages
+                    )
+                    repl_state.setdefault("_hybrid_output_history", []).append(
+                        _inline_chars
+                    )
+
                 # ── Extract step content from whichever loop ran ──────────
                 step_content = ""
                 if _use_rlm and not _step_timed_out:
@@ -4055,7 +4118,12 @@ class GoalPursuitExecutor(HybridAgentExecutor, RLMAgentLoopExecutor):
                 )
 
                 # ── AskUser pause detection ───────────────────────────────
-                ask_user_question = repl_state.pop("_pending_question", None)
+                # Each parallel step writes its question under its own task id,
+                # so we pop only this step's question (not a sibling's).
+                _task_id = id(asyncio.current_task())
+                ask_user_question = (
+                    repl_state.get("_pending_questions", {}).pop(_task_id, None)
+                )
                 if ask_user_question:
                     step_trace["paused"] = True
                     step_trace["pending_question"] = ask_user_question
@@ -4438,6 +4506,7 @@ class GoalPursuitExecutor(HybridAgentExecutor, RLMAgentLoopExecutor):
                         failure_reason=failure_reason,
                         config=config,
                         tool_history=replan_trigger["tool_history"],
+                        repl_state=repl_state,
                     )
                     if new_remaining:
                         if enable_dependency_graph:

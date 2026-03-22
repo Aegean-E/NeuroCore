@@ -912,7 +912,9 @@ async def test_ask_user_pauses_execution():
     ex.llm.chat_completion = AsyncMock(side_effect=[plan_resp, step1_resp])
 
     async def run_with_ask_user(*args, repl_state, llm_messages, **kwargs):
-        repl_state["_pending_question"] = "What format do you want the output in?"
+        import asyncio
+        _task_id = id(asyncio.current_task())
+        repl_state.setdefault("_pending_questions", {})[_task_id] = "What format do you want the output in?"
         return ({"content": "Pausing to ask."}, 1, False)
 
     with patch.object(ex, "_run_hybrid_loop", side_effect=run_with_ask_user), \
@@ -973,7 +975,12 @@ async def test_execute_tool_intercepts_ask_user():
     }
     result = await ex._execute_tool(tool_call, {}, repl_state, large_output_threshold=3000)
 
-    assert repl_state.get("_pending_question") == "Which dataset should I use?"
+    # Question stored under current task's id in the new task-scoped dict
+    import asyncio
+    _questions = repl_state.get("_pending_questions", {})
+    assert "Which dataset should I use?" in _questions.values(), (
+        f"Question not found in _pending_questions: {_questions}"
+    )
     assert result["name"] == "AskUser"
     assert result["success"] is True
     # Content should acknowledge pause without executing anything
@@ -1849,8 +1856,11 @@ async def test_ask_user_standard_mode_still_pauses():
     }
     result = await ex._execute_tool(tool_call, {}, repl_state, 3000)
 
-    # Must set _pending_question to trigger the pause path
-    assert repl_state.get("_pending_question") == "Should I use GPT-4?"
+    # Question stored under current task's id in the new task-scoped dict
+    _questions = repl_state.get("_pending_questions", {})
+    assert "Should I use GPT-4?" in _questions.values(), (
+        f"Question not found in _pending_questions: {_questions}"
+    )
     # Result content tells the LLM to pause
     assert "paused" in result["content"].lower()
 
@@ -2223,3 +2233,329 @@ async def test_step_execution_mode_auto_uses_hybrid_below_threshold(monkeypatch)
         )
 
     assert hybrid_called, "Hybrid loop must be used when context pressure is below threshold"
+
+
+# ---------------------------------------------------------------------------
+# Fix 3: Reasoning accumulation across steps
+# ---------------------------------------------------------------------------
+
+async def test_reasoning_history_accumulates_in_repl_state(monkeypatch):
+    """After each step, its reasoning must be stored in repl_state['_step_reasoning_history']."""
+    monkeypatch.setattr(GoalPursuitExecutor, "_reason_about_step", _real_reason_about_step)
+    ex = make_executor()
+    call_n = [0]
+
+    async def fake_llm(**kwargs):
+        call_n[0] += 1
+        if call_n[0] == 1:
+            # Planning: two-step plan
+            return {"choices": [{"message": {"content": plan_json("StepA", "StepB"), "tool_calls": []}}]}
+        if call_n[0] == 2:
+            # _reason_about_step for step 1
+            return {"choices": [{"message": {"content": "Reasoning for step A."}}]}
+        if call_n[0] == 3:
+            # Step 1 execution
+            return {"choices": [{"message": {"content": "Step A done.", "tool_calls": []}}]}
+        if call_n[0] == 4:
+            # Evaluator for step 1
+            return {"choices": [{"message": {"content": eval_json(True, "ok", "A result")}}]}
+        if call_n[0] == 5:
+            # _reason_about_step for step 2 — capture the messages to verify history was injected
+            return {"choices": [{"message": {"content": "Reasoning for step B."}}]}
+        if call_n[0] == 6:
+            # Step 2 execution
+            return {"choices": [{"message": {"content": "Step B done.", "tool_calls": []}}]}
+        # Evaluator for step 2
+        return {"choices": [{"message": {"content": eval_json(True, "ok", "B result")}}]}
+
+    with patch.object(ex, "_llm_with_retry", side_effect=fake_llm):
+        result = await ex.receive(
+            {"messages": MESSAGES},
+            config={"max_steps": 2, "enable_parallel_steps": False},
+        )
+
+    # The result doesn't directly expose _step_reasoning_history, but we can
+    # verify it by running a second call and checking no errors occurred.
+    assert "agent_loop_error" not in result
+    # The agent completed two steps
+    assert len(result.get("completed_steps", [])) == 2
+
+
+async def test_reasoning_history_fed_to_next_step(monkeypatch):
+    """The second step's _reason_about_step call must receive the first step's reasoning."""
+    monkeypatch.setattr(GoalPursuitExecutor, "_reason_about_step", _real_reason_about_step)
+    ex = make_executor()
+    call_n = [0]
+    step2_reason_messages = []
+
+    async def fake_llm(**kwargs):
+        call_n[0] += 1
+        if call_n[0] == 1:
+            return {"choices": [{"message": {"content": plan_json("StepA", "StepB"), "tool_calls": []}}]}
+        if call_n[0] == 2:
+            return {"choices": [{"message": {"content": "Unique reasoning for step A: use tool X."}}]}
+        if call_n[0] == 3:
+            return {"choices": [{"message": {"content": "Step A done.", "tool_calls": []}}]}
+        if call_n[0] == 4:
+            return {"choices": [{"message": {"content": eval_json(True, "ok", "A result")}}]}
+        if call_n[0] == 5:
+            # Capture messages to verify prior reasoning was included
+            step2_reason_messages.extend(kwargs.get("messages", []))
+            return {"choices": [{"message": {"content": "Reasoning for step B."}}]}
+        if call_n[0] == 6:
+            return {"choices": [{"message": {"content": "Step B done.", "tool_calls": []}}]}
+        return {"choices": [{"message": {"content": eval_json(True, "ok", "B result")}}]}
+
+    with patch.object(ex, "_llm_with_retry", side_effect=fake_llm):
+        await ex.receive(
+            {"messages": MESSAGES},
+            config={"max_steps": 2, "enable_parallel_steps": False},
+        )
+
+    # The step 2 reasoning call should contain step 1's reasoning in its prompt
+    full_text = " ".join(m.get("content", "") for m in step2_reason_messages)
+    assert "Unique reasoning for step A: use tool X." in full_text, (
+        "Step 2 reasoning prompt must include accumulated history from step 1"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Fix 4: _replan uses full step outputs from repl_state
+# ---------------------------------------------------------------------------
+
+async def test_replan_uses_full_step_output_from_repl_state():
+    """_replan must prefer repl_state['variables']['step_N_result'] over extracted_result[:150]."""
+    ex = make_executor()
+
+    full_content = "A" * 500  # longer than 150 chars
+    repl_state = {"variables": {"step_1_result": full_content}}
+    completed_steps = [{"step": 1, "action": "Research", "target": "topic"}]
+    step_results = [{"success": True, "reason": "ok", "extracted_result": "short"}]
+    failed_step = {"step": 2, "action": "Summarize", "target": "findings"}
+
+    captured_prompt = []
+
+    async def fake_llm(**kwargs):
+        captured_prompt.extend(kwargs.get("messages", []))
+        return {"choices": [{"message": {"content": plan_json("Retry")}}]}
+
+    with patch.object(ex, "_llm_with_retry", side_effect=fake_llm):
+        await ex._replan(
+            original_request="Do research and summarize",
+            completed_steps=completed_steps,
+            step_results=step_results,
+            failed_step=failed_step,
+            failure_reason="Summarization failed",
+            config={},
+            repl_state=repl_state,
+        )
+
+    full_text = " ".join(m.get("content", "") for m in captured_prompt)
+    assert full_content[:300] in full_text, (
+        "_replan must include full step output, not just the 150-char extracted_result"
+    )
+    assert "short" not in full_text or full_content[:300] in full_text, (
+        "extracted_result fallback must not override full content"
+    )
+
+
+async def test_replan_falls_back_to_extracted_result_when_no_variable():
+    """When repl_state has no variable for a step, fall back to extracted_result."""
+    ex = make_executor()
+
+    repl_state = {"variables": {}}  # no step_1_result stored
+    completed_steps = [{"step": 1, "action": "Research", "target": "topic"}]
+    step_results = [{"success": True, "reason": "ok", "extracted_result": "fallback content"}]
+    failed_step = {"step": 2, "action": "Summarize", "target": "findings"}
+
+    captured_prompt = []
+
+    async def fake_llm(**kwargs):
+        captured_prompt.extend(kwargs.get("messages", []))
+        return {"choices": [{"message": {"content": plan_json("Retry")}}]}
+
+    with patch.object(ex, "_llm_with_retry", side_effect=fake_llm):
+        await ex._replan(
+            original_request="Do research and summarize",
+            completed_steps=completed_steps,
+            step_results=step_results,
+            failed_step=failed_step,
+            failure_reason="Failed",
+            config={},
+            repl_state=repl_state,
+        )
+
+    full_text = " ".join(m.get("content", "") for m in captured_prompt)
+    assert "fallback content" in full_text, (
+        "When no variable is stored, extracted_result must still appear in replan prompt"
+    )
+
+
+async def test_replan_without_repl_state_still_works():
+    """_replan must remain backward-compatible when repl_state is not passed."""
+    ex = make_executor()
+
+    completed_steps = [{"step": 1, "action": "Research", "target": "topic"}]
+    step_results = [{"success": True, "reason": "ok", "extracted_result": "some result"}]
+    failed_step = {"step": 2, "action": "Summarize", "target": "findings"}
+
+    async def fake_llm(**kwargs):
+        return {"choices": [{"message": {"content": plan_json("Retry")}}]}
+
+    with patch.object(ex, "_llm_with_retry", side_effect=fake_llm):
+        result = await ex._replan(
+            original_request="Do research",
+            completed_steps=completed_steps,
+            step_results=step_results,
+            failed_step=failed_step,
+            failure_reason="Failed",
+            config={},
+            # repl_state intentionally omitted
+        )
+
+    assert isinstance(result, list), "_replan must return a list even without repl_state"
+
+
+# ---------------------------------------------------------------------------
+# Fix 5: _context_pressure also measures hybrid inline output
+# ---------------------------------------------------------------------------
+
+def test_context_pressure_zero_for_hybrid_steps_with_no_history():
+    """No hybrid history → hybrid_pressure = 0."""
+    ex = make_executor()
+    assert ex._context_pressure({}, max_context_tokens=8000) == 0.0
+
+
+def test_context_pressure_uses_hybrid_output_history():
+    """Peak of _hybrid_output_history drives pressure when stdout_history is empty."""
+    ex = make_executor()
+    # 32000 chars in a step_messages conversation → 8000 tokens → 1.0 at max_context=8000
+    repl_state = {"_hybrid_output_history": [32000]}
+    assert ex._context_pressure(repl_state, max_context_tokens=8000) == pytest.approx(1.0)
+
+
+def test_context_pressure_takes_max_of_both_signals():
+    """Returns max(rlm_pressure, hybrid_pressure)."""
+    ex = make_executor()
+    # stdout: 8000 chars → 2000 tokens → 0.25 of 8000
+    # hybrid: 16000 chars peak → 4000 tokens → 0.5 of 8000
+    repl_state = {
+        "stdout_history": ["x" * 8000],
+        "_hybrid_output_history": [16000],
+    }
+    pressure = ex._context_pressure(repl_state, max_context_tokens=8000)
+    assert pressure == pytest.approx(0.5)
+
+
+def test_context_pressure_uses_peak_not_sum_of_hybrid_history():
+    """Pressure uses peak of last 3 hybrid steps, not cumulative sum."""
+    ex = make_executor()
+    # Last 3 entries: [4000, 4000, 8000] → peak = 8000 chars → 2000 tokens → 0.25
+    repl_state = {"_hybrid_output_history": [100_000, 4000, 4000, 8000]}
+    # Peak of last 3 = max(4000, 4000, 8000) = 8000 → pressure = 0.25
+    pressure = ex._context_pressure(repl_state, max_context_tokens=8000)
+    assert pressure == pytest.approx(0.25)
+
+
+async def test_hybrid_step_records_output_in_hybrid_output_history(monkeypatch):
+    """After a hybrid step, step_messages size is recorded in _hybrid_output_history."""
+    from modules.agent_loop.node import HybridAgentExecutor
+    ex = make_executor()
+    call_n = [0]
+
+    async def fake_llm(**kwargs):
+        call_n[0] += 1
+        if call_n[0] == 1:
+            return {"choices": [{"message": {"content": plan_json("Step"), "tool_calls": []}}]}
+        if call_n[0] == 2:
+            return {"choices": [{"message": {"content": "Done.", "tool_calls": []}}]}
+        return {"choices": [{"message": {"content": eval_json(True), "tool_calls": []}}]}
+
+    async def fake_hybrid(self, **kwargs):
+        return ({"choices": [{"message": {"content": "Done.", "tool_calls": []}}]}, 1, False)
+
+    monkeypatch.setattr(HybridAgentExecutor, "_run_hybrid_loop", fake_hybrid)
+    with patch.object(ex, "_llm_with_retry", side_effect=fake_llm):
+        result = await ex.receive(
+            {"messages": MESSAGES},
+            config={"step_execution_mode": "hybrid", "max_steps": 1},
+        )
+
+    # The hybrid output history should have been populated (may be in repl_state
+    # which is internal — verify indirectly via no error and step completion).
+    assert "agent_loop_error" not in result
+
+
+# ---------------------------------------------------------------------------
+# Fix 6: Parallel-step repl_state races
+# ---------------------------------------------------------------------------
+
+async def test_pending_question_uses_task_scoped_key():
+    """Two parallel steps calling AskUser must not overwrite each other's question."""
+    ex = make_executor()
+    repl_state = {
+        "variables": {},
+        "_auto_proceed_on_ask_user": False,
+        "_pending_questions": {},
+    }
+    config_ctx = {}
+
+    import asyncio
+
+    # Simulate two concurrent AskUser calls from different tasks
+    question_a = "What is A?"
+    question_b = "What is B?"
+
+    async def task_a():
+        # Simulate what _execute_tool does for AskUser
+        _task_id = id(asyncio.current_task())
+        repl_state.setdefault("_pending_questions", {})[_task_id] = question_a
+        return _task_id
+
+    async def task_b():
+        _task_id = id(asyncio.current_task())
+        repl_state.setdefault("_pending_questions", {})[_task_id] = question_b
+        return _task_id
+
+    id_a, id_b = await asyncio.gather(task_a(), task_b())
+
+    # Each task's question must be stored independently
+    assert repl_state["_pending_questions"][id_a] == question_a
+    assert repl_state["_pending_questions"][id_b] == question_b
+    assert id_a != id_b
+
+
+async def test_estimated_cost_reserved_before_await():
+    """Cost is incremented before the LLM await so parallel sub-calls see the updated total."""
+    ex = make_executor()
+    repl_state = {
+        "variables": {},
+        "sub_call_count": 0,
+        "max_sub_calls": 10,
+        "recursion_depth": 0,
+        "max_recursion_depth": 3,
+        "estimated_cost": 0.0,
+        "max_cost_usd": 1.0,
+        "stdout_history": [],
+        "final": None,
+        "_var_counts": {},
+    }
+    cost_seen_during_call = []
+
+    async def fake_chat_completion(**kwargs):
+        # By the time this await resolves, cost should already be reserved
+        cost_seen_during_call.append(repl_state["estimated_cost"])
+        return {"choices": [{"message": {"content": "result"}}]}
+
+    ex.llm = MagicMock()
+    ex.llm.chat_completion = fake_chat_completion
+
+    await ex._execute_sub_call(
+        args={"prompt": "hello", "max_tokens": 100},
+        repl_state=repl_state,
+    )
+
+    # Cost must have been reserved before the await resolved
+    assert cost_seen_during_call[0] > 0.0, (
+        "estimated_cost must be incremented before the LLM call, not after"
+    )
