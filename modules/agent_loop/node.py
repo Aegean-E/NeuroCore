@@ -1447,6 +1447,7 @@ Call set_final() when complete."""
         max_tokens = config.get("max_tokens", 2000)
 
         llm_messages = initial_messages.copy()
+        seen_calls: set[str] = set()
 
         for iteration in range(max_iterations):
             repl_state["iteration"] = iteration
@@ -1533,6 +1534,14 @@ Call set_final() when complete."""
 
             for tool_call in tool_calls:
                 tool_name = tool_call.get("function", {}).get("name", "unknown")
+                fn = tool_call.get("function", {})
+                call_sig = f"{fn.get('name', '')}:{fn.get('arguments', '')}"
+                if call_sig in seen_calls:
+                    iteration_trace["errors"].append(
+                        f"Duplicate tool call skipped: {call_sig[:120]}"
+                    )
+                    continue
+                seen_calls.add(call_sig)
                 iteration_trace["tool_calls"].append(tool_name)
 
                 tool_result = await self._execute_tool(tool_call, tool_library, repl_state)
@@ -2747,6 +2756,16 @@ class GoalPursuitExecutor(HybridAgentExecutor):
             }
 
         if func_name == "DecomposeGoal":
+            # Guard against the LLM hallucinating this tool call when sub-goals
+            # are disabled via config (enable_subgoals=False).
+            if not repl_state.get("_subgoal_config", {}).get("enable_subgoals", True):
+                return {
+                    "tool_call_id": tool_call.get("id", ""),
+                    "role": "tool",
+                    "name": "DecomposeGoal",
+                    "content": "Error: sub-goal decomposition is disabled for this run.",
+                    "success": False,
+                }
             try:
                 args = json.loads(tool_call["function"].get("arguments", "{}"))
             except Exception:
@@ -2978,7 +2997,7 @@ class GoalPursuitExecutor(HybridAgentExecutor):
             .replace("{target}", step.get("target", ""))
             .replace("{goal}", step.get("goal", step.get("action", "")))
             .replace("{tool_history}", tool_history_str)
-            .replace("{response}", execution_result[:2000])
+            .replace("{response}", execution_result[:int(config.get("eval_response_max_chars", 8000))])
         )
         model = config.get("model") or settings.get("default_model")
         response = await self._llm_with_retry(
@@ -3130,7 +3149,10 @@ class GoalPursuitExecutor(HybridAgentExecutor):
                 parts.append(f"## Previous Reasoning\n{v}")
         parts.append(self._build_variable_system_note(large_output_threshold))
         if repl_state and repl_state.get("variables"):
-            var_names = [k for k in repl_state["variables"] if k.startswith("step_")]
+            var_names = [
+                k for k in repl_state["variables"]
+                if k.startswith("step_") and k.endswith("_result")
+            ]
             if var_names:
                 var_list = ", ".join(f'"{v}"' for v in var_names)
                 parts.append(
@@ -4145,7 +4167,12 @@ class GoalPursuitExecutor(HybridAgentExecutor):
                     result["plan"] = snap_remaining
                     result["completed_steps"] = completed_steps
                     result["step_results"] = step_results
-                    result["remaining_steps"] = remaining_steps
+                    # Use snap_remaining (includes wave steps) so that both keys
+                    # have consistent semantics.  The paused step is part of the
+                    # current wave and must not be dropped from remaining_steps.
+                    # On resume, completed_step_numbers (rebuilt from completed_steps)
+                    # will correctly skip any wave steps that already succeeded.
+                    result["remaining_steps"] = snap_remaining
                     result["replan_count"] = replan_count
                     result["iterations"] = total_iterations
                     result["goal_pursuit_trace"] = goal_pursuit_trace
@@ -4310,13 +4337,18 @@ class GoalPursuitExecutor(HybridAgentExecutor):
                 try:
                     import httpx as _httpx, os as _os
                     _api = _os.getenv("MEMORY_API_URL", "http://localhost:8000")
-                    _httpx.post(f"{_api}/memory/goals/{int(goal_id)}/complete", timeout=5.0)
+                    _goal_id_str = str(goal_id)
+                    if not _goal_id_str.lstrip("-").isdigit():
+                        raise ValueError(
+                            f"goal_id must be an integer, got: {_goal_id_str!r}"
+                        )
+                    _httpx.post(f"{_api}/memory/goals/{int(_goal_id_str)}/complete", timeout=5.0)
                     logger.info(f"[GoalPursuit] Auto-completed goal {goal_id}")
                 except Exception as _gce:
                     logger.warning(f"[GoalPursuit] Auto-complete goal {goal_id} failed: {_gce}")
 
             # Save a post-run reflection so future goal runs can learn from this one
-            asyncio.create_task(self._save_run_reflection(
+            _reflection_task = asyncio.create_task(self._save_run_reflection(
                 goal=user_goal,
                 completed_steps=completed_steps,
                 step_results=step_results,
@@ -4324,6 +4356,11 @@ class GoalPursuitExecutor(HybridAgentExecutor):
                 goal_pursuit_trace=goal_pursuit_trace,
                 succeeded=bool(not remaining_after and final_content),
             ))
+            _reflection_task.add_done_callback(
+                lambda t: logger.warning(
+                    f"[GoalPursuit] Reflection save failed: {t.exception()}"
+                ) if not t.cancelled() and t.exception() else None
+            )
 
             self._log_agent_event("goal_pursuit_end", {
                 "completed_steps": len(completed_steps),

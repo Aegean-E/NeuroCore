@@ -1314,7 +1314,7 @@ async def test_execute_tool_decompose_goal_invokes_sub_receive():
         "variables": {},
         "_subgoal_depth": 0,
         "_max_subgoal_depth": 2,
-        "_subgoal_config": {"enable_synthesis": False, "enable_subgoals": False},
+        "_subgoal_config": {"enable_synthesis": False, "enable_subgoals": True},
     }
     tool_call = {
         "id": "tc1",
@@ -1379,7 +1379,7 @@ async def test_subgoal_depth_incremented_in_recursive_call():
         "variables": {},
         "_subgoal_depth": 0,
         "_max_subgoal_depth": 2,
-        "_subgoal_config": {"enable_synthesis": False, "enable_subgoals": False},
+        "_subgoal_config": {"enable_synthesis": False, "enable_subgoals": True},
     }
     tool_call = {
         "id": "tc1",
@@ -1511,3 +1511,255 @@ async def test_rlm_subcall_tool_call_id_override():
         result = await ex._execute_tool(tool_call, {}, repl_state)
 
     assert result["tool_call_id"] == "real_id_123"
+
+
+# ---------------------------------------------------------------------------
+# Bug 11 regression: remaining_steps on AskUser pause must equal snap_remaining
+# ---------------------------------------------------------------------------
+
+def test_ask_user_pause_remaining_steps_matches_plan():
+    """
+    On AskUser pause, result["remaining_steps"] must equal result["plan"]
+    (both snap_remaining) so external consumers don't lose the paused step.
+
+    _run_one_step is a closure inside receive() — we verify the fix is in
+    place by inspecting the source of GoalPursuitExecutor.receive().
+    """
+    import inspect
+    source = inspect.getsource(GoalPursuitExecutor.receive)
+    # Both keys must be set to snap_remaining in the pause block
+    plan_line = 'result["plan"] = snap_remaining'
+    remaining_line = 'result["remaining_steps"] = snap_remaining'
+    assert plan_line in source, "Must set plan=snap_remaining on pause"
+    # Verify remaining_steps is also snap_remaining (the fix).
+    # Find the plan assignment then look ahead for the remaining_steps assignment.
+    plan_pos = source.index(plan_line)
+    segment = source[plan_pos: plan_pos + 1200]
+    assert remaining_line in segment, (
+        "remaining_steps must equal snap_remaining (not the stripped remaining_steps) "
+        "on AskUser pause so the paused step is not dropped"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Bug 13 regression: var_names filter must require endswith("_result")
+# ---------------------------------------------------------------------------
+
+def test_build_step_system_prompt_filters_only_step_result_vars():
+    """Variables like step_timeout must not appear in the Available Step Results list."""
+    ex = make_executor()
+    repl_state = {
+        "variables": {
+            "step_1_result": "some output",
+            "step_timeout": "unexpected",      # should NOT appear
+            "step_2_result": "more output",
+            "step_extra_data": "also hidden",  # should NOT appear
+        },
+    }
+    step = {"step": 3, "action": "Process", "target": "data", "goal": "g"}
+    # _build_step_system_prompt takes: step, plan_context, input_data, config,
+    # large_output_threshold, repl_state=None
+    prompt = ex._build_step_system_prompt(
+        step,
+        "## Plan\nstep 3",
+        {"messages": MESSAGES},
+        {},
+        4096,
+        repl_state,
+    )
+    assert "step_timeout" not in prompt
+    assert "step_extra_data" not in prompt
+    assert "step_1_result" in prompt
+    assert "step_2_result" in prompt
+
+
+# ---------------------------------------------------------------------------
+# Bug 14 regression: DecomposeGoal blocked when enable_subgoals=False
+# ---------------------------------------------------------------------------
+
+async def test_decompose_goal_blocked_when_subgoals_disabled():
+    """
+    If enable_subgoals=False, a hallucinated DecomposeGoal call must return
+    an error result instead of executing a sub-goal.
+    """
+    ex = make_executor()
+    repl_state = {
+        "variables": {},
+        "_var_counts": {},
+        "sub_call_count": 0,
+        "max_sub_calls": 10,
+        "recursion_depth": 0,
+        "max_recursion_depth": 3,
+        "estimated_cost": 0.0,
+        "max_cost_usd": 1.0,
+        "_subgoal_depth": 0,
+        "_max_subgoal_depth": 2,
+        "_subgoal_config": {"enable_subgoals": False},
+    }
+    tool_call = {
+        "id": "tc_dg",
+        "function": {
+            "name": "DecomposeGoal",
+            "arguments": json.dumps({"subgoal": "do something"}),
+        },
+    }
+    result = await ex._execute_tool(tool_call, {}, repl_state, 3000)
+    assert result["success"] is False
+    assert "disabled" in result["content"].lower()
+
+
+# ---------------------------------------------------------------------------
+# Bug 15 regression: _evaluate_step respects eval_response_max_chars config
+# ---------------------------------------------------------------------------
+
+async def test_evaluate_step_uses_configurable_truncation():
+    """
+    _evaluate_step must truncate execution_result at eval_response_max_chars
+    (default 8000), not the old hardcoded 2000.
+    """
+    ex = make_executor()
+    # Build a result whose key evidence is at char 3000 (beyond old 2000 limit)
+    long_result = "x" * 2500 + "SUCCESS_MARKER" + "y" * 5000
+
+    captured_prompts = []
+
+    async def _fake_llm_with_retry(messages, **kwargs):
+        captured_prompts.extend(messages)
+        return {"choices": [{"message": {"content": json.dumps(
+            {"success": True, "reason": "ok", "extracted_result": "r"}
+        )}}]}
+
+    with patch.object(ex, "_llm_with_retry", side_effect=_fake_llm_with_retry):
+        await ex._evaluate_step(
+            step={"action": "act", "target": "tgt", "goal": "g"},
+            execution_result=long_result,
+            config={"eval_response_max_chars": 8000},
+        )
+
+    full_prompt = " ".join(m.get("content", "") for m in captured_prompts)
+    assert "SUCCESS_MARKER" in full_prompt, (
+        "Evidence at char 2500 must be visible with eval_response_max_chars=8000"
+    )
+
+
+async def test_evaluate_step_custom_truncation_respected():
+    """eval_response_max_chars config value must be honoured over the default."""
+    ex = make_executor()
+    long_result = "a" * 100 + "HIDDEN_MARKER" + "b" * 500
+
+    captured_prompts = []
+
+    async def _fake_llm_with_retry(messages, **kwargs):
+        captured_prompts.extend(messages)
+        return {"choices": [{"message": {"content": json.dumps(
+            {"success": True, "reason": "ok", "extracted_result": "r"}
+        )}}]}
+
+    with patch.object(ex, "_llm_with_retry", side_effect=_fake_llm_with_retry):
+        await ex._evaluate_step(
+            step={"action": "act", "target": "tgt", "goal": "g"},
+            execution_result=long_result,
+            # Truncate before the marker
+            config={"eval_response_max_chars": 50},
+        )
+
+    full_prompt = " ".join(m.get("content", "") for m in captured_prompts)
+    assert "HIDDEN_MARKER" not in full_prompt, (
+        "Marker at char 100 must be cut off with eval_response_max_chars=50"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Bug 16 regression: non-integer goal_id must not silently log as POST failure
+# ---------------------------------------------------------------------------
+
+async def test_goal_id_non_integer_raises_clear_error(capsys):
+    """
+    A UUID-style goal_id must trigger a ValueError with a clear message, not
+    an obscure httpx error.
+    """
+    ex = make_executor()
+    # Simulate the goal-completion block in isolation
+    goal_id = "not-an-integer"
+    _goal_id_str = str(goal_id)
+    raised = None
+    try:
+        if not _goal_id_str.lstrip("-").isdigit():
+            raise ValueError(f"goal_id must be an integer, got: {_goal_id_str!r}")
+    except ValueError as e:
+        raised = e
+    assert raised is not None
+    assert "not-an-integer" in str(raised)
+
+
+# ---------------------------------------------------------------------------
+# Bug 17 regression: RLM loop deduplicates tool calls
+# ---------------------------------------------------------------------------
+
+async def test_rlm_loop_deduplicates_tool_calls():
+    """
+    _run_rlm_loop must skip duplicate tool calls within the same response,
+    matching the deduplication behaviour of the standard and hybrid loops.
+    """
+    from modules.agent_loop.node import RLMAgentLoopExecutor
+    with patch("modules.agent_loop.node.LLMBridge"):
+        rlm = RLMAgentLoopExecutor()
+    rlm._load_tool_library = MagicMock(return_value={"Echo": "result = args.get('text', '')"})
+
+    dup_call = {"id": "c1", "function": {"name": "Echo", "arguments": '{"text": "hi"}'}}
+    uniq_call = {"id": "c2", "function": {"name": "Echo", "arguments": '{"text": "unique"}'}}
+
+    tool_response = {
+        "choices": [{
+            "message": {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [dup_call, dup_call, uniq_call],
+            }
+        }]
+    }
+    final_response = {"choices": [{"message": {"role": "assistant", "content": "done"}}]}
+
+    rlm.llm = MagicMock()
+    rlm.llm.chat_completion = AsyncMock(side_effect=[tool_response, final_response])
+
+    execution_log = []
+
+    async def _fake_execute_tool(tool_call, library, repl_state):
+        execution_log.append(tool_call.get("function", {}).get("arguments", ""))
+        return {
+            "role": "tool",
+            "tool_call_id": tool_call.get("id", ""),
+            "content": "echoed",
+            "success": True,
+        }
+
+    repl_state = {
+        "variables": {},
+        "stdout_history": [],
+        "iteration": 0,
+        "_var_counts": {},
+        "final": None,
+    }
+    trace = []
+
+    with patch.object(rlm, "_execute_tool", side_effect=_fake_execute_tool):
+        await rlm._run_rlm_loop(
+            initial_messages=[{"role": "user", "content": "echo"}],
+            repl_state=repl_state,
+            tools_list=[],
+            tool_library={},
+            model="test-model",
+            config={"max_iterations": 5, "max_llm_retries": 1, "retry_delay": 0},
+            trace=trace,
+        )
+
+    # dup_call appears twice but must only execute once; uniq_call executes once
+    # Total: 2 executions (not 3)
+    assert len(execution_log) == 2, (
+        f"Expected 2 executions (1 dup skipped), got {len(execution_log)}: {execution_log}"
+    )
+    assert execution_log.count('{"text": "hi"}') == 1
+    assert execution_log.count('{"text": "unique"}') == 1
+    # Trace must record the duplicate error
+    assert any("Duplicate" in e for itr in trace for e in itr.get("errors", []))

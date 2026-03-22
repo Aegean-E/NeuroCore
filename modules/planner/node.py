@@ -123,20 +123,22 @@ class PlannerExecutor:
         """Get list of step indices that can be executed (all dependencies satisfied)."""
         if not plan:
             return []
-        
+
         n = len(plan)
-        
+        # Build once — reused for every step's dependency check (O(n) not O(n²)).
+        step_num_to_idx = {plan[j].get('step', j + 1): j for j in range(n)}
+
         # Calculate which steps have all dependencies completed
         executable = []
         for i in range(n):
             if i in completed_steps:
                 continue  # Already done
-            
+
             # Check if all dependencies are completed
             deps_satisfied = True
             step = plan[i]
             depends_on = step.get('depends_on')
-            
+
             if depends_on is not None:
                 if isinstance(depends_on, int):
                     deps = [depends_on]
@@ -144,21 +146,18 @@ class PlannerExecutor:
                     deps = depends_on
                 else:
                     deps = []
-                
-                # Map step numbers to indices
-                step_num_to_idx = {plan[j].get('step', j + 1): j for j in range(n)}
-                
+
                 for dep_step_num in deps:
                     dep_idx = step_num_to_idx.get(dep_step_num)
                     if dep_idx is not None and dep_idx not in completed_steps:
                         deps_satisfied = False
                         break
-            
+
             if deps_satisfied:
                 executable.append(i)
-        
+
         return executable
-    
+
     def _run_auto_track(self, data: dict) -> dict:
         """
         Run one progression tick (tracker behavior) when auto_track is enabled.
@@ -613,18 +612,20 @@ class PlanStepTracker:
         
         adj, in_degree = self._build_dependency_graph(plan)
         n = len(plan)
-        
+        # Build once — reused for every step's dependency check (O(n) not O(n²)).
+        step_num_to_idx = {plan[j].get('step', j + 1): j for j in range(n)}
+
         # Calculate which steps have all dependencies completed
         executable = []
         for i in range(n):
             if i in completed_steps:
                 continue  # Already done
-            
+
             # Check if all dependencies are completed
             deps_satisfied = True
             step = plan[i]
             depends_on = step.get('depends_on')
-            
+
             if depends_on is not None:
                 if isinstance(depends_on, int):
                     deps = [depends_on]
@@ -632,19 +633,16 @@ class PlanStepTracker:
                     deps = depends_on
                 else:
                     deps = []
-                
-                # Map step numbers to indices
-                step_num_to_idx = {plan[j].get('step', j + 1): j for j in range(n)}
-                
+
                 for dep_step_num in deps:
                     dep_idx = step_num_to_idx.get(dep_step_num)
                     if dep_idx is not None and dep_idx not in completed_steps:
                         deps_satisfied = False
                         break
-            
+
             if deps_satisfied:
                 executable.append(i)
-        
+
         return executable
     
     async def receive(self, data: dict, config: dict = None) -> dict:

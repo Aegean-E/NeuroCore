@@ -511,6 +511,56 @@ async def test_planner_uses_config_model_override():
     assert actual_model == "custom-model-xyz"
 
 
+# ---------------------------------------------------------------------------
+# Bug 18 regression: _get_executable_steps must not rebuild step_num_to_idx
+# inside the outer loop (O(n²) → O(n))
+# ---------------------------------------------------------------------------
+
+def test_get_executable_steps_hoist_step_num_to_idx():
+    """
+    _get_executable_steps must produce correct results regardless of plan size.
+    The O(n²) rebuild was a performance bug — correctness test ensures the
+    hoisted dict still resolves deps properly.
+    """
+    from modules.planner.node import PlannerExecutor
+    ex = PlannerExecutor()
+
+    # 5-step chain: 1 → 2 → 3 → 4 → 5
+    plan = [
+        {"step": 1, "action": "A", "depends_on": []},
+        {"step": 2, "action": "B", "depends_on": [1]},
+        {"step": 3, "action": "C", "depends_on": [2]},
+        {"step": 4, "action": "D", "depends_on": [3]},
+        {"step": 5, "action": "E", "depends_on": [4]},
+    ]
+
+    # Nothing completed yet — only step 1 (index 0) should be executable
+    assert ex._get_executable_steps(plan, completed_steps=set()) == [0]
+
+    # Steps 0 and 1 completed — step 2 (index 2) executable
+    assert ex._get_executable_steps(plan, completed_steps={0, 1}) == [2]
+
+    # Steps 0-3 completed — step 4 (index 4) executable
+    assert ex._get_executable_steps(plan, completed_steps={0, 1, 2, 3}) == [4]
+
+    # All completed — nothing left
+    assert ex._get_executable_steps(plan, completed_steps={0, 1, 2, 3, 4}) == []
+
+
+def test_get_executable_steps_parallel_when_no_deps():
+    """Steps with no dependencies are all executable simultaneously."""
+    from modules.planner.node import PlannerExecutor
+    ex = PlannerExecutor()
+
+    plan = [
+        {"step": 1, "action": "A", "depends_on": []},
+        {"step": 2, "action": "B", "depends_on": []},
+        {"step": 3, "action": "C", "depends_on": []},
+    ]
+    result = ex._get_executable_steps(plan, completed_steps=set())
+    assert result == [0, 1, 2]
+
+
 if __name__ == "__main__":
     import pytest
     pytest.main([__file__, "-v"])
