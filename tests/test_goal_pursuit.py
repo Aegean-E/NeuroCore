@@ -606,10 +606,11 @@ async def test_receive_step_skipped_after_max_retries():
         # We need TWO more fails on the same step without replan in between to hit max_step_retries=2.
     ])
 
-    # Simpler: use max_step_retries=1 so a single failure triggers a skip
+    # max_step_retries=1: one failure triggers alternative approach, then skip if alt also fails
     ex.llm.chat_completion = AsyncMock(side_effect=[
         plan_resp,
-        step1_fail, eval1_fail,   # consecutive_failures=1 >= max_step_retries=1 → SKIP step 1
+        step1_fail, eval1_fail,   # attempt 1 → consecutive_failures=1 >= 1 → alternative
+        step1_fail, eval1_fail,   # alternative attempt also fails → step 1 SKIPPED
         step2_resp, eval2_ok,     # step 2 succeeds
     ])
 
@@ -953,3 +954,243 @@ async def test_execute_tool_intercepts_ask_user():
     assert result["success"] is True
     # Content should acknowledge pause without executing anything
     assert "paused" in result["content"].lower() or "waiting" in result["content"].lower()
+
+
+# ---------------------------------------------------------------------------
+# Alternative approach on step exhaustion
+# ---------------------------------------------------------------------------
+
+async def test_alternative_approach_succeeds_after_max_retries():
+    """When a step hits max_step_retries=1, an alternative attempt is made before skipping."""
+    ex = make_executor()
+
+    plan_resp = llm_response(plan_json("Do the thing"))
+    fail_resp = llm_response("Failed attempt.")
+    fail_eval = llm_response(eval_json(False, "no results"))
+    alt_resp = llm_response("Alternative succeeded.")
+    alt_eval = llm_response(eval_json(True, "ok", "Alternative succeeded."))
+
+    ex.llm.chat_completion = AsyncMock(side_effect=[
+        plan_resp,
+        fail_resp, fail_eval,   # attempt 1 (consecutive_failures=1 >= max_step_retries=1)
+        alt_resp, alt_eval,     # alternative attempt
+    ])
+
+    with patch.object(ex, "_load_tool_library", return_value={}), \
+         patch.object(ex, "_load_tools", return_value={}):
+        result = await ex.receive(
+            {"messages": MESSAGES},
+            config={"enable_synthesis": False, "max_step_retries": 1},
+        )
+
+    assert len(result["completed_steps"]) == 1
+    trace = result["goal_pursuit_trace"]
+    assert trace[-1].get("alternative_attempt") is True
+    assert trace[-1].get("alternative_succeeded") is True
+
+
+async def test_alternative_approach_fails_then_step_skipped():
+    """When normal attempt and alternative both fail, the step is skipped."""
+    ex = make_executor()
+
+    plan_resp = llm_response(plan_json("Do the thing", "Second step"))
+    fail_resp = llm_response("Failed.")
+    fail_eval = llm_response(eval_json(False, "no results"))
+    step2_resp = llm_response("Second step done.")
+    step2_eval = llm_response(eval_json(True, "ok", "done"))
+
+    ex.llm.chat_completion = AsyncMock(side_effect=[
+        plan_resp,
+        fail_resp, fail_eval,  # attempt 1 (consecutive_failures=1 >= max_step_retries=1)
+        fail_resp, fail_eval,  # alternative attempt also fails → step 1 skipped
+        step2_resp, step2_eval,
+    ])
+
+    with patch.object(ex, "_load_tool_library", return_value={}), \
+         patch.object(ex, "_load_tools", return_value={}):
+        result = await ex.receive(
+            {"messages": MESSAGES},
+            config={"enable_synthesis": False, "max_step_retries": 1},
+        )
+
+    skipped = [t for t in result["goal_pursuit_trace"] if t.get("skipped")]
+    assert len(skipped) == 1
+    assert skipped[0].get("alternative_attempt") is True
+    assert skipped[0].get("alternative_succeeded") is False
+    # Second step should still complete
+    assert len(result["completed_steps"]) == 1
+
+
+# ---------------------------------------------------------------------------
+# _save_run_reflection — cross-run learning
+# ---------------------------------------------------------------------------
+
+async def test_save_run_reflection_called_on_completion():
+    """_save_run_reflection is scheduled as a task after _execute() returns."""
+    ex = make_executor()
+
+    plan_resp = llm_response(plan_json("Do something"))
+    step_resp = llm_response("Done.")
+    eval_resp = llm_response(eval_json(True, "ok", "Done."))
+
+    ex.llm.chat_completion = AsyncMock(side_effect=[plan_resp, step_resp, eval_resp])
+
+    reflection_calls = []
+
+    async def capture_reflection(**kwargs):
+        reflection_calls.append(kwargs)
+
+    with patch.object(ex, "_save_run_reflection", side_effect=capture_reflection), \
+         patch.object(ex, "_load_tool_library", return_value={}), \
+         patch.object(ex, "_load_tools", return_value={}):
+        # create_task schedules it — we need to let the event loop run it
+        result = await ex.receive(
+            {"messages": MESSAGES},
+            config={"enable_synthesis": False},
+        )
+        # Yield to the event loop so the scheduled task runs
+        await asyncio.sleep(0)
+
+    assert len(reflection_calls) == 1
+    assert reflection_calls[0]["succeeded"] is True
+    assert "Research AI trends" in reflection_calls[0]["goal"]
+
+
+# ---------------------------------------------------------------------------
+# _compress_step_results — RLM synthesis compression
+# ---------------------------------------------------------------------------
+
+async def test_compress_step_results_noop_when_small():
+    """No compression when total step results are under the threshold."""
+    ex = make_executor()
+    repl_state = {"variables": {
+        "step_1_result": "short result",
+        "step_2_result": "also short",
+    }}
+    count = await ex._compress_step_results(repl_state, {"synthesis_compress_threshold": 9000})
+    assert count == 0
+    assert repl_state["variables"]["step_1_result"] == "short result"
+
+
+async def test_compress_step_results_compresses_large_vars():
+    """Large step results are summarized when total exceeds threshold."""
+    ex = make_executor()
+    big_text = "x" * 2000
+    repl_state = {"variables": {
+        "step_1_result": big_text,
+        "step_2_result": big_text,
+        "step_3_result": big_text,
+        "step_4_result": big_text,
+        "step_5_result": big_text,
+    }}
+    summary_resp = llm_response("Compressed summary of findings.")
+    ex.llm.chat_completion = AsyncMock(return_value=summary_resp)
+
+    count = await ex._compress_step_results(
+        repl_state,
+        {"synthesis_compress_threshold": 100, "synthesis_per_var_threshold": 500},
+    )
+    assert count == 5
+    for k in repl_state["variables"]:
+        assert repl_state["variables"][k].startswith("[Compressed summary]")
+
+
+async def test_compress_step_results_called_before_synthesis():
+    """_compress_step_results is awaited before _synthesize during plan execution."""
+    ex = make_executor()
+
+    plan_resp = llm_response(plan_json("Step A", "Step B"))
+    step_resp = llm_response("done")
+    eval_resp = llm_response(eval_json(True, "ok", "done"))
+    synth_resp = llm_response("Final answer.")
+
+    ex.llm.chat_completion = AsyncMock(side_effect=[
+        plan_resp,
+        step_resp, eval_resp,   # step 1
+        step_resp, eval_resp,   # step 2
+        synth_resp,             # synthesis
+    ])
+
+    compress_calls = []
+
+    async def fake_compress(repl_state, config):
+        compress_calls.append(True)
+        return 0
+
+    with patch.object(ex, "_compress_step_results", side_effect=fake_compress), \
+         patch.object(ex, "_fetch_goal_lessons", return_value=[]), \
+         patch.object(ex, "_load_tool_library", return_value={}), \
+         patch.object(ex, "_load_tools", return_value={}):
+        await ex.receive({"messages": MESSAGES}, config={"enable_synthesis": True})
+
+    assert len(compress_calls) == 1
+
+
+# ---------------------------------------------------------------------------
+# _fetch_goal_lessons / _compress_lessons — RLM planning memory
+# ---------------------------------------------------------------------------
+
+async def test_fetch_goal_lessons_returns_empty_on_db_error():
+    """DB errors in _fetch_goal_lessons are silently swallowed."""
+    ex = make_executor()
+    with patch("modules.agent_loop.node.GoalPursuitExecutor._fetch_goal_lessons",
+               return_value=[]):
+        lessons = await ex._fetch_goal_lessons({})
+    assert lessons == []
+
+
+async def test_compress_lessons_passthrough_when_small():
+    """Short lessons are returned unchanged (no LLM call)."""
+    ex = make_executor()
+    lessons = ["Lesson 1: do X.", "Lesson 2: avoid Y."]
+    result = await ex._compress_lessons(lessons, {"lessons_compress_threshold": 9000})
+    assert "Lesson 1" in result
+    assert "Lesson 2" in result
+    ex.llm.chat_completion.assert_not_called()
+
+
+async def test_compress_lessons_calls_llm_when_large():
+    """Large lesson list triggers chunked LLM summarization."""
+    ex = make_executor()
+    # 10 lessons each 400 chars → 4000 total > threshold of 100
+    lessons = [f"Lesson {i}: " + "x" * 390 for i in range(10)]
+    summary_resp = llm_response("Bullet: key insight.")
+    ex.llm.chat_completion = AsyncMock(return_value=summary_resp)
+
+    result = await ex._compress_lessons(
+        lessons,
+        {"lessons_compress_threshold": 100, "lessons_chunk_size": 3},
+    )
+    assert ex.llm.chat_completion.called
+    assert len(result) > 0
+
+
+async def test_lessons_injected_into_planning_prompt():
+    """Past lessons are fetched and injected when _create_plan_with_trace runs."""
+    ex = make_executor()
+
+    plan_resp = llm_response(plan_json("Do something"))
+    step_resp = llm_response("done")
+    eval_resp = llm_response(eval_json(True, "ok", "done"))
+
+    ex.llm.chat_completion = AsyncMock(side_effect=[plan_resp, step_resp, eval_resp])
+
+    captured_prompts = []
+    original_create_plan = ex._create_plan.__func__
+
+    async def capturing_create_plan(self, user_request, config, lessons=""):
+        captured_prompts.append(lessons)
+        return await original_create_plan(self, user_request, config, lessons=lessons)
+
+    with patch.object(type(ex), "_create_plan", capturing_create_plan), \
+         patch.object(ex, "_fetch_goal_lessons", return_value=["Past lesson: use tool X."]), \
+         patch.object(ex, "_compress_lessons", return_value="Past lesson: use tool X."), \
+         patch.object(ex, "_load_tool_library", return_value={}), \
+         patch.object(ex, "_load_tools", return_value={}):
+        await ex.receive(
+            {"messages": MESSAGES},
+            config={"enable_synthesis": False},
+        )
+
+    assert len(captured_prompts) == 1
+    assert "Past lesson" in captured_prompts[0]

@@ -2777,11 +2777,26 @@ class GoalPursuitExecutor(HybridAgentExecutor):
             pass
         return []
 
-    async def _create_plan(self, user_request: str, config: dict) -> list:
+    async def _create_plan(self, user_request: str, config: dict, lessons: str = "") -> list:
         """Call LLM to create an initial step-by-step plan."""
         max_steps = int(config.get("max_steps", 10))
         prompt = config.get("planning_prompt", self._DEFAULT_PLANNING_PROMPT)
         prompt = prompt.replace("{request}", user_request).replace("{max_steps}", str(max_steps))
+        if lessons:
+            # Inject lessons before the final JSON-only instruction so the model
+            # still sees "JSON array only" as the last instruction.
+            json_instruction = "Respond with a JSON array only. No prose."
+            lessons_block = (
+                f"Lessons from past runs of similar goals "
+                f"(take these into account when structuring your plan):\n{lessons}"
+            )
+            if json_instruction in prompt:
+                prompt = prompt.replace(
+                    json_instruction,
+                    f"{lessons_block}\n\n{json_instruction}",
+                )
+            else:
+                prompt += f"\n\n{lessons_block}"
         model = config.get("model") or settings.get("default_model")
         response = await self._llm_with_retry(
             messages=[
@@ -2990,6 +3005,248 @@ class GoalPursuitExecutor(HybridAgentExecutor):
             f"Success criterion: {step.get('goal', step.get('action', ''))}"
         )
         return "\n\n".join(parts)
+
+    # ------------------------------------------------------------------
+    # Cross-run learning
+    # ------------------------------------------------------------------
+
+    async def _save_run_reflection(
+        self,
+        goal: str,
+        completed_steps: list,
+        step_results: list,
+        replan_count: int,
+        goal_pursuit_trace: list,
+        succeeded: bool,
+    ) -> None:
+        """Save a structured post-run lesson to long-term memory so future
+        planning prompts can retrieve and benefit from it."""
+        try:
+            from modules.memory.backend import memory_store
+            from modules.memory.arbiter import MemoryArbiter
+
+            # Build worked / failed / replanned summaries from the trace
+            worked = []
+            failed = []
+            for entry in goal_pursuit_trace:
+                if not isinstance(entry, dict):
+                    continue
+                action = entry.get("action", "?")
+                if isinstance(action, dict):
+                    action = action.get("action", "?")
+                eval_info = entry.get("evaluation", {})
+                if entry.get("skipped"):
+                    failed.append(f"- Skipped: {action} ({entry.get('skip_reason', '')})")
+                elif eval_info.get("success"):
+                    tool_count = entry.get("tool_calls_count", 0)
+                    worked.append(f"- {action} (tools used: {tool_count})")
+                elif entry.get("replanned"):
+                    failed.append(
+                        f"- Failed and replanned: {action} — {eval_info.get('reason', '')[:100]}"
+                    )
+
+            outcome_str = "completed successfully" if succeeded else "did not fully complete"
+            worked_str = "\n".join(worked) if worked else "none"
+            failed_str = "\n".join(failed) if failed else "none"
+
+            lesson = (
+                f"Goal pursuit run lesson:\n"
+                f"Goal: {goal[:300]}\n"
+                f"Outcome: {outcome_str} ({len(completed_steps)} steps done, "
+                f"{replan_count} replans)\n"
+                f"Steps that worked:\n{worked_str}\n"
+                f"Steps that failed or were skipped:\n{failed_str}\n"
+                f"Strategic note: When pursuing goals similar to this one, "
+                f"{'the plan executed cleanly.' if replan_count == 0 else f'expect to replan {replan_count} time(s).'}"
+            )
+
+            llm_bridge = LLMBridge(
+                base_url=settings.get("llm_api_url"),
+                api_key=settings.get("llm_api_key"),
+                embedding_base_url=settings.get("embedding_api_url"),
+                embedding_model=settings.get("embedding_model"),
+            )
+            embedding = await llm_bridge.get_embedding(lesson)
+
+            arbiter = MemoryArbiter(memory_store=memory_store)
+            await arbiter.consider(
+                text=lesson,
+                confidence=0.9,
+                subject="GoalPursuit",
+                source="goal_reflection",
+                embedding=embedding,
+                mem_type="EXPERIENCE",
+                verified=True,
+            )
+            logger.info("[GoalPursuit] Saved post-run reflection to memory")
+        except Exception as e:
+            logger.warning(f"[GoalPursuit] Failed to save run reflection: {e}")
+
+    # ------------------------------------------------------------------
+    # RLM-style helpers
+    # ------------------------------------------------------------------
+
+    async def _fetch_goal_lessons(self, config: dict) -> list:
+        """Fetch goal_reflection memories from the store for planning context."""
+        try:
+            from modules.memory.backend import memory_store
+            with memory_store._connect() as con:
+                rows = con.execute("""
+                    SELECT text FROM memories
+                    WHERE deleted = 0 AND source = 'goal_reflection'
+                    ORDER BY created_at DESC
+                    LIMIT 30
+                """).fetchall()
+            return [r[0] for r in rows if r[0]]
+        except Exception as e:
+            logger.warning(f"[GoalPursuit] Failed to fetch goal lessons: {e}")
+            return []
+
+    async def _compress_lessons(self, lessons: list, config: dict) -> str:
+        """Chunk and summarize past goal_reflection lessons so they fit in the planning prompt.
+
+        If the total text is under ``lessons_compress_threshold`` chars it is
+        returned as-is.  Otherwise lessons are split into chunks of
+        ``lessons_chunk_size`` entries, each chunk summarized by the LLM, and
+        then (if still large) merged in a second pass.
+        """
+        if not lessons:
+            return ""
+        joined = "\n---\n".join(lessons)
+        threshold = int(config.get("lessons_compress_threshold", 3000))
+        if len(joined) <= threshold:
+            return joined
+
+        chunk_size = int(config.get("lessons_chunk_size", 5))
+        model = config.get("model") or settings.get("default_model")
+        chunks = [lessons[i:i + chunk_size] for i in range(0, len(lessons), chunk_size)]
+
+        async def _summarize_chunk(chunk: list) -> str:
+            chunk_text = "\n---\n".join(chunk)
+            resp = await self._llm_with_retry(
+                messages=[{
+                    "role": "user",
+                    "content": (
+                        "These are lessons learned from past goal execution runs.\n"
+                        "Summarize the key strategic insights as concise bullet points (max 5).\n"
+                        "Focus on what worked, what failed, and what to avoid.\n\n"
+                        f"{chunk_text}"
+                    ),
+                }],
+                model=model,
+                temperature=0.0,
+                max_tokens=300,
+                tools=[],
+                max_retries=2,
+                retry_delay=1.0,
+            )
+            if resp and "choices" in resp:
+                return resp["choices"][0]["message"].get("content", "").strip()
+            return ""
+
+        summaries = await asyncio.gather(
+            *[_summarize_chunk(c) for c in chunks],
+            return_exceptions=True,
+        )
+        valid = [s for s in summaries if isinstance(s, str) and s]
+        if not valid:
+            return joined[:threshold]
+
+        compressed = "\n\n".join(valid)
+        if len(compressed) <= threshold:
+            return compressed
+
+        # Second pass: merge chunk summaries into a single compact list
+        resp = await self._llm_with_retry(
+            messages=[{
+                "role": "user",
+                "content": (
+                    "Merge these summaries of past execution lessons into a final "
+                    "compact list of the most important strategic insights (max 7 bullets):\n\n"
+                    f"{compressed}"
+                ),
+            }],
+            model=model,
+            temperature=0.0,
+            max_tokens=400,
+            tools=[],
+            max_retries=2,
+            retry_delay=1.0,
+        )
+        if resp and "choices" in resp:
+            merged = resp["choices"][0]["message"].get("content", "").strip()
+            if merged:
+                return merged
+        return compressed[:threshold]
+
+    async def _compress_step_results(self, repl_state: dict, config: dict) -> int:
+        """Pre-compress large step_N_result variables before synthesis.
+
+        When the total size of all step results exceeds
+        ``synthesis_compress_threshold`` chars, variables over
+        ``synthesis_per_var_threshold`` chars are individually summarized by
+        the LLM in parallel.  This keeps the synthesizer's retrieved content
+        within context limits.
+
+        Returns the number of variables that were compressed.
+        """
+        vars_ = repl_state.get("variables", {})
+        step_vars = {
+            k: str(v) for k, v in vars_.items()
+            if k.startswith("step_") and k.endswith("_result")
+        }
+        if not step_vars:
+            return 0
+
+        compress_threshold = int(config.get("synthesis_compress_threshold", 9000))
+        per_var_threshold = int(config.get("synthesis_per_var_threshold", 1500))
+        total_chars = sum(len(v) for v in step_vars.values())
+        if total_chars <= compress_threshold:
+            return 0
+
+        model = config.get("model") or settings.get("default_model")
+        to_compress = {k: v for k, v in step_vars.items() if len(v) > per_var_threshold}
+        if not to_compress:
+            return 0
+
+        async def _summarize_one(key: str, text: str):
+            resp = await self._llm_with_retry(
+                messages=[{
+                    "role": "user",
+                    "content": (
+                        "Summarize the following content to its key findings in "
+                        "300 words or fewer. Preserve specific facts, numbers, "
+                        f"and conclusions.\n\n{text[:8000]}"
+                    ),
+                }],
+                model=model,
+                temperature=0.0,
+                max_tokens=600,
+                tools=[],
+                max_retries=2,
+                retry_delay=1.0,
+            )
+            if resp and "choices" in resp:
+                summary = resp["choices"][0]["message"].get("content", "").strip()
+                if summary:
+                    return key, f"[Compressed summary]\n{summary}"
+            return key, text  # fallback: keep original
+
+        results = await asyncio.gather(
+            *[_summarize_one(k, v) for k, v in to_compress.items()],
+            return_exceptions=True,
+        )
+        compressed_count = 0
+        for r in results:
+            if isinstance(r, Exception):
+                logger.warning(f"[GoalPursuit] Step result compression failed: {r}")
+                continue
+            key, compressed = r
+            repl_state["variables"][key] = compressed
+            compressed_count += 1
+
+        logger.info(f"[GoalPursuit] Compressed {compressed_count} step result(s) for synthesis")
+        return compressed_count
 
     # ------------------------------------------------------------------
     # Main entry point
@@ -3477,20 +3734,115 @@ class GoalPursuitExecutor(HybridAgentExecutor):
                         failure_reason = f"Step timed out after {step_timeout}s"
 
                     # Skip step if it has failed too many consecutive times,
-                    # preserving the global replan budget for other steps.
+                    # but first try one "alternative approach" attempt before giving up.
                     if consecutive_failures >= max_step_retries:
-                        step_trace["skipped"] = True
-                        step_trace["skip_reason"] = (
-                            f"Step failed {consecutive_failures} consecutive times; skipping"
+                        # Build an alternative-approach prompt listing everything tried
+                        tool_hist_str = "\n".join(tool_history) if tool_history else "No tools recorded."
+                        alt_system = (
+                            self._build_step_system_prompt(
+                                step, plan_context, input_data, config,
+                                large_output_threshold, repl_state
+                            )
+                            + f"\n\n## IMPORTANT: Previous Attempts Failed\n"
+                            f"This step has failed {consecutive_failures} times.\n"
+                            f"What was tried:\n{tool_hist_str}\n\n"
+                            f"You MUST use a completely different approach — different tools, "
+                            f"different strategy, different angle. Do NOT repeat what failed."
                         )
-                        logger.warning(
-                            f"[GoalPursuit] Step {step.get('step')} skipped after "
-                            f"{consecutive_failures} consecutive failures"
-                        )
-                        consecutive_failures = 0
-                        step_idx += 1
-                        goal_pursuit_trace.append(step_trace)
-                        continue
+                        alt_messages = [
+                            {"role": "system", "content": alt_system},
+                            {
+                                "role": "user",
+                                "content": (
+                                    f"Previous attempts for this step failed. "
+                                    f"Try a completely different approach.\n"
+                                    f"Step: {step.get('action', '')}: {step.get('target', '')}.\n"
+                                    f"Original goal: {user_goal}"
+                                ),
+                            },
+                        ]
+                        await _push_thinking({
+                            "type": "tool_call",
+                            "name": f"Step {step.get('step', step_idx + 1)} (alternative approach)",
+                            "content": f"Retrying with different strategy after {consecutive_failures} failures",
+                        })
+                        try:
+                            _alt_coro = self._run_hybrid_loop(
+                                llm_messages=alt_messages,
+                                tools_list=tools_list,
+                                tool_library=tool_library,
+                                repl_state=repl_state,
+                                model=model,
+                                temperature=temperature,
+                                max_tokens=max_tokens,
+                                max_iterations=max_iterations_per_step,
+                                max_llm_retries=max_llm_retries,
+                                retry_delay=retry_delay,
+                                tool_error_strategy=tool_error_strategy,
+                                large_output_threshold=large_output_threshold,
+                                trace=goal_pursuit_trace,
+                                stream_queue=stream_queue,
+                                thinking_steps=thinking_steps,
+                            )
+                            alt_response, alt_iters, alt_had_error = await asyncio.wait_for(
+                                _alt_coro,
+                                timeout=float(step_timeout) if step_timeout else None,
+                            )
+                            alt_content = ""
+                            if alt_response and "choices" in alt_response:
+                                alt_content = (
+                                    alt_response["choices"][0]["message"].get("content") or ""
+                                )
+                            total_iterations += alt_iters
+                        except asyncio.TimeoutError:
+                            alt_content = ""
+                            logger.warning(f"[GoalPursuit] Alternative attempt timed out for step {step.get('step')}")
+                        except Exception as _ae:
+                            alt_content = ""
+                            logger.warning(f"[GoalPursuit] Alternative attempt failed: {_ae}")
+
+                        if alt_content and enable_step_evaluation:
+                            alt_eval = await self._evaluate_step(step, alt_content, config)
+                        elif alt_content:
+                            alt_eval = {"success": True, "reason": "ok", "extracted_result": alt_content[:500]}
+                        else:
+                            alt_eval = {"success": False, "reason": "alternative attempt produced no output", "extracted_result": ""}
+
+                        if alt_eval.get("success"):
+                            completed_steps.append(step)
+                            step_results.append(alt_eval)
+                            completed_step_numbers.add(step.get("step", step_idx + 1))
+                            step_num = step.get("step", step_idx + 1)
+                            repl_state["variables"][f"step_{step_num}_result"] = alt_content
+                            consecutive_failures = 0
+                            step_trace["alternative_attempt"] = True
+                            step_trace["alternative_succeeded"] = True
+                            step_trace["evaluation"] = alt_eval
+                            goal_pursuit_trace.append(step_trace)
+                            await _push_thinking({
+                                "type": "tool_result",
+                                "name": f"Step {step.get('step', step_idx + 1)} alt eval",
+                                "content": alt_eval["reason"][:250],
+                                "success": True,
+                            })
+                            step_idx += 1
+                            continue
+                        else:
+                            # Alternative also failed — now actually skip
+                            step_trace["skipped"] = True
+                            step_trace["alternative_attempt"] = True
+                            step_trace["alternative_succeeded"] = False
+                            step_trace["skip_reason"] = (
+                                f"Step failed {consecutive_failures} times + alternative attempt; skipping"
+                            )
+                            logger.warning(
+                                f"[GoalPursuit] Step {step.get('step')} skipped after "
+                                f"{consecutive_failures} failures and alternative attempt"
+                            )
+                            consecutive_failures = 0
+                            step_idx += 1
+                            goal_pursuit_trace.append(step_trace)
+                            continue
 
                     if replan_count >= max_replan_depth:
                         step_trace["replan_skipped"] = "max_replan_depth reached"
@@ -3554,11 +3906,37 @@ class GoalPursuitExecutor(HybridAgentExecutor):
 
             # Step 3: synthesize final answer
             if completed_steps and enable_synthesis and len(completed_steps) > 1:
+                # Pre-compress large step results so synthesizer context stays manageable
+                compressed_count = await self._compress_step_results(repl_state, config)
+                if compressed_count:
+                    await _push_thinking({
+                        "type": "tool_call",
+                        "name": "CompressResults",
+                        "content": f"Compressed {compressed_count} large step result(s) before synthesis",
+                    })
                 final_content = await _synthesize(completed_steps, step_results)
+                # Fallback when synthesis LLM returns nothing
+                if not final_content and step_results:
+                    final_content = step_results[-1].get("extracted_result", "")
+                if not final_content:
+                    for t in reversed(goal_pursuit_trace):
+                        if isinstance(t, dict) and t.get("content_preview"):
+                            final_content = t["content_preview"]
+                            break
             elif completed_steps:
+                # Single step — compress its result variable if large before reading
+                await self._compress_step_results(repl_state, config)
                 final_content = step_results[-1].get("extracted_result", "") if step_results else ""
+                # Prefer the full stored variable over the truncated extracted_result
+                step_num = completed_steps[-1].get("step", len(completed_steps))
+                var_key = f"step_{step_num}_result"
+                if var_key in repl_state["variables"]:
+                    final_content = str(repl_state["variables"][var_key])
                 if not final_content and goal_pursuit_trace:
-                    final_content = goal_pursuit_trace[-1].get("content_preview", "")
+                    for t in reversed(goal_pursuit_trace):
+                        if isinstance(t, dict) and t.get("content_preview"):
+                            final_content = t["content_preview"]
+                            break
             else:
                 final_content = ""
 
@@ -3611,6 +3989,16 @@ class GoalPursuitExecutor(HybridAgentExecutor):
                 except Exception as _gce:
                     logger.warning(f"[GoalPursuit] Auto-complete goal {goal_id} failed: {_gce}")
 
+            # Save a post-run reflection so future goal runs can learn from this one
+            asyncio.create_task(self._save_run_reflection(
+                goal=user_goal,
+                completed_steps=completed_steps,
+                step_results=step_results,
+                replan_count=replan_count,
+                goal_pursuit_trace=goal_pursuit_trace,
+                succeeded=bool(not remaining_after and final_content),
+            ))
+
             self._log_agent_event("goal_pursuit_end", {
                 "completed_steps": len(completed_steps),
                 "total_steps": len(remaining_steps),
@@ -3627,7 +4015,21 @@ class GoalPursuitExecutor(HybridAgentExecutor):
                 await stream_queue.put({"type": "thinking", "content": list(thinking_steps)})
 
         async def _create_plan_with_trace() -> list:
-            plan = await self._create_plan(user_goal, config)
+            # Fetch past goal_reflection lessons and compress if needed
+            lessons_list = await self._fetch_goal_lessons(config)
+            lessons = ""
+            if lessons_list:
+                lessons = await self._compress_lessons(lessons_list, config)
+                await _push_thinking({
+                    "type": "tool_call",
+                    "name": "LoadLessons",
+                    "content": (
+                        f"Loaded {len(lessons_list)} past lesson(s) for planning"
+                        + (" (compressed)" if len(lessons_list) > 1 else "")
+                    ),
+                })
+
+            plan = await self._create_plan(user_goal, config, lessons=lessons)
             self._log_agent_event("goal_pursuit_plan_created", {
                 "steps": len(plan),
                 "goal_preview": user_goal[:100],

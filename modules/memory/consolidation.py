@@ -61,9 +61,10 @@ class MemoryConsolidator:
         """Fetch candidate memories with timestamps for consolidation."""
         with self.store._connect() as con:
             rows = con.execute("""
-                SELECT id, text, created_at 
-                FROM memories 
+                SELECT id, text, created_at
+                FROM memories
                 WHERE deleted = 0 AND parent_id IS NULL AND embedding IS NOT NULL
+                AND source != 'goal_reflection'
                 ORDER BY created_at DESC
             """).fetchall()
 
@@ -80,8 +81,9 @@ class MemoryConsolidator:
 
         with self.store._connect() as con:
             rows = con.execute("""
-                SELECT id, embedding FROM memories 
+                SELECT id, embedding FROM memories
                 WHERE deleted = 0 AND parent_id IS NULL AND embedding IS NOT NULL
+                AND source != 'goal_reflection'
                 ORDER BY id ASC
             """).fetchall()
 
