@@ -588,16 +588,6 @@ class MemoryStore:
         
         return []
 
-    def delete_entry(self, memory_id: int):
-        with self.write_lock:
-            with self._connect() as con:
-                con.execute("DELETE FROM memories WHERE id = ?", (memory_id,))
-            
-            if FAISS_AVAILABLE and self.faiss_index:
-                with self.faiss_lock:
-                    self.faiss_index.remove_ids(np.array([memory_id]).astype('int64'))
-                    self._save_faiss_index()
-
     def boost_importance(self, memory_id: int, boost: int = 1):
         with self._connect() as con:
             con.execute("UPDATE memories SET importance_boost = importance_boost + ? WHERE id = ?", (boost, memory_id))
@@ -721,30 +711,32 @@ class MemoryStore:
         Updates a memory entry. Archives the old version via parent_id.
         Returns the new memory ID, or None if not found.
         """
+        new_id = None
+        description = None
         with self.write_lock:
             with self._connect() as con:
                 current = con.execute("""
                     SELECT text, type, verified FROM memories WHERE id = ? AND deleted = 0 AND parent_id IS NULL
                 """, (memory_id,)).fetchone()
-                
+
                 if not current:
                     return None
-                
+
                 old_text, old_type, old_verified = current[0], current[1], current[2]
-                
+
                 new_text = text if text is not None else old_text
                 new_type = mem_type if mem_type is not None else old_type
                 new_verified = verified if verified is not None else bool(old_verified)
-                
+
                 con.execute("UPDATE memories SET parent_id = ? WHERE id = ?", (memory_id, memory_id))
-                
+
                 cur = con.execute("""
                     INSERT INTO memories (identity, type, subject, text, confidence, created_at, embedding, source, verified, parent_id)
                     SELECT identity, ?, subject, ?, confidence, ?, embedding, source, ?, NULL
                     FROM memories WHERE id = ?
                 """, (new_type, new_text, int(time.time()), 1 if new_verified else 0, memory_id))
                 new_id = cur.lastrowid
-                
+
                 changes = []
                 if text and text != old_text:
                     changes.append(f"changed text from '{old_text}' to '{text}'")
@@ -752,16 +744,20 @@ class MemoryStore:
                     changes.append(f"changed type from '{old_type}' to '{mem_type}'")
                 if verified is not None and verified != bool(old_verified):
                     changes.append(f"changed verified from {bool(old_verified)} to {verified}")
-                
+
                 description = f"Updated memory #{memory_id}: {', '.join(changes)}" if changes else f"Updated memory #{memory_id}"
-                self.log_meta_memory("edit", [memory_id], json.dumps({"new_id": new_id}), description)
-                
-                if FAISS_AVAILABLE and self.faiss_index:
-                    with self.faiss_lock:
-                        self.faiss_index.remove_ids(np.array([memory_id]).astype('int64'))
-                        self._save_faiss_index()
-                
-                return new_id
+
+            if FAISS_AVAILABLE and self.faiss_index:
+                with self.faiss_lock:
+                    self.faiss_index.remove_ids(np.array([memory_id]).astype('int64'))
+                    self._save_faiss_index()
+
+        # Log AFTER releasing write_lock — log_meta_memory acquires write_lock itself,
+        # and threading.Lock is non-reentrant (re-entry from the same thread deadlocks).
+        if new_id is not None and description is not None:
+            self.log_meta_memory("edit", [memory_id], json.dumps({"new_id": new_id}), description)
+
+        return new_id
 
     def delete_entry(self, memory_id: int, reason: str = None):
         """Hard deletes a memory entry. Logs to meta_memories."""
@@ -770,18 +766,20 @@ class MemoryStore:
             row = con.execute("SELECT text FROM memories WHERE id = ?", (memory_id,)).fetchone()
             if row:
                 old_text = row[0]
-        
+
         with self.write_lock:
             with self._connect() as con:
                 con.execute("DELETE FROM memories WHERE id = ?", (memory_id,))
-            
+
             if FAISS_AVAILABLE and self.faiss_index:
                 with self.faiss_lock:
                     self.faiss_index.remove_ids(np.array([memory_id]).astype('int64'))
                     self._save_faiss_index()
-            
-            description = f"Deleted memory #{memory_id}" + (f": {reason}" if reason else "")
-            self.log_meta_memory("delete", [memory_id], reason, description)
+
+        # Log AFTER releasing write_lock — log_meta_memory acquires write_lock itself,
+        # and threading.Lock is non-reentrant (re-entry from the same thread deadlocks).
+        description = f"Deleted memory #{memory_id}" + (f": {reason}" if reason else "")
+        self.log_meta_memory("delete", [memory_id], reason, description)
 
     def merge_memories(self, memory_ids: List[int], new_text: str, new_type: str = "BELIEF", new_verified: bool = False) -> Optional[int]:
         """
