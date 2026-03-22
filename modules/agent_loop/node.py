@@ -2575,7 +2575,7 @@ class HybridAgentExecutor(AgentBaseExecutor):
 # Goal Pursuit Agent Loop
 # ---------------------------------------------------------------------------
 
-class GoalPursuitExecutor(HybridAgentExecutor):
+class GoalPursuitExecutor(HybridAgentExecutor, RLMAgentLoopExecutor):
     """
     Goal Pursuit Agent — hybrid agent loop with integrated planning, per-step
     evaluation, and autonomous replanning.
@@ -2653,6 +2653,15 @@ class GoalPursuitExecutor(HybridAgentExecutor):
             },
         },
     }
+
+    _DEFAULT_ASSUMPTION_PROMPT = (
+        "You are an autonomous agent working toward the goal: {goal}\n\n"
+        "You need to ask the user: {question}\n\n"
+        "The user is currently unavailable. Make the most reasonable assumption "
+        "that allows progress to continue. "
+        "Provide a concise assumed answer (1-3 sentences). "
+        "Begin your reply with 'Assumed:' followed by the answer."
+    )
 
     _DEFAULT_PLANNING_PROMPT = (
         "You are a task planner. Break the user's request into clear, executable steps.\n\n"
@@ -2742,6 +2751,28 @@ class GoalPursuitExecutor(HybridAgentExecutor):
             except Exception:
                 args = {}
             question = args.get("question", "").strip()
+
+            if repl_state.get("_auto_proceed_on_ask_user"):
+                # User is unavailable — generate a reasonable assumption and continue.
+                config_ctx = repl_state.get("_subgoal_config", {})
+                assumption = await self._generate_ask_user_assumption(
+                    question, repl_state, config_ctx
+                )
+                entry = {"question": question, "assumed_answer": assumption}
+                repl_state.setdefault("_ask_user_assumptions", []).append(entry)
+                logger.info(
+                    f"[GoalPursuit] AskUser auto-proceed: "
+                    f"Q={question[:80]!r} → {assumption[:80]!r}"
+                )
+                return {
+                    "tool_call_id": tool_call.get("id", ""),
+                    "role": "tool",
+                    "name": "AskUser",
+                    "content": f"[User unavailable — auto-assumed] {assumption}",
+                    "success": True,
+                }
+
+            # Standard pause mode — wait for user input.
             if question:
                 repl_state["_pending_question"] = question
             return {
@@ -2973,6 +3004,54 @@ class GoalPursuitExecutor(HybridAgentExecutor):
             return []
         content = response["choices"][0]["message"].get("content", "")
         return await self._parse_plan_response(content, max_steps)
+
+    async def _generate_ask_user_assumption(
+        self,
+        question: str,
+        repl_state: dict,
+        config: dict,
+    ) -> str:
+        """Generate a reasonable assumed answer when the user is unavailable.
+
+        Called when ``ask_user_auto_proceed=True`` and the LLM invokes AskUser.
+        Uses the LLM to synthesise a plausible answer given the question and the
+        current goal, so execution can continue without human input.
+        """
+        goal = repl_state.get("_current_goal", "the current task")
+        model = config.get("model") or settings.get("default_model")
+        prompt = (
+            config.get("ask_user_assumption_prompt", self._DEFAULT_ASSUMPTION_PROMPT)
+            .replace("{goal}", goal)
+            .replace("{question}", question)
+        )
+        try:
+            response = await self._llm_with_retry(
+                messages=[
+                    {
+                        "role": "system",
+                        "content": (
+                            "You are an autonomous agent. The user is temporarily "
+                            "unavailable. Make a reasonable, conservative assumption "
+                            "so the task can progress. Keep your answer brief."
+                        ),
+                    },
+                    {"role": "user", "content": prompt},
+                ],
+                model=model,
+                temperature=float(config.get("ask_user_assumption_temperature", 0.3)),
+                max_tokens=200,
+                tools=[],
+                max_retries=2,
+                retry_delay=float(config.get("retry_delay", 1.0)),
+            )
+            if response:
+                msg = response.get("choices", [{}])[0].get("message", {})
+                answer = msg.get("content", "").strip()
+                if answer:
+                    return answer
+        except Exception as e:
+            logger.warning(f"[GoalPursuit] Failed to generate AskUser assumption: {e}")
+        return "Assumed: proceeding with the most reasonable default for this task."
 
     async def _evaluate_step(
         self,
@@ -3420,6 +3499,8 @@ class GoalPursuitExecutor(HybridAgentExecutor):
         repl_state: dict,
         config: dict,
         user_goal: str,
+        tools_list: list = None,
+        reasoning_history: str = "",
     ) -> str:
         """Brief chain-of-thought LLM call before a step executes.
 
@@ -3428,10 +3509,20 @@ class GoalPursuitExecutor(HybridAgentExecutor):
         output is injected into the step system prompt so the execution
         loop acts on the reasoning rather than re-discovering it through
         trial and error.
+
+        Args:
+            tools_list: Available tool definitions — names are summarised so
+                the model can genuinely compare alternatives.
+            reasoning_history: Prior reasoning from the ReasoningBook (if the
+                flow wired a ReasoningBook Load node upstream).  Informs the
+                deliberation with lessons from previous runs.
         """
         model = config.get("model") or settings.get("default_model")
+
+        # Only step_*_result variables hold actual step outputs (Bug 13 fix).
         available_vars = [
-            k for k in repl_state.get("variables", {}) if k.startswith("step_")
+            k for k in repl_state.get("variables", {})
+            if k.startswith("step_") and k.endswith("_result")
         ]
         var_note = (
             "Step results already stored (retrieve with GetVariable): "
@@ -3439,24 +3530,49 @@ class GoalPursuitExecutor(HybridAgentExecutor):
             if available_vars
             else "No previous step results available yet."
         )
+
+        # Summarise available tools so the model can pick between alternatives.
+        tools_note = ""
+        if tools_list:
+            tool_names = [
+                t.get("function", {}).get("name", "")
+                for t in tools_list
+                if isinstance(t, dict)
+            ]
+            tool_names = [n for n in tool_names if n]
+            if tool_names:
+                tools_note = "Available tools: " + ", ".join(tool_names) + ".\n"
+
+        # Prior reasoning from the ReasoningBook informs the deliberation.
+        history_note = ""
+        if reasoning_history:
+            history_note = (
+                f"\nPrior reasoning history (from ReasoningBook):\n"
+                f"{reasoning_history[:800]}\n"
+            )
+
         prompt = (
             "You are about to execute one step of a multi-step plan.\n"
             "In 1-3 concise sentences reason about:\n"
-            "  1. The best tool or approach for this step.\n"
+            "  1. The best tool or approach for this step"
+            + (" (compare the available tools if relevant)" if tools_note else "")
+            + ".\n"
             "  2. Which prior step results (if any) are directly useful.\n"
             "  3. One specific pitfall to avoid.\n\n"
             f"Overall goal: {user_goal}\n"
             f"Step action: {step.get('action', '')}\n"
             f"Step target: {step.get('target', '')}\n"
             f"Success criterion: {step.get('goal', step.get('action', ''))}\n"
-            f"{var_note}\n\n"
+            f"{tools_note}"
+            f"{var_note}"
+            f"{history_note}\n"
             "Respond with only your brief reasoning — no JSON, no preamble."
         )
         resp = await self._llm_with_retry(
             messages=[{"role": "user", "content": prompt}],
             model=model,
             temperature=float(config.get("planning_temperature", 0.1)),
-            max_tokens=150,
+            max_tokens=200,
             tools=[],
             max_retries=2,
             retry_delay=1.0,
@@ -3464,6 +3580,20 @@ class GoalPursuitExecutor(HybridAgentExecutor):
         if resp and "choices" in resp:
             return (resp["choices"][0]["message"].get("content") or "").strip()
         return ""
+
+    def _context_pressure(self, repl_state: dict, max_context_tokens: int) -> float:
+        """Estimate context pressure as a fraction in [0.0, 1.0].
+
+        Measured as the total token-equivalent of accumulated stdout output
+        across all completed steps.  When pressure is high the step executor
+        should switch from the hybrid loop (full outputs inline) to the RLM
+        loop (metadata stubs only) to keep the LLM context bounded.
+
+        This is intentionally cheap — a single list comprehension — so it can
+        be called before every step without noticeable overhead.
+        """
+        stdout_chars = sum(len(s) for s in repl_state.get("stdout_history", []))
+        return min(1.0, (stdout_chars // 4) / max(1, max_context_tokens))
 
     # ------------------------------------------------------------------
     # Main entry point
@@ -3528,6 +3658,13 @@ class GoalPursuitExecutor(HybridAgentExecutor):
         step_timeout = float(config.get("step_timeout", 0))
         enable_dependency_graph = bool(config.get("enable_dependency_graph", True))
         enable_ask_user = bool(config.get("enable_ask_user", True))
+        ask_user_auto_proceed = bool(config.get("ask_user_auto_proceed", False))
+        # "auto"   — switch to RLM when context pressure >= threshold (default)
+        # "hybrid" — always use the hybrid loop (full outputs inline)
+        # "rlm"    — always use the RLM loop (metadata stubs, constant context)
+        step_execution_mode = str(config.get("step_execution_mode", "auto"))
+        context_pressure_threshold = float(config.get("context_pressure_threshold", 0.7))
+        max_context_tokens = int(config.get("max_context_tokens", 8000))
         enable_subgoals = bool(config.get("enable_subgoals", True))
         subgoal_depth = int(config.get("_subgoal_depth", 0))
         max_subgoal_depth = int(config.get("max_subgoal_depth", 2))
@@ -3656,6 +3793,13 @@ class GoalPursuitExecutor(HybridAgentExecutor):
             "_subgoal_depth": subgoal_depth,
             "_max_subgoal_depth": max_subgoal_depth,
             "_subgoal_config": config,
+            # AskUser auto-proceed — set by _execute_tool when user is unavailable.
+            "_auto_proceed_on_ask_user": ask_user_auto_proceed,
+            "_current_goal": user_goal,
+            "_ask_user_assumptions": [],
+            # Required by _run_rlm_loop which reads/writes these keys directly.
+            "stdout_history": list(input_data.get("stdout_history", [])),
+            "final": None,
         }
         # Restore persisted variables from a previous interrupted run.
         restored_vars = input_data.pop("_repl_variables", {})
@@ -3719,7 +3863,12 @@ class GoalPursuitExecutor(HybridAgentExecutor):
                 if enable_step_reasoning:
                     try:
                         reasoning = await self._reason_about_step(
-                            step, repl_state, config, user_goal
+                            step,
+                            repl_state,
+                            config,
+                            user_goal,
+                            tools_list=tools_list,
+                            reasoning_history=input_data.get("reasoning_context", ""),
                         )
                     except Exception as _re:
                         logger.debug(f"[GoalPursuit] Pre-step reasoning failed: {_re}")
@@ -3769,34 +3918,84 @@ class GoalPursuitExecutor(HybridAgentExecutor):
                 if reasoning:
                     step_trace["reasoning"] = reasoning
 
-                _step_timed_out = False
-                try:
-                    _step_coro = self._run_hybrid_loop(
-                        llm_messages=step_messages,
-                        tools_list=tools_list,
-                        tool_library=tool_library,
-                        repl_state=repl_state,
-                        model=model,
-                        temperature=temperature,
-                        max_tokens=max_tokens,
-                        max_iterations=max_iterations_per_step,
-                        max_llm_retries=max_llm_retries,
-                        retry_delay=retry_delay,
-                        tool_error_strategy=tool_error_strategy,
-                        large_output_threshold=large_output_threshold,
-                        trace=goal_pursuit_trace,
-                        stream_queue=stream_queue,
-                        thinking_steps=thinking_steps,
+                # ── Choose execution mode based on context pressure ───────
+                _pressure = self._context_pressure(repl_state, max_context_tokens)
+                _use_rlm = (
+                    step_execution_mode == "rlm"
+                    or (
+                        step_execution_mode == "auto"
+                        and _pressure >= context_pressure_threshold
                     )
-                    if step_timeout > 0:
-                        final_response, iters, had_tool_error = await asyncio.wait_for(
-                            _step_coro, timeout=step_timeout
+                )
+                step_trace["execution_mode"] = "rlm" if _use_rlm else "hybrid"
+                step_trace["context_pressure"] = round(_pressure, 2)
+                if _use_rlm:
+                    logger.info(
+                        f"[GoalPursuit] Step {step.get('step')} using RLM loop "
+                        f"(pressure={_pressure:.2f})"
+                    )
+
+                _step_timed_out = False
+                final_response = None  # only populated in hybrid mode
+                try:
+                    if _use_rlm:
+                        # RLM mode — tool outputs stored as variables, context bounded.
+                        # Clear any prior set_final() so a previous step's value does
+                        # not short-circuit this step immediately.
+                        repl_state.pop("final", None)
+                        _rlm_trace: list = []
+                        _step_coro = self._run_rlm_loop(
+                            initial_messages=step_messages,
+                            repl_state=repl_state,
+                            tools_list=tools_list,
+                            tool_library=tool_library,
+                            model=model,
+                            config={
+                                **config,
+                                "max_iterations": max_iterations_per_step,
+                            },
+                            trace=_rlm_trace,
+                            stream_queue=stream_queue,
+                            thinking_steps=thinking_steps,
                         )
+                        if step_timeout > 0:
+                            _final_ans, _, _rlm_msgs = await asyncio.wait_for(
+                                _step_coro, timeout=step_timeout
+                            )
+                        else:
+                            _final_ans, _, _rlm_msgs = await _step_coro
+                        iters = len(_rlm_trace)
+                        had_tool_error = any(_itr.get("errors") for _itr in _rlm_trace)
                     else:
-                        final_response, iters, had_tool_error = await _step_coro
+                        # Hybrid mode — full outputs inline, richer inline reasoning.
+                        _step_coro = self._run_hybrid_loop(
+                            llm_messages=step_messages,
+                            tools_list=tools_list,
+                            tool_library=tool_library,
+                            repl_state=repl_state,
+                            model=model,
+                            temperature=temperature,
+                            max_tokens=max_tokens,
+                            max_iterations=max_iterations_per_step,
+                            max_llm_retries=max_llm_retries,
+                            retry_delay=retry_delay,
+                            tool_error_strategy=tool_error_strategy,
+                            large_output_threshold=large_output_threshold,
+                            trace=goal_pursuit_trace,
+                            stream_queue=stream_queue,
+                            thinking_steps=thinking_steps,
+                        )
+                        if step_timeout > 0:
+                            final_response, iters, had_tool_error = await asyncio.wait_for(
+                                _step_coro, timeout=step_timeout
+                            )
+                        else:
+                            final_response, iters, had_tool_error = await _step_coro
                 except asyncio.TimeoutError:
                     _step_timed_out = True
-                    final_response, iters, had_tool_error = None, 0, True
+                    iters, had_tool_error = 0, True
+                    if _use_rlm:
+                        _final_ans = None
                     logger.warning(
                         f"[GoalPursuit] Step {step.get('step')} timed out "
                         f"after {step_timeout}s"
@@ -3805,30 +4004,47 @@ class GoalPursuitExecutor(HybridAgentExecutor):
                 total_iterations += iters
                 iteration_count += iters
 
+                # ── Extract step content from whichever loop ran ──────────
                 step_content = ""
-                if final_response and "choices" in final_response:
+                if _use_rlm and not _step_timed_out:
+                    # Prefer the value explicitly committed via set_final(),
+                    # fall back to the last entry in stdout_history.
+                    if _final_ans:
+                        step_content = str(_final_ans)
+                    elif repl_state.get("stdout_history"):
+                        step_content = str(repl_state["stdout_history"][-1])
+                elif final_response and "choices" in final_response:
                     step_content = (
                         final_response["choices"][0]["message"].get("content") or ""
                     )
 
-                # Build tool history from the mutated step_messages so the
-                # evaluator and replanner can see what was actually attempted.
+                # Build tool history for the evaluator and replanner.
                 tool_history: list = []
                 if not _step_timed_out:
-                    for msg in step_messages:
-                        role = msg.get("role", "")
-                        if role == "assistant" and msg.get("tool_calls"):
-                            for tc in msg["tool_calls"]:
-                                fn = tc.get("function", {})
-                                args_raw = fn.get("arguments", "")[:150]
-                                tool_history.append(
-                                    f"→ Called: {fn.get('name', '?')}({args_raw})"
-                                )
-                        elif role == "tool":
-                            t_name = msg.get("name", "tool")
-                            t_content = (msg.get("content") or "")[:200]
-                            ok = "✓" if msg.get("success", True) else "✗"
-                            tool_history.append(f"  {ok} {t_name}: {t_content}")
+                    if _use_rlm:
+                        for _itr in _rlm_trace:
+                            for _tc_name in _itr.get("tool_calls", []):
+                                tool_history.append(f"→ Called: {_tc_name}")
+                            for _err in _itr.get("errors", []):
+                                tool_history.append(f"  ✗ {_err}")
+                    else:
+                        for msg in step_messages:
+                            role = msg.get("role", "")
+                            if role == "assistant" and msg.get("tool_calls"):
+                                for tc in msg["tool_calls"]:
+                                    fn = tc.get("function", {})
+                                    args_raw = fn.get("arguments", "")[:150]
+                                    tool_history.append(
+                                        f"→ Called: {fn.get('name', '?')}({args_raw})"
+                                    )
+                        # (tool result rows still extracted below for hybrid)
+                        for msg in step_messages:
+                            role = msg.get("role", "")
+                            if role == "tool":
+                                t_name = msg.get("name", "tool")
+                                t_content = (msg.get("content") or "")[:200]
+                                ok = "✓" if msg.get("success", True) else "✗"
+                                tool_history.append(f"  {ok} {t_name}: {t_content}")
 
                 step_trace["iterations"] = iters
                 step_trace["had_tool_error"] = had_tool_error
@@ -4181,6 +4397,9 @@ class GoalPursuitExecutor(HybridAgentExecutor):
                         "variables": list(repl_state["variables"].keys()),
                         "variable_count": len(repl_state["variables"]),
                     }
+                    assumptions = repl_state.get("_ask_user_assumptions", [])
+                    if assumptions:
+                        result["ask_user_assumptions"] = assumptions
                     self._thinking_steps = thinking_steps
                     return result
 
@@ -4311,6 +4530,9 @@ class GoalPursuitExecutor(HybridAgentExecutor):
             }
             result["replan_needed"] = bool(remaining_after)
             result["replan_depth_exceeded"] = _replan_depth_hit or (replan_count >= max_replan_depth and bool(remaining_after))
+            assumptions = repl_state.get("_ask_user_assumptions", [])
+            if assumptions:
+                result["ask_user_assumptions"] = assumptions
 
             if episode is not None and sm is not None:
                 try:

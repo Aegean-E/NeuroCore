@@ -8,6 +8,10 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from modules.agent_loop.node import GoalPursuitExecutor
 
+# Capture the real _reason_about_step before any autouse fixtures can stub it.
+# Tests that exercise the real method use this reference to restore it.
+_real_reason_about_step = GoalPursuitExecutor._reason_about_step
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -54,7 +58,7 @@ def _stub_step_reasoning(monkeypatch):
     _reason_about_step LLM call would consume those responses unexpectedly.
     Tests that want to exercise reasoning should explicitly undo this patch.
     """
-    async def _no_reasoning(self, step, repl_state, config, user_goal):
+    async def _no_reasoning(self, step, repl_state, config, user_goal, tools_list=None, reasoning_history=""):
         return ""
     monkeypatch.setattr(
         "modules.agent_loop.node.GoalPursuitExecutor._reason_about_step",
@@ -1763,3 +1767,459 @@ async def test_rlm_loop_deduplicates_tool_calls():
     assert execution_log.count('{"text": "unique"}') == 1
     # Trace must record the duplicate error
     assert any("Duplicate" in e for itr in trace for e in itr.get("errors", []))
+
+
+# ---------------------------------------------------------------------------
+# ask_user_auto_proceed — autonomous continuation when user is unavailable
+# ---------------------------------------------------------------------------
+
+async def test_ask_user_auto_proceed_generates_assumption():
+    """
+    When ask_user_auto_proceed=True, _execute_tool must NOT pause.
+    It must call _generate_ask_user_assumption and return the assumption
+    as the tool result content.
+    """
+    ex = make_executor()
+    repl_state = {
+        "variables": {},
+        "_var_counts": {},
+        "sub_call_count": 0,
+        "max_sub_calls": 10,
+        "recursion_depth": 0,
+        "max_recursion_depth": 3,
+        "estimated_cost": 0.0,
+        "max_cost_usd": 1.0,
+        "_subgoal_depth": 0,
+        "_max_subgoal_depth": 2,
+        "_subgoal_config": {"ask_user_auto_proceed": True},
+        "_auto_proceed_on_ask_user": True,
+        "_current_goal": "Research AI trends",
+        "_ask_user_assumptions": [],
+    }
+    tool_call = {
+        "id": "tc_ask",
+        "function": {
+            "name": "AskUser",
+            "arguments": json.dumps({"question": "Which year should I focus on?"}),
+        },
+    }
+
+    async def fake_assumption(question, rs, cfg):
+        return "Assumed: focus on 2024, the most recent full year."
+
+    with patch.object(ex, "_generate_ask_user_assumption", side_effect=fake_assumption):
+        result = await ex._execute_tool(tool_call, {}, repl_state, 3000)
+
+    # Must NOT set _pending_question (that would trigger a pause)
+    assert "_pending_question" not in repl_state
+    # Must succeed and include the assumption
+    assert result["success"] is True
+    assert "2024" in result["content"]
+    assert "auto-assumed" in result["content"].lower()
+    # Must record the assumption in repl_state
+    assert len(repl_state["_ask_user_assumptions"]) == 1
+    assert repl_state["_ask_user_assumptions"][0]["question"] == "Which year should I focus on?"
+
+
+async def test_ask_user_standard_mode_still_pauses():
+    """When ask_user_auto_proceed is False (default), AskUser must pause normally."""
+    ex = make_executor()
+    repl_state = {
+        "variables": {},
+        "_var_counts": {},
+        "sub_call_count": 0,
+        "max_sub_calls": 10,
+        "recursion_depth": 0,
+        "max_recursion_depth": 3,
+        "estimated_cost": 0.0,
+        "max_cost_usd": 1.0,
+        "_subgoal_depth": 0,
+        "_max_subgoal_depth": 2,
+        "_subgoal_config": {},
+        "_auto_proceed_on_ask_user": False,
+        "_current_goal": "Research AI trends",
+        "_ask_user_assumptions": [],
+    }
+    tool_call = {
+        "id": "tc_ask2",
+        "function": {
+            "name": "AskUser",
+            "arguments": json.dumps({"question": "Should I use GPT-4?"}),
+        },
+    }
+    result = await ex._execute_tool(tool_call, {}, repl_state, 3000)
+
+    # Must set _pending_question to trigger the pause path
+    assert repl_state.get("_pending_question") == "Should I use GPT-4?"
+    # Result content tells the LLM to pause
+    assert "paused" in result["content"].lower()
+
+
+async def test_generate_ask_user_assumption_returns_llm_content():
+    """_generate_ask_user_assumption must use LLM output as the assumption."""
+    ex = make_executor()
+    ex.llm.chat_completion = AsyncMock(return_value={
+        "choices": [{"message": {"role": "assistant", "content": "Assumed: use 2024 data."}}]
+    })
+    repl_state = {"_current_goal": "Analyse trends", "_subgoal_config": {}}
+    assumption = await ex._generate_ask_user_assumption(
+        "Which year?", repl_state, {}
+    )
+    assert "2024" in assumption
+
+
+async def test_generate_ask_user_assumption_fallback_on_llm_failure():
+    """If the LLM call fails, a safe fallback string must be returned."""
+    ex = make_executor()
+    ex.llm.chat_completion = AsyncMock(side_effect=RuntimeError("LLM down"))
+    repl_state = {"_current_goal": "Some goal", "_subgoal_config": {}}
+    assumption = await ex._generate_ask_user_assumption(
+        "Any question?", repl_state, {}
+    )
+    assert assumption  # must not be empty
+    assert isinstance(assumption, str)
+
+
+async def test_ask_user_assumptions_surfaced_in_result():
+    """
+    ask_user_assumptions must appear in the final result dict when
+    ask_user_auto_proceed=True and at least one assumption was made.
+    """
+    ex = make_executor()
+
+    # Minimal plan: one step that calls AskUser then completes
+    plan = [{"step": 1, "action": "Analyze", "target": "data", "goal": "g", "depends_on": []}]
+    plan_json_str = json.dumps(plan)
+    step_content = "Analysis done with the assumed answer."
+    eval_ok = eval_json(True, "success", step_content)
+
+    responses = iter([
+        llm_response(plan_json_str),  # planning
+        # step execution — LLM calls AskUser then produces final content
+        {
+            "choices": [{
+                "message": {
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": [{
+                        "id": "tc_ask",
+                        "function": {
+                            "name": "AskUser",
+                            "arguments": json.dumps({"question": "Use strict mode?"}),
+                        },
+                    }],
+                }
+            }]
+        },
+        llm_response(step_content),   # after AskUser auto-assumed
+        llm_response(eval_ok),        # step evaluation
+        llm_response(step_content),   # synthesis
+    ])
+    ex.llm.chat_completion = AsyncMock(side_effect=lambda **kw: next(responses))
+
+    async def fake_assumption(question, rs, cfg):
+        return "Assumed: yes, use strict mode."
+
+    with patch.object(ex, "_generate_ask_user_assumption", side_effect=fake_assumption):
+        result = await ex.receive(
+            {"messages": MESSAGES},
+            config={
+                "ask_user_auto_proceed": True,
+                "enable_step_evaluation": True,
+                "timeout": 0,
+            },
+        )
+
+    assert "ask_user_assumptions" in result, (
+        "Assumptions must be surfaced in the result when auto-proceed is active"
+    )
+    assert any(
+        "Use strict mode?" in a["question"]
+        for a in result["ask_user_assumptions"]
+    )
+
+
+# ---------------------------------------------------------------------------
+# _reason_about_step deliberation quality fixes
+# ---------------------------------------------------------------------------
+
+async def test_reason_about_step_filters_var_names_correctly(monkeypatch):
+    """
+    _reason_about_step must only list step_*_result variables, not any step_*
+    variable (Bug 13 duplicate fix).
+    """
+    monkeypatch.setattr(GoalPursuitExecutor, "_reason_about_step", _real_reason_about_step)
+    ex = make_executor()
+    repl_state = {
+        "variables": {
+            "step_1_result": "output of step 1",
+            "step_timeout": "5",           # must NOT appear
+            "step_2_result": "output of step 2",
+            "step_extra_info": "metadata",  # must NOT appear
+        },
+    }
+    captured = []
+
+    async def fake_llm(**kwargs):
+        captured.extend(kwargs.get("messages", []))
+        return {"choices": [{"message": {"content": "Use WebSearch; step_1_result is useful; avoid hallucination."}}]}
+
+    with patch.object(ex, "_llm_with_retry", side_effect=fake_llm):
+        await ex._reason_about_step(
+            step={"action": "Analyse", "target": "data", "goal": "g"},
+            repl_state=repl_state,
+            config={},
+            user_goal="test goal",
+        )
+
+    prompt_text = " ".join(m.get("content", "") for m in captured)
+    assert "step_1_result" in prompt_text
+    assert "step_2_result" in prompt_text
+    assert "step_timeout" not in prompt_text
+    assert "step_extra_info" not in prompt_text
+
+
+async def test_reason_about_step_includes_tool_names(monkeypatch):
+    """
+    When tools_list is passed, _reason_about_step must include tool names in
+    the prompt so the model can compare alternatives.
+    """
+    monkeypatch.setattr(GoalPursuitExecutor, "_reason_about_step", _real_reason_about_step)
+    ex = make_executor()
+    tools_list = [
+        {"function": {"name": "WebSearch"}},
+        {"function": {"name": "KnowledgeBase"}},
+        {"function": {"name": "Calculator"}},
+    ]
+    captured = []
+
+    async def fake_llm(**kwargs):
+        captured.extend(kwargs.get("messages", []))
+        return {"choices": [{"message": {"content": "Use WebSearch here."}}]}
+
+    with patch.object(ex, "_llm_with_retry", side_effect=fake_llm):
+        await ex._reason_about_step(
+            step={"action": "Research", "target": "AI trends", "goal": "g"},
+            repl_state={"variables": {}},
+            config={},
+            user_goal="summarise AI",
+            tools_list=tools_list,
+        )
+
+    prompt_text = " ".join(m.get("content", "") for m in captured)
+    assert "WebSearch" in prompt_text
+    assert "KnowledgeBase" in prompt_text
+    assert "Calculator" in prompt_text
+
+
+async def test_reason_about_step_includes_reasoning_history(monkeypatch):
+    """
+    When reasoning_history is provided (from ReasoningBook), it must appear
+    in the deliberation prompt so prior lessons inform the current step.
+    """
+    monkeypatch.setattr(GoalPursuitExecutor, "_reason_about_step", _real_reason_about_step)
+    ex = make_executor()
+    prior_history = "Lesson: always verify sources before summarising."
+    captured = []
+
+    async def fake_llm(**kwargs):
+        captured.extend(kwargs.get("messages", []))
+        return {"choices": [{"message": {"content": "Verify sources first."}}]}
+
+    with patch.object(ex, "_llm_with_retry", side_effect=fake_llm):
+        await ex._reason_about_step(
+            step={"action": "Summarise", "target": "findings", "goal": "g"},
+            repl_state={"variables": {}},
+            config={},
+            user_goal="research goal",
+            reasoning_history=prior_history,
+        )
+
+    prompt_text = " ".join(m.get("content", "") for m in captured)
+    assert "verify sources" in prompt_text.lower()
+
+
+async def test_reason_about_step_no_tools_no_tools_note(monkeypatch):
+    """When tools_list is empty, the prompt must not include a tools line."""
+    monkeypatch.setattr(GoalPursuitExecutor, "_reason_about_step", _real_reason_about_step)
+    ex = make_executor()
+    captured = []
+
+    async def fake_llm(**kwargs):
+        captured.extend(kwargs.get("messages", []))
+        return {"choices": [{"message": {"content": "Just do it."}}]}
+
+    with patch.object(ex, "_llm_with_retry", side_effect=fake_llm):
+        await ex._reason_about_step(
+            step={"action": "Do", "target": "thing", "goal": "g"},
+            repl_state={"variables": {}},
+            config={},
+            user_goal="goal",
+            tools_list=[],
+        )
+
+    prompt_text = " ".join(m.get("content", "") for m in captured)
+    assert "Available tools:" not in prompt_text
+
+
+# ---------------------------------------------------------------------------
+# Context pressure and execution mode switching
+# ---------------------------------------------------------------------------
+
+def test_context_pressure_zero_when_no_stdout():
+    """Zero stdout_history → pressure 0.0."""
+    ex = make_executor()
+    assert ex._context_pressure({}, max_context_tokens=8000) == 0.0
+
+
+def test_context_pressure_scales_with_stdout():
+    """Accumulated stdout chars / 4 should equal the fraction.
+    16000 chars → 4000 tokens; at max_context_tokens=8000 → pressure 0.5.
+    """
+    ex = make_executor()
+    repl_state = {"stdout_history": ["a" * 8000, "b" * 8000]}  # 16000 chars total
+    assert ex._context_pressure(repl_state, max_context_tokens=8000) == pytest.approx(0.5)
+
+
+def test_context_pressure_capped_at_one():
+    """Pressure never exceeds 1.0 regardless of stdout size."""
+    ex = make_executor()
+    repl_state = {"stdout_history": ["x" * 100_000]}
+    assert ex._context_pressure(repl_state, max_context_tokens=100) == 1.0
+
+
+def test_context_pressure_zero_max_context_guard():
+    """max_context_tokens=0 must not raise ZeroDivisionError; returns 1.0."""
+    ex = make_executor()
+    repl_state = {"stdout_history": ["hello"]}
+    # max(1, 0) prevents ZeroDivisionError; pressure > 1 is clamped to 1.0
+    assert ex._context_pressure(repl_state, max_context_tokens=0) == 1.0
+
+
+async def test_step_trace_contains_execution_mode_and_pressure(monkeypatch):
+    """step_trace emitted for each step must include execution_mode and context_pressure."""
+    ex = make_executor()
+    call_n = [0]
+
+    async def fake_llm(**kwargs):
+        call_n[0] += 1
+        if call_n[0] == 1:
+            # Planning call
+            return {"choices": [{"message": {"content": plan_json("DoSomething"), "tool_calls": []}}]}
+        if call_n[0] == 2:
+            # Step execution call — no tool calls, simple answer
+            return {"choices": [{"message": {"content": "Done.", "tool_calls": []}}]}
+        # Evaluation call
+        return {"choices": [{"message": {"content": eval_json(True), "tool_calls": []}}]}
+
+    with patch.object(ex, "_llm_with_retry", side_effect=fake_llm):
+        result = await ex.receive(
+            {"messages": MESSAGES},
+            config={"step_execution_mode": "hybrid", "max_steps": 1},
+        )
+
+    traces = result.get("goal_pursuit_trace", [])
+    step_traces = [t for t in traces if isinstance(t, dict) and "execution_mode" in t]
+    assert step_traces, "No step trace with execution_mode found"
+    t0 = step_traces[0]
+    assert t0["execution_mode"] in ("hybrid", "rlm")
+    assert "context_pressure" in t0
+    assert 0.0 <= t0["context_pressure"] <= 1.0
+
+
+async def test_step_execution_mode_rlm_forces_rlm(monkeypatch):
+    """step_execution_mode='rlm' must always choose RLM regardless of pressure."""
+    from modules.agent_loop.node import RLMAgentLoopExecutor
+    ex = make_executor()
+    call_n = [0]
+
+    async def fake_llm(**kwargs):
+        call_n[0] += 1
+        if call_n[0] == 1:
+            return {"choices": [{"message": {"content": plan_json("Step"), "tool_calls": []}}]}
+        return {"choices": [{"message": {"content": eval_json(True), "tool_calls": []}}]}
+
+    rlm_called = []
+
+    async def fake_rlm(self, **kwargs):
+        rlm_called.append(True)
+        return ("done", {}, [])
+
+    monkeypatch.setattr(RLMAgentLoopExecutor, "_run_rlm_loop", fake_rlm)
+    with patch.object(ex, "_llm_with_retry", side_effect=fake_llm):
+        await ex.receive(
+            {"messages": MESSAGES},
+            config={"step_execution_mode": "rlm", "max_steps": 1},
+        )
+
+    assert rlm_called, "RLM loop must be called when step_execution_mode='rlm'"
+
+
+async def test_step_execution_mode_auto_triggers_rlm_above_threshold(monkeypatch):
+    """In 'auto' mode, exceed the pressure threshold → RLM loop is used."""
+    from modules.agent_loop.node import RLMAgentLoopExecutor
+    ex = make_executor()
+    call_n = [0]
+
+    async def fake_llm(**kwargs):
+        call_n[0] += 1
+        if call_n[0] == 1:
+            return {"choices": [{"message": {"content": plan_json("Step"), "tool_calls": []}}]}
+        return {"choices": [{"message": {"content": eval_json(True), "tool_calls": []}}]}
+
+    rlm_called = []
+
+    async def fake_rlm(self, **kwargs):
+        rlm_called.append(True)
+        return ("done", {}, [])
+
+    monkeypatch.setattr(RLMAgentLoopExecutor, "_run_rlm_loop", fake_rlm)
+    # Push pressure above threshold: 40000 chars / 4 = 10000 tokens; threshold 0.7 of 8000 = 5600
+    with patch.object(ex, "_llm_with_retry", side_effect=fake_llm):
+        await ex.receive(
+            {"messages": MESSAGES, "stdout_history": ["x" * 40_000]},
+            config={
+                "step_execution_mode": "auto",
+                "context_pressure_threshold": 0.7,
+                "max_context_tokens": 8000,
+                "max_steps": 1,
+            },
+        )
+
+    assert rlm_called, "RLM loop must be triggered when context pressure exceeds threshold"
+
+
+async def test_step_execution_mode_auto_uses_hybrid_below_threshold(monkeypatch):
+    """In 'auto' mode, below the pressure threshold → hybrid loop is used."""
+    from modules.agent_loop.node import HybridAgentExecutor
+    ex = make_executor()
+    call_n = [0]
+
+    async def fake_llm(**kwargs):
+        call_n[0] += 1
+        if call_n[0] == 1:
+            return {"choices": [{"message": {"content": plan_json("Step"), "tool_calls": []}}]}
+        if call_n[0] == 2:
+            return {"choices": [{"message": {"content": "Done.", "tool_calls": []}}]}
+        return {"choices": [{"message": {"content": eval_json(True), "tool_calls": []}}]}
+
+    hybrid_called = []
+
+    async def fake_hybrid(self, **kwargs):
+        hybrid_called.append(True)
+        return ({"choices": [{"message": {"content": "Done.", "tool_calls": []}}]}, 1, False)
+
+    monkeypatch.setattr(HybridAgentExecutor, "_run_hybrid_loop", fake_hybrid)
+    # Only 400 chars of stdout → pressure = 0.01, well below 0.7 threshold
+    with patch.object(ex, "_llm_with_retry", side_effect=fake_llm):
+        await ex.receive(
+            {"messages": MESSAGES, "stdout_history": ["x" * 400]},
+            config={
+                "step_execution_mode": "auto",
+                "context_pressure_threshold": 0.7,
+                "max_context_tokens": 8000,
+                "max_steps": 1,
+            },
+        )
+
+    assert hybrid_called, "Hybrid loop must be used when context pressure is below threshold"
