@@ -43,6 +43,26 @@ MESSAGES = [{"role": "user", "content": "Research AI trends and summarize them"}
 
 
 # ---------------------------------------------------------------------------
+# Autouse fixture — suppress pre-step reasoning for all existing tests
+# ---------------------------------------------------------------------------
+
+@pytest.fixture(autouse=True)
+def _stub_step_reasoning(monkeypatch):
+    """Stub out _reason_about_step for all GoalPursuit tests.
+
+    Existing tests set up specific LLM mock sequences; the extra
+    _reason_about_step LLM call would consume those responses unexpectedly.
+    Tests that want to exercise reasoning should explicitly undo this patch.
+    """
+    async def _no_reasoning(self, step, repl_state, config, user_goal):
+        return ""
+    monkeypatch.setattr(
+        "modules.agent_loop.node.GoalPursuitExecutor._reason_about_step",
+        _no_reasoning,
+    )
+
+
+# ---------------------------------------------------------------------------
 # _parse_plan_response
 # ---------------------------------------------------------------------------
 
@@ -311,7 +331,7 @@ async def test_receive_step_fails_replans_and_succeeds():
          patch.object(ex, "_load_tools", return_value={}):
         result = await ex.receive(
             {"messages": MESSAGES},
-            config={"enable_synthesis": False, "max_replan_depth": 3},
+            config={"enable_synthesis": False, "max_replan_depth": 3, "max_step_retries": 0},
         )
 
     assert len(result["completed_steps"]) == 1
@@ -349,7 +369,7 @@ async def test_receive_replan_depth_exceeded_stops():
          patch.object(ex, "_load_tools", return_value={}):
         result = await ex.receive(
             {"messages": MESSAGES},
-            config={"enable_synthesis": False, "max_replan_depth": 2},
+            config={"enable_synthesis": False, "max_replan_depth": 2, "max_step_retries": 0},
         )
 
     assert result["replan_count"] >= 2
@@ -1194,3 +1214,218 @@ async def test_lessons_injected_into_planning_prompt():
 
     assert len(captured_prompts) == 1
     assert "Past lesson" in captured_prompts[0]
+
+
+# ---------------------------------------------------------------------------
+# Sub-goals — DecomposeGoal tool
+# ---------------------------------------------------------------------------
+
+async def test_decompose_goal_tool_injected_when_enabled():
+    """DecomposeGoal appears in tools_list when enable_subgoals=True (default)."""
+    ex = make_executor()
+    plan_resp = llm_response(plan_json("Do something"))
+    step_resp = llm_response("done")
+    eval_resp = llm_response(eval_json(True, "ok", "done"))
+    ex.llm.chat_completion = AsyncMock(side_effect=[plan_resp, step_resp, eval_resp])
+
+    captured_tools = []
+    original_run = ex._run_hybrid_loop
+
+    async def capture_tools(*args, tools_list, **kwargs):
+        captured_tools.extend(tools_list)
+        return await original_run(*args, tools_list=tools_list, **kwargs)
+
+    with patch.object(ex, "_run_hybrid_loop", side_effect=capture_tools), \
+         patch.object(ex, "_load_tool_library", return_value={}), \
+         patch.object(ex, "_load_tools", return_value={}):
+        await ex.receive({"messages": MESSAGES}, config={"enable_synthesis": False})
+
+    tool_names = {t["function"]["name"] for t in captured_tools if isinstance(t, dict)}
+    assert "DecomposeGoal" in tool_names
+
+
+async def test_decompose_goal_tool_not_injected_at_max_depth():
+    """DecomposeGoal is absent when subgoal_depth >= max_subgoal_depth."""
+    ex = make_executor()
+    plan_resp = llm_response(plan_json("Do something"))
+    step_resp = llm_response("done")
+    eval_resp = llm_response(eval_json(True, "ok", "done"))
+    ex.llm.chat_completion = AsyncMock(side_effect=[plan_resp, step_resp, eval_resp])
+
+    captured_tools = []
+    original_run = ex._run_hybrid_loop
+
+    async def capture_tools(*args, tools_list, **kwargs):
+        captured_tools.extend(tools_list)
+        return await original_run(*args, tools_list=tools_list, **kwargs)
+
+    with patch.object(ex, "_run_hybrid_loop", side_effect=capture_tools), \
+         patch.object(ex, "_load_tool_library", return_value={}), \
+         patch.object(ex, "_load_tools", return_value={}):
+        # _subgoal_depth == max_subgoal_depth → tool should be absent
+        await ex.receive(
+            {"messages": MESSAGES},
+            config={"enable_synthesis": False, "_subgoal_depth": 2, "max_subgoal_depth": 2},
+        )
+
+    tool_names = {t["function"]["name"] for t in captured_tools if isinstance(t, dict)}
+    assert "DecomposeGoal" not in tool_names
+
+
+async def test_decompose_goal_tool_not_injected_when_disabled():
+    """DecomposeGoal is absent when enable_subgoals=False."""
+    ex = make_executor()
+    plan_resp = llm_response(plan_json("Do something"))
+    step_resp = llm_response("done")
+    eval_resp = llm_response(eval_json(True, "ok", "done"))
+    ex.llm.chat_completion = AsyncMock(side_effect=[plan_resp, step_resp, eval_resp])
+
+    captured_tools = []
+    original_run = ex._run_hybrid_loop
+
+    async def capture_tools(*args, tools_list, **kwargs):
+        captured_tools.extend(tools_list)
+        return await original_run(*args, tools_list=tools_list, **kwargs)
+
+    with patch.object(ex, "_run_hybrid_loop", side_effect=capture_tools), \
+         patch.object(ex, "_load_tool_library", return_value={}), \
+         patch.object(ex, "_load_tools", return_value={}):
+        await ex.receive(
+            {"messages": MESSAGES},
+            config={"enable_synthesis": False, "enable_subgoals": False},
+        )
+
+    tool_names = {t["function"]["name"] for t in captured_tools if isinstance(t, dict)}
+    assert "DecomposeGoal" not in tool_names
+
+
+async def test_execute_tool_decompose_goal_invokes_sub_receive():
+    """_execute_tool with DecomposeGoal calls receive() recursively and returns result."""
+    ex = make_executor()
+
+    sub_plan_resp = llm_response(plan_json("Sub step"))
+    sub_step_resp = llm_response("Sub-goal result.")
+    sub_eval_resp = llm_response(eval_json(True, "ok", "Sub-goal result."))
+    ex.llm.chat_completion = AsyncMock(
+        side_effect=[sub_plan_resp, sub_step_resp, sub_eval_resp]
+    )
+
+    repl_state = {
+        "variables": {},
+        "_subgoal_depth": 0,
+        "_max_subgoal_depth": 2,
+        "_subgoal_config": {"enable_synthesis": False, "enable_subgoals": False},
+    }
+    tool_call = {
+        "id": "tc1",
+        "function": {
+            "name": "DecomposeGoal",
+            "arguments": json.dumps({
+                "subgoal": "Research AI papers published this year",
+                "context": "Parent goal: summarize AI landscape",
+            }),
+        },
+    }
+
+    with patch.object(ex, "_load_tool_library", return_value={}), \
+         patch.object(ex, "_load_tools", return_value={}):
+        result = await ex._execute_tool(tool_call, {}, repl_state, 3000)
+
+    assert result["name"] == "DecomposeGoal"
+    assert result["success"] is True
+    assert result["content"]  # should contain the sub-goal's output
+
+
+async def test_execute_tool_decompose_goal_missing_subgoal_returns_error():
+    """DecomposeGoal with no subgoal parameter returns an error result."""
+    ex = make_executor()
+    repl_state = {
+        "variables": {},
+        "_subgoal_depth": 0,
+        "_max_subgoal_depth": 2,
+        "_subgoal_config": {},
+    }
+    tool_call = {
+        "id": "tc1",
+        "function": {
+            "name": "DecomposeGoal",
+            "arguments": json.dumps({}),
+        },
+    }
+    result = await ex._execute_tool(tool_call, {}, repl_state, 3000)
+    assert result["success"] is False
+    assert "required" in result["content"].lower() or "error" in result["content"].lower()
+
+
+async def test_subgoal_depth_incremented_in_recursive_call():
+    """When DecomposeGoal spawns a sub-call, _subgoal_depth in the sub-config is depth+1."""
+    ex = make_executor()
+
+    captured_configs = []
+    original_receive = ex.receive
+
+    async def capture_receive(input_data, config=None):
+        captured_configs.append(dict(config or {}))
+        return await original_receive(input_data, config=config)
+
+    sub_plan_resp = llm_response(plan_json("Sub step"))
+    sub_step_resp = llm_response("Sub result.")
+    sub_eval_resp = llm_response(eval_json(True, "ok", "Sub result."))
+    ex.llm.chat_completion = AsyncMock(
+        side_effect=[sub_plan_resp, sub_step_resp, sub_eval_resp]
+    )
+
+    repl_state = {
+        "variables": {},
+        "_subgoal_depth": 0,
+        "_max_subgoal_depth": 2,
+        "_subgoal_config": {"enable_synthesis": False, "enable_subgoals": False},
+    }
+    tool_call = {
+        "id": "tc1",
+        "function": {
+            "name": "DecomposeGoal",
+            "arguments": json.dumps({"subgoal": "Investigate this topic deeply"}),
+        },
+    }
+
+    with patch.object(ex, "receive", side_effect=capture_receive), \
+         patch.object(ex, "_load_tool_library", return_value={}), \
+         patch.object(ex, "_load_tools", return_value={}):
+        await ex._execute_tool(tool_call, {}, repl_state, 3000)
+
+    # capture_receive was called once for the sub-goal
+    assert len(captured_configs) == 1
+    assert captured_configs[0].get("_subgoal_depth") == 1  # depth incremented
+
+
+async def test_subgoal_result_content_returned_as_tool_result():
+    """DecomposeGoal returns the sub-goal's content string as the tool result."""
+    ex = make_executor()
+
+    async def fake_receive(input_data, config=None):
+        return {
+            "content": "Sub done with findings.",
+            "completed_steps": [],
+            "repl_state": {"variables": [], "variable_count": 0},
+        }
+
+    repl_state = {
+        "variables": {},
+        "_subgoal_depth": 0,
+        "_max_subgoal_depth": 2,
+        "_subgoal_config": {},
+    }
+    tool_call = {
+        "id": "tc1",
+        "function": {
+            "name": "DecomposeGoal",
+            "arguments": json.dumps({"subgoal": "Find data"}),
+        },
+    }
+
+    with patch.object(ex, "receive", side_effect=fake_receive):
+        result = await ex._execute_tool(tool_call, {}, repl_state, 3000)
+
+    assert result["success"] is True
+    assert result["content"] == "Sub done with findings."

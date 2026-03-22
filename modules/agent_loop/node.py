@@ -2609,6 +2609,38 @@ class GoalPursuitExecutor(HybridAgentExecutor):
         },
     }
 
+    _DECOMPOSE_GOAL_TOOL_DEF = {
+        "type": "function",
+        "function": {
+            "name": "DecomposeGoal",
+            "description": (
+                "Decompose the current step into a sub-goal that will be planned and "
+                "executed autonomously as a full GoalPursuit cycle. Use this when the "
+                "step is complex enough to benefit from its own multi-step plan — for "
+                "example, when a single step requires research, synthesis, and decision-making. "
+                "The sub-goal runs independently and its synthesized result is returned here. "
+                "Do NOT use this for simple tool calls — call the tool directly instead."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "subgoal": {
+                        "type": "string",
+                        "description": "The sub-goal to achieve. Be specific and self-contained.",
+                    },
+                    "context": {
+                        "type": "string",
+                        "description": (
+                            "Relevant context from the current execution that the sub-goal "
+                            "should know about (e.g. key findings, constraints, prior results)."
+                        ),
+                    },
+                },
+                "required": ["subgoal"],
+            },
+        },
+    }
+
     _DEFAULT_PLANNING_PROMPT = (
         "You are a task planner. Break the user's request into clear, executable steps.\n\n"
         "Rules:\n"
@@ -2619,8 +2651,13 @@ class GoalPursuitExecutor(HybridAgentExecutor):
         "- IMPORTANT: The 'action' field must match an available tool name wherever possible. "
         "Do not invent generic actions like 'open', 'navigate', 'access' when a specific tool exists. "
         "For example: use 'GetYouTubeTranscript' not 'open video', use 'WebSearch' not 'search the web'.\n"
+        "- For complex steps that require their own multi-step investigation, use action 'DecomposeGoal'. "
+        "The agent will call DecomposeGoal with a sub-goal description and it will plan+execute recursively.\n"
         "- depends_on: list of step numbers that must complete before this step can run. "
         "Use [] for steps with no prerequisites. Example: step 3 that needs steps 1 and 2 → \"depends_on\": [1, 2]\n"
+        "- IMPORTANT: Steps with no shared dependencies will be executed in PARALLEL. "
+        "Keep depends_on minimal — only list steps whose output this step actually needs. "
+        "Independent research/retrieval steps should always have depends_on: [].\n"
         "- If the task is simple (single action or question), return a 1-step array.\n"
         "- Maximum {max_steps} steps. Keep steps atomic and independently testable.\n\n"
         "User request: {request}\n\n"
@@ -2683,8 +2720,9 @@ class GoalPursuitExecutor(HybridAgentExecutor):
         repl_state: dict,
         large_output_threshold: int,
     ) -> dict:
-        """Intercept AskUser before delegating to the parent hybrid executor."""
+        """Intercept AskUser and DecomposeGoal before delegating to parent."""
         func_name = tool_call.get("function", {}).get("name", "")
+
         if func_name == "AskUser":
             try:
                 args = json.loads(tool_call["function"].get("arguments", "{}"))
@@ -2703,6 +2741,84 @@ class GoalPursuitExecutor(HybridAgentExecutor):
                 ),
                 "success": True,
             }
+
+        if func_name == "DecomposeGoal":
+            try:
+                args = json.loads(tool_call["function"].get("arguments", "{}"))
+            except Exception:
+                args = {}
+            subgoal = args.get("subgoal", "").strip()
+            context = args.get("context", "").strip()
+            if not subgoal:
+                return {
+                    "tool_call_id": tool_call.get("id", ""),
+                    "role": "tool",
+                    "name": "DecomposeGoal",
+                    "content": "Error: subgoal parameter is required.",
+                    "success": False,
+                }
+
+            current_depth = int(repl_state.get("_subgoal_depth", 0))
+            max_depth = int(repl_state.get("_max_subgoal_depth", 2))
+            sub_config = dict(repl_state.get("_subgoal_config", {}))
+
+            logger.info(
+                f"[GoalPursuit] Spawning sub-goal "
+                f"(depth {current_depth + 1}/{max_depth}): {subgoal[:80]}"
+            )
+
+            # Build sub-goal user message with optional context injection.
+            sub_content = subgoal
+            if context:
+                sub_content += f"\n\nContext:\n{context}"
+
+            sub_input = {
+                "messages": [{"role": "user", "content": sub_content}],
+                # Share current variable store so the sub-goal can read parent results.
+                "_repl_variables": dict(repl_state.get("variables", {})),
+            }
+            # Increment depth so nested DecomposeGoal calls are gated correctly.
+            sub_config["_subgoal_depth"] = current_depth + 1
+            sub_config["enable_synthesis"] = True
+            sub_config["enable_episode_persistence"] = False
+            sub_config.pop("_stream_queue", None)  # don't inherit stream queue
+
+            try:
+                sub_step_timeout = float(sub_config.get("step_timeout", 0)) or None
+                sub_result = await asyncio.wait_for(
+                    self.receive(sub_input, config=sub_config),
+                    timeout=sub_step_timeout,
+                )
+                content = sub_result.get("content") or ""
+                if not content:
+                    content = "Sub-goal completed but produced no output."
+
+                return {
+                    "tool_call_id": tool_call.get("id", ""),
+                    "role": "tool",
+                    "name": "DecomposeGoal",
+                    "content": content,
+                    "success": True,
+                }
+            except asyncio.TimeoutError:
+                logger.warning(f"[GoalPursuit] Sub-goal timed out: {subgoal[:60]}")
+                return {
+                    "tool_call_id": tool_call.get("id", ""),
+                    "role": "tool",
+                    "name": "DecomposeGoal",
+                    "content": "Sub-goal timed out before completing.",
+                    "success": False,
+                }
+            except Exception as e:
+                logger.warning(f"[GoalPursuit] Sub-goal execution failed: {e}")
+                return {
+                    "tool_call_id": tool_call.get("id", ""),
+                    "role": "tool",
+                    "name": "DecomposeGoal",
+                    "content": f"Sub-goal failed: {e}",
+                    "success": False,
+                }
+
         return await super()._execute_tool(
             tool_call, tool_library, repl_state, large_output_threshold
         )
@@ -3265,6 +3381,61 @@ class GoalPursuitExecutor(HybridAgentExecutor):
         return compressed_count
 
     # ------------------------------------------------------------------
+    # Pre-step reasoning
+    # ------------------------------------------------------------------
+
+    async def _reason_about_step(
+        self,
+        step: dict,
+        repl_state: dict,
+        config: dict,
+        user_goal: str,
+    ) -> str:
+        """Brief chain-of-thought LLM call before a step executes.
+
+        Asks the model to reason in 1-3 sentences about the best approach,
+        which prior results are relevant, and any pitfall to avoid.  The
+        output is injected into the step system prompt so the execution
+        loop acts on the reasoning rather than re-discovering it through
+        trial and error.
+        """
+        model = config.get("model") or settings.get("default_model")
+        available_vars = [
+            k for k in repl_state.get("variables", {}) if k.startswith("step_")
+        ]
+        var_note = (
+            "Step results already stored (retrieve with GetVariable): "
+            + ", ".join(available_vars)
+            if available_vars
+            else "No previous step results available yet."
+        )
+        prompt = (
+            "You are about to execute one step of a multi-step plan.\n"
+            "In 1-3 concise sentences reason about:\n"
+            "  1. The best tool or approach for this step.\n"
+            "  2. Which prior step results (if any) are directly useful.\n"
+            "  3. One specific pitfall to avoid.\n\n"
+            f"Overall goal: {user_goal}\n"
+            f"Step action: {step.get('action', '')}\n"
+            f"Step target: {step.get('target', '')}\n"
+            f"Success criterion: {step.get('goal', step.get('action', ''))}\n"
+            f"{var_note}\n\n"
+            "Respond with only your brief reasoning — no JSON, no preamble."
+        )
+        resp = await self._llm_with_retry(
+            messages=[{"role": "user", "content": prompt}],
+            model=model,
+            temperature=float(config.get("planning_temperature", 0.1)),
+            max_tokens=150,
+            tools=[],
+            max_retries=2,
+            retry_delay=1.0,
+        )
+        if resp and "choices" in resp:
+            return (resp["choices"][0]["message"].get("content") or "").strip()
+        return ""
+
+    # ------------------------------------------------------------------
     # Main entry point
     # ------------------------------------------------------------------
 
@@ -3327,6 +3498,9 @@ class GoalPursuitExecutor(HybridAgentExecutor):
         step_timeout = float(config.get("step_timeout", 0))
         enable_dependency_graph = bool(config.get("enable_dependency_graph", True))
         enable_ask_user = bool(config.get("enable_ask_user", True))
+        enable_subgoals = bool(config.get("enable_subgoals", True))
+        subgoal_depth = int(config.get("_subgoal_depth", 0))
+        max_subgoal_depth = int(config.get("max_subgoal_depth", 2))
         stream_queue = config.get("_stream_queue")
         model = config.get("model") or settings.get("default_model")
 
@@ -3432,6 +3606,8 @@ class GoalPursuitExecutor(HybridAgentExecutor):
                 tools_list.append(definition)
         if enable_ask_user:
             tools_list.append(self._ASK_USER_TOOL_DEF)
+        if enable_subgoals and subgoal_depth < max_subgoal_depth:
+            tools_list.append(self._DECOMPOSE_GOAL_TOOL_DEF)
         tool_library = self._load_tool_library()
 
         # Shared repl_state: variable storage is shared across all steps so
@@ -3446,6 +3622,10 @@ class GoalPursuitExecutor(HybridAgentExecutor):
             "estimated_cost": 0.0,
             "max_cost_usd": float(config.get("max_cost_usd", 1.0)),
             "sub_call_model": config.get("sub_call_model") or model,
+            # Sub-goal tracking — read by _execute_tool when DecomposeGoal is called.
+            "_subgoal_depth": subgoal_depth,
+            "_max_subgoal_depth": max_subgoal_depth,
+            "_subgoal_config": config,
         }
         # Restore persisted variables from a previous interrupted run.
         restored_vars = input_data.pop("_repl_variables", {})
@@ -3459,6 +3639,7 @@ class GoalPursuitExecutor(HybridAgentExecutor):
 
         async def _execute():
             nonlocal replan_count, iteration_count, total_iterations
+            _replan_depth_hit = False
 
             # Step 1: create or restore plan
             remaining_steps = list(input_data.get("plan", []))
@@ -3482,32 +3663,71 @@ class GoalPursuitExecutor(HybridAgentExecutor):
             if enable_dependency_graph:
                 remaining_steps = self._topo_sort_steps(remaining_steps)
 
-            # Step 2: execute steps
-            step_idx = 0
-            consecutive_failures = 0
-            while step_idx < len(remaining_steps):
-                if replan_count > max_replan_depth:
-                    break
+            # ── Step 2: execute steps via wave-based parallel scheduler ──────
+            # Independent steps (no unsatisfied depends_on) form a "wave" and
+            # run concurrently via asyncio.gather.  After each wave, results are
+            # collected and a replan is triggered if any step needs it.
+            enable_parallel = bool(config.get("enable_parallel_steps", True))
+            enable_step_reasoning = bool(config.get("enable_step_reasoning", True))
 
-                step = remaining_steps[step_idx]
+            async def _run_one_step(step: dict, snap_remaining: list) -> dict:
+                """Execute, optionally reason, and evaluate one step.
 
-                # Dependency check: defer step if prerequisites are not met.
-                if enable_dependency_graph:
-                    unmet = set(step.get("depends_on", [])) - completed_step_numbers
-                    if unmet:
-                        # Move to end and try the next step.
-                        remaining_steps.append(remaining_steps.pop(step_idx))
-                        # Detect deadlock: if all remaining steps have unmet deps, break.
-                        all_blocked = all(
-                            (set(s.get("depends_on", [])) - completed_step_numbers)
-                            for s in remaining_steps[step_idx:]
+                Returns a result dict:
+                  step, success, step_content, evaluation, tool_history,
+                  step_trace, ask_user_question, skipped, needs_replan,
+                  failure_reason
+                """
+                nonlocal total_iterations, iteration_count
+
+                plan_context = self._build_plan_context(
+                    completed_steps, snap_remaining, 0, step_results
+                )
+
+                # ── Pre-step chain-of-thought reasoning ──────────────────
+                reasoning = ""
+                if enable_step_reasoning:
+                    try:
+                        reasoning = await self._reason_about_step(
+                            step, repl_state, config, user_goal
                         )
-                        if all_blocked:
-                            logger.warning(
-                                f"[GoalPursuit] All remaining steps blocked by unmet deps; stopping"
-                            )
-                            break
-                        continue
+                    except Exception as _re:
+                        logger.debug(f"[GoalPursuit] Pre-step reasoning failed: {_re}")
+                    if reasoning:
+                        await _push_thinking({
+                            "type": "tool_call",
+                            "name": f"Reasoning (step {step.get('step')})",
+                            "content": reasoning,
+                        })
+
+                system_prompt = self._build_step_system_prompt(
+                    step, plan_context, input_data, config,
+                    large_output_threshold, repl_state,
+                )
+                if reasoning:
+                    system_prompt += f"\n\n## Pre-step Reasoning\n{reasoning}"
+
+                step_messages = [
+                    {"role": "system", "content": system_prompt},
+                    {
+                        "role": "user",
+                        "content": (
+                            f"Complete this step: {step.get('action', '')}: "
+                            f"{step.get('target', '')}.\n"
+                            f"Original goal: {user_goal}"
+                        ),
+                    },
+                ]
+
+                logger.info(
+                    f"[GoalPursuit] Executing step {step.get('step')}: "
+                    f"{step.get('action')}"
+                )
+                await _push_thinking({
+                    "type": "tool_call",
+                    "name": f"Step {step.get('step')}",
+                    "content": f"{step.get('action', '')}: {step.get('target', '')}",
+                })
 
                 step_trace = {
                     "step": step.get("step"),
@@ -3516,73 +3736,28 @@ class GoalPursuitExecutor(HybridAgentExecutor):
                     "replan_count": replan_count,
                     "depends_on": step.get("depends_on", []),
                 }
+                if reasoning:
+                    step_trace["reasoning"] = reasoning
 
-                # Pre-step checkpoint: records current state (including repl variables)
-                # so a crash-during-step can resume cleanly by re-running this step.
-                if episode is not None and sm is not None:
-                    try:
-                        sm.save_episode_state(
-                            phase=EpisodeState.PHASE_EXECUTING,
-                            replan_count=replan_count,
-                            completed_steps=[
-                                s.get("step") if isinstance(s, dict) else s
-                                for s in completed_steps
-                            ],
-                            current_step=step_idx,
-                            plan=remaining_steps[step_idx:],
-                            metadata={
-                                "repl_variables": dict(repl_state["variables"]),
-                                "step_started": step.get("step"),
-                            },
-                            add_checkpoint=False,
-                        )
-                    except Exception as e:
-                        logger.warning(f"[GoalPursuit] Pre-step checkpoint failed: {e}")
-
-                plan_context = self._build_plan_context(
-                    completed_steps, remaining_steps, step_idx, step_results
-                )
-                system_prompt = self._build_step_system_prompt(
-                    step, plan_context, input_data, config, large_output_threshold, repl_state
-                )
-                step_messages = [
-                    {"role": "system", "content": system_prompt},
-                    {
-                        "role": "user",
-                        "content": (
-                            f"Complete this step: {step.get('action', '')}: {step.get('target', '')}.\n"
-                            f"Original goal: {user_goal}"
-                        ),
-                    },
-                ]
-
-                logger.info(
-                    f"[GoalPursuit] Executing step {step.get('step')}: {step.get('action')}"
-                )
-                await _push_thinking({
-                    "type": "tool_call",
-                    "name": f"Step {step.get('step', step_idx + 1)}",
-                    "content": f"{step.get('action', '')}: {step.get('target', '')}",
-                })
-                _step_coro = self._run_hybrid_loop(
-                    llm_messages=step_messages,
-                    tools_list=tools_list,
-                    tool_library=tool_library,
-                    repl_state=repl_state,
-                    model=model,
-                    temperature=temperature,
-                    max_tokens=max_tokens,
-                    max_iterations=max_iterations_per_step,
-                    max_llm_retries=max_llm_retries,
-                    retry_delay=retry_delay,
-                    tool_error_strategy=tool_error_strategy,
-                    large_output_threshold=large_output_threshold,
-                    trace=goal_pursuit_trace,
-                    stream_queue=stream_queue,
-                    thinking_steps=thinking_steps,
-                )
                 _step_timed_out = False
                 try:
+                    _step_coro = self._run_hybrid_loop(
+                        llm_messages=step_messages,
+                        tools_list=tools_list,
+                        tool_library=tool_library,
+                        repl_state=repl_state,
+                        model=model,
+                        temperature=temperature,
+                        max_tokens=max_tokens,
+                        max_iterations=max_iterations_per_step,
+                        max_llm_retries=max_llm_retries,
+                        retry_delay=retry_delay,
+                        tool_error_strategy=tool_error_strategy,
+                        large_output_threshold=large_output_threshold,
+                        trace=goal_pursuit_trace,
+                        stream_queue=stream_queue,
+                        thinking_steps=thinking_steps,
+                    )
                     if step_timeout > 0:
                         final_response, iters, had_tool_error = await asyncio.wait_for(
                             _step_coro, timeout=step_timeout
@@ -3593,8 +3768,10 @@ class GoalPursuitExecutor(HybridAgentExecutor):
                     _step_timed_out = True
                     final_response, iters, had_tool_error = None, 0, True
                     logger.warning(
-                        f"[GoalPursuit] Step {step.get('step')} timed out after {step_timeout}s"
+                        f"[GoalPursuit] Step {step.get('step')} timed out "
+                        f"after {step_timeout}s"
                     )
+
                 total_iterations += iters
                 iteration_count += iters
 
@@ -3604,8 +3781,8 @@ class GoalPursuitExecutor(HybridAgentExecutor):
                         final_response["choices"][0]["message"].get("content") or ""
                     )
 
-                # Build tool history from the mutated step_messages so the evaluator
-                # and replanner can see what was actually attempted, not just the summary.
+                # Build tool history from the mutated step_messages so the
+                # evaluator and replanner can see what was actually attempted.
                 tool_history: list = []
                 if not _step_timed_out:
                     for msg in step_messages:
@@ -3631,67 +3808,36 @@ class GoalPursuitExecutor(HybridAgentExecutor):
                     [t for t in tool_history if t.startswith("→")]
                 )
 
-                # ── AskUser pause detection ────────────────────────────────
-                pending_q = repl_state.pop("_pending_question", None)
-                if pending_q:
+                # ── AskUser pause detection ───────────────────────────────
+                ask_user_question = repl_state.pop("_pending_question", None)
+                if ask_user_question:
                     step_trace["paused"] = True
-                    step_trace["pending_question"] = pending_q
+                    step_trace["pending_question"] = ask_user_question
                     goal_pursuit_trace.append(step_trace)
                     await _push_thinking({
                         "type": "tool_call",
                         "name": "AskUser",
-                        "content": pending_q[:300],
+                        "content": ask_user_question[:300],
                     })
-                    if episode is not None and sm is not None:
-                        try:
-                            sm.save_episode_state(
-                                phase=EpisodeState.PHASE_PAUSED,
-                                replan_count=replan_count,
-                                completed_steps=[
-                                    s.get("step") if isinstance(s, dict) else s
-                                    for s in completed_steps
-                                ],
-                                current_step=step_idx,
-                                plan=remaining_steps[step_idx:],
-                                metadata={
-                                    "repl_variables": dict(repl_state["variables"]),
-                                    "pending_question": pending_q,
-                                    "paused_at_step": step.get("step"),
-                                },
-                                add_checkpoint=True,
-                            )
-                        except Exception as _pe:
-                            logger.warning(f"[GoalPursuit] Pause checkpoint failed: {_pe}")
-                    result = input_data.copy()
-                    result["content"] = pending_q
-                    result["messages"] = messages + [
-                        {"role": "assistant", "content": pending_q}
-                    ]
-                    result["paused"] = True
-                    result["pending_question"] = pending_q
-                    result["plan"] = remaining_steps
-                    result["completed_steps"] = completed_steps
-                    result["step_results"] = step_results
-                    result["remaining_steps"] = remaining_steps[step_idx:]
-                    result["replan_count"] = replan_count
-                    result["iterations"] = total_iterations
-                    result["goal_pursuit_trace"] = goal_pursuit_trace
-                    result["agent_loop_trace"] = goal_pursuit_trace
-                    result["repl_state"] = {
-                        "variables": list(repl_state["variables"].keys()),
-                        "variable_count": len(repl_state["variables"]),
+                    return {
+                        "step": step, "success": False,
+                        "step_content": step_content,
+                        "evaluation": {}, "tool_history": tool_history,
+                        "step_trace": step_trace,
+                        "ask_user_question": ask_user_question,
+                        "skipped": False, "needs_replan": False,
+                        "failure_reason": "",
                     }
-                    self._thinking_steps = thinking_steps
-                    return result
 
-                # Evaluate step outcome
+                # ── Evaluate step outcome ─────────────────────────────────
                 if enable_step_evaluation:
                     evaluation = await self._evaluate_step(
                         step, step_content, config, tool_history=tool_history
                     )
                 else:
                     has_error_flag = (
-                        final_response.get("error") is not None if final_response else False
+                        final_response.get("error") is not None
+                        if final_response else False
                     )
                     success = bool(step_content) and not has_error_flag
                     evaluation = {
@@ -3706,168 +3852,318 @@ class GoalPursuitExecutor(HybridAgentExecutor):
                 step_trace["evaluation"] = evaluation
                 logger.info(
                     f"[GoalPursuit] Step {step.get('step')} "
-                    f"success={evaluation['success']}, reason={evaluation['reason'][:80]}"
+                    f"success={evaluation['success']}, "
+                    f"reason={evaluation['reason'][:80]}"
                 )
                 await _push_thinking({
                     "type": "tool_result",
-                    "name": f"Step {step.get('step', step_idx + 1)} eval",
+                    "name": f"Step {step.get('step')} eval",
                     "content": evaluation["reason"][:250],
                     "success": evaluation["success"],
                 })
 
                 if evaluation["success"]:
-                    completed_steps.append(step)
-                    step_results.append(evaluation)
-                    consecutive_failures = 0
-                    step_num = step.get("step", step_idx + 1)
-                    completed_step_numbers.add(step_num)
-                    # Store full step output as a named variable so later steps
-                    # (and the synthesizer) can retrieve it via GetVariable.
-                    var_key = f"step_{step_num}_result"
-                    repl_state["variables"][var_key] = step_content
-                    step_idx += 1
+                    goal_pursuit_trace.append(step_trace)
+                    return {
+                        "step": step, "success": True,
+                        "step_content": step_content, "evaluation": evaluation,
+                        "tool_history": tool_history, "step_trace": step_trace,
+                        "ask_user_question": None, "skipped": False,
+                        "needs_replan": False, "failure_reason": "",
+                    }
 
+                # ── Step failed ───────────────────────────────────────────
+                failure_reason = evaluation.get("reason", "Unknown failure")
+                if _step_timed_out:
+                    failure_reason = f"Step timed out after {step_timeout}s"
+
+                # Try alternative approach (if max_step_retries > 0).
+                # The original reasoning is included so the model knows to
+                # reconsider its initial assessment.
+                if max_step_retries > 0:
+                    tool_hist_str = (
+                        "\n".join(tool_history) if tool_history
+                        else "No tools recorded."
+                    )
+                    alt_system = (
+                        self._build_step_system_prompt(
+                            step, plan_context, input_data, config,
+                            large_output_threshold, repl_state,
+                        )
+                        + "\n\n## IMPORTANT: Previous Attempt Failed\n"
+                        f"What was tried:\n{tool_hist_str}\n\n"
+                        "You MUST use a completely different approach — different "
+                        "tools, different strategy, different angle. "
+                        "Do NOT repeat what failed."
+                    )
+                    if reasoning:
+                        alt_system += (
+                            f"\n\n## Original Reasoning (reconsider this)\n{reasoning}"
+                        )
+                    alt_messages = [
+                        {"role": "system", "content": alt_system},
+                        {
+                            "role": "user",
+                            "content": (
+                                "Previous attempt failed. "
+                                "Try a completely different approach.\n"
+                                f"Step: {step.get('action', '')}: "
+                                f"{step.get('target', '')}.\n"
+                                f"Original goal: {user_goal}"
+                            ),
+                        },
+                    ]
+                    await _push_thinking({
+                        "type": "tool_call",
+                        "name": f"Step {step.get('step')} (alternative approach)",
+                        "content": "Retrying with different strategy",
+                    })
+                    try:
+                        _alt_coro = self._run_hybrid_loop(
+                            llm_messages=alt_messages,
+                            tools_list=tools_list,
+                            tool_library=tool_library,
+                            repl_state=repl_state,
+                            model=model,
+                            temperature=temperature,
+                            max_tokens=max_tokens,
+                            max_iterations=max_iterations_per_step,
+                            max_llm_retries=max_llm_retries,
+                            retry_delay=retry_delay,
+                            tool_error_strategy=tool_error_strategy,
+                            large_output_threshold=large_output_threshold,
+                            trace=goal_pursuit_trace,
+                            stream_queue=stream_queue,
+                            thinking_steps=thinking_steps,
+                        )
+                        alt_response, alt_iters, _ = await asyncio.wait_for(
+                            _alt_coro,
+                            timeout=float(step_timeout) if step_timeout else None,
+                        )
+                        total_iterations += alt_iters
+                        alt_content = ""
+                        if alt_response and "choices" in alt_response:
+                            alt_content = (
+                                alt_response["choices"][0]["message"].get("content") or ""
+                            )
+                    except (asyncio.TimeoutError, Exception) as _ae:
+                        alt_content = ""
+                        logger.warning(
+                            f"[GoalPursuit] Alternative attempt failed for step "
+                            f"{step.get('step')}: {_ae}"
+                        )
+
+                    if alt_content and enable_step_evaluation:
+                        alt_eval = await self._evaluate_step(step, alt_content, config)
+                    elif alt_content:
+                        alt_eval = {
+                            "success": True, "reason": "ok",
+                            "extracted_result": alt_content[:500],
+                        }
+                    else:
+                        alt_eval = {
+                            "success": False,
+                            "reason": "alternative attempt produced no output",
+                            "extracted_result": "",
+                        }
+
+                    step_trace["alternative_attempt"] = True
+                    await _push_thinking({
+                        "type": "tool_result",
+                        "name": f"Step {step.get('step')} alt eval",
+                        "content": alt_eval["reason"][:250],
+                        "success": alt_eval["success"],
+                    })
+
+                    if alt_eval.get("success"):
+                        step_trace["alternative_succeeded"] = True
+                        step_trace["evaluation"] = alt_eval
+                        goal_pursuit_trace.append(step_trace)
+                        return {
+                            "step": step, "success": True,
+                            "step_content": alt_content, "evaluation": alt_eval,
+                            "tool_history": tool_history, "step_trace": step_trace,
+                            "ask_user_question": None, "skipped": False,
+                            "needs_replan": False, "failure_reason": "",
+                        }
+
+                    # Alternative also failed — skip the step entirely.
+                    step_trace["alternative_succeeded"] = False
+                    step_trace["skipped"] = True
+                    step_trace["skip_reason"] = (
+                        "Step failed + alternative attempt both failed; skipping"
+                    )
+                    goal_pursuit_trace.append(step_trace)
+                    logger.warning(
+                        f"[GoalPursuit] Step {step.get('step')} skipped after "
+                        "failure and alternative attempt"
+                    )
+                    return {
+                        "step": step, "success": False,
+                        "step_content": step_content, "evaluation": evaluation,
+                        "tool_history": tool_history, "step_trace": step_trace,
+                        "ask_user_question": None, "skipped": True,
+                        "needs_replan": False, "failure_reason": failure_reason,
+                    }
+
+                # No alternative configured — signal outer loop to replan.
+                goal_pursuit_trace.append(step_trace)
+                return {
+                    "step": step, "success": False,
+                    "step_content": step_content, "evaluation": evaluation,
+                    "tool_history": tool_history, "step_trace": step_trace,
+                    "ask_user_question": None, "skipped": False,
+                    "needs_replan": True, "failure_reason": failure_reason,
+                }
+
+            # ── Wave-based outer loop ─────────────────────────────────────
+            while remaining_steps and replan_count <= max_replan_depth:
+                # Build the current wave: all steps whose dependencies are
+                # fully satisfied by already-completed step numbers.
+                wave = [
+                    s for s in remaining_steps
+                    if set(s.get("depends_on", [])).issubset(completed_step_numbers)
+                ]
+                if not wave:
+                    logger.warning(
+                        "[GoalPursuit] All remaining steps have unmet "
+                        "dependencies; stopping"
+                    )
+                    break
+
+                # Snapshot of ALL still-pending steps for plan context display.
+                snap_remaining = list(remaining_steps)
+                wave_nums = {s["step"] for s in wave}
+                remaining_steps = [
+                    s for s in remaining_steps if s["step"] not in wave_nums
+                ]
+
+                # Pre-wave episode checkpoint.
+                if episode is not None and sm is not None:
+                    try:
+                        sm.save_episode_state(
+                            phase=EpisodeState.PHASE_EXECUTING,
+                            replan_count=replan_count,
+                            completed_steps=[s.get("step") for s in completed_steps],
+                            current_step=len(completed_steps),
+                            plan=snap_remaining,
+                            metadata={"repl_variables": dict(repl_state["variables"])},
+                            add_checkpoint=False,
+                        )
+                    except Exception as e:
+                        logger.warning(f"[GoalPursuit] Pre-wave checkpoint failed: {e}")
+
+                if len(wave) > 1:
+                    wave_desc = ", ".join(
+                        f"step {s['step']} ({s.get('action', '?')})" for s in wave
+                    )
+                    logger.info(
+                        f"[GoalPursuit] Running wave of {len(wave)} steps in parallel"
+                    )
+                    await _push_thinking({
+                        "type": "tool_call",
+                        "name": f"Parallel wave ({len(wave)} steps)",
+                        "content": wave_desc,
+                    })
+
+                # Run wave — parallel when multiple independent steps, serial otherwise.
+                if enable_parallel and len(wave) > 1:
+                    wave_results = await asyncio.gather(
+                        *[_run_one_step(s, snap_remaining) for s in wave],
+                        return_exceptions=True,
+                    )
+                else:
+                    wave_results = []
+                    for s in wave:
+                        wave_results.append(await _run_one_step(s, snap_remaining))
+
+                # ── Process wave results ──────────────────────────────────
+                paused_question: str | None = None
+                replan_trigger: dict | None = None  # first step requiring replan
+
+                for r in wave_results:
+                    if isinstance(r, Exception):
+                        logger.error(
+                            f"[GoalPursuit] Step raised exception in wave: {r}"
+                        )
+                        continue
+
+                    if r.get("ask_user_question") and paused_question is None:
+                        paused_question = r["ask_user_question"]
+                        continue
+
+                    if r["success"]:
+                        s = r["step"]
+                        completed_steps.append(s)
+                        step_results.append(r["evaluation"])
+                        step_num = s["step"]
+                        completed_step_numbers.add(step_num)
+                        repl_state["variables"][f"step_{step_num}_result"] = (
+                            r["step_content"]
+                        )
+                    elif r["skipped"]:
+                        # Skipped steps unblock their dependents.
+                        completed_step_numbers.add(r["step"]["step"])
+                    elif r["needs_replan"] and replan_trigger is None:
+                        replan_trigger = r
+
+                # ── AskUser pause: checkpoint and return ──────────────────
+                if paused_question:
                     if episode is not None and sm is not None:
                         try:
                             sm.save_episode_state(
-                                phase=EpisodeState.PHASE_EXECUTING,
+                                phase=EpisodeState.PHASE_PAUSED,
                                 replan_count=replan_count,
-                                completed_steps=[
-                                    s.get("step") if isinstance(s, dict) else s
-                                    for s in completed_steps
-                                ],
-                                current_step=step_idx,
-                                plan=remaining_steps[step_idx:] if step_idx < len(remaining_steps) else [],
-                                metadata={"repl_variables": dict(repl_state["variables"])},
+                                completed_steps=[s.get("step") for s in completed_steps],
+                                current_step=len(completed_steps),
+                                plan=remaining_steps,
+                                metadata={
+                                    "repl_variables": dict(repl_state["variables"]),
+                                    "pending_question": paused_question,
+                                },
                                 add_checkpoint=True,
                             )
-                        except Exception as e:
-                            logger.warning(f"[GoalPursuit] Episode checkpoint failed: {e}")
-                else:
-                    consecutive_failures += 1
-                    failure_reason = evaluation.get("reason", "Unknown failure")
-                    if _step_timed_out:
-                        failure_reason = f"Step timed out after {step_timeout}s"
-
-                    # Skip step if it has failed too many consecutive times,
-                    # but first try one "alternative approach" attempt before giving up.
-                    if consecutive_failures >= max_step_retries:
-                        # Build an alternative-approach prompt listing everything tried
-                        tool_hist_str = "\n".join(tool_history) if tool_history else "No tools recorded."
-                        alt_system = (
-                            self._build_step_system_prompt(
-                                step, plan_context, input_data, config,
-                                large_output_threshold, repl_state
-                            )
-                            + f"\n\n## IMPORTANT: Previous Attempts Failed\n"
-                            f"This step has failed {consecutive_failures} times.\n"
-                            f"What was tried:\n{tool_hist_str}\n\n"
-                            f"You MUST use a completely different approach — different tools, "
-                            f"different strategy, different angle. Do NOT repeat what failed."
-                        )
-                        alt_messages = [
-                            {"role": "system", "content": alt_system},
-                            {
-                                "role": "user",
-                                "content": (
-                                    f"Previous attempts for this step failed. "
-                                    f"Try a completely different approach.\n"
-                                    f"Step: {step.get('action', '')}: {step.get('target', '')}.\n"
-                                    f"Original goal: {user_goal}"
-                                ),
-                            },
-                        ]
-                        await _push_thinking({
-                            "type": "tool_call",
-                            "name": f"Step {step.get('step', step_idx + 1)} (alternative approach)",
-                            "content": f"Retrying with different strategy after {consecutive_failures} failures",
-                        })
-                        try:
-                            _alt_coro = self._run_hybrid_loop(
-                                llm_messages=alt_messages,
-                                tools_list=tools_list,
-                                tool_library=tool_library,
-                                repl_state=repl_state,
-                                model=model,
-                                temperature=temperature,
-                                max_tokens=max_tokens,
-                                max_iterations=max_iterations_per_step,
-                                max_llm_retries=max_llm_retries,
-                                retry_delay=retry_delay,
-                                tool_error_strategy=tool_error_strategy,
-                                large_output_threshold=large_output_threshold,
-                                trace=goal_pursuit_trace,
-                                stream_queue=stream_queue,
-                                thinking_steps=thinking_steps,
-                            )
-                            alt_response, alt_iters, alt_had_error = await asyncio.wait_for(
-                                _alt_coro,
-                                timeout=float(step_timeout) if step_timeout else None,
-                            )
-                            alt_content = ""
-                            if alt_response and "choices" in alt_response:
-                                alt_content = (
-                                    alt_response["choices"][0]["message"].get("content") or ""
-                                )
-                            total_iterations += alt_iters
-                        except asyncio.TimeoutError:
-                            alt_content = ""
-                            logger.warning(f"[GoalPursuit] Alternative attempt timed out for step {step.get('step')}")
-                        except Exception as _ae:
-                            alt_content = ""
-                            logger.warning(f"[GoalPursuit] Alternative attempt failed: {_ae}")
-
-                        if alt_content and enable_step_evaluation:
-                            alt_eval = await self._evaluate_step(step, alt_content, config)
-                        elif alt_content:
-                            alt_eval = {"success": True, "reason": "ok", "extracted_result": alt_content[:500]}
-                        else:
-                            alt_eval = {"success": False, "reason": "alternative attempt produced no output", "extracted_result": ""}
-
-                        if alt_eval.get("success"):
-                            completed_steps.append(step)
-                            step_results.append(alt_eval)
-                            completed_step_numbers.add(step.get("step", step_idx + 1))
-                            step_num = step.get("step", step_idx + 1)
-                            repl_state["variables"][f"step_{step_num}_result"] = alt_content
-                            consecutive_failures = 0
-                            step_trace["alternative_attempt"] = True
-                            step_trace["alternative_succeeded"] = True
-                            step_trace["evaluation"] = alt_eval
-                            goal_pursuit_trace.append(step_trace)
-                            await _push_thinking({
-                                "type": "tool_result",
-                                "name": f"Step {step.get('step', step_idx + 1)} alt eval",
-                                "content": alt_eval["reason"][:250],
-                                "success": True,
-                            })
-                            step_idx += 1
-                            continue
-                        else:
-                            # Alternative also failed — now actually skip
-                            step_trace["skipped"] = True
-                            step_trace["alternative_attempt"] = True
-                            step_trace["alternative_succeeded"] = False
-                            step_trace["skip_reason"] = (
-                                f"Step failed {consecutive_failures} times + alternative attempt; skipping"
-                            )
+                        except Exception as _pe:
                             logger.warning(
-                                f"[GoalPursuit] Step {step.get('step')} skipped after "
-                                f"{consecutive_failures} failures and alternative attempt"
+                                f"[GoalPursuit] Pause checkpoint failed: {_pe}"
                             )
-                            consecutive_failures = 0
-                            step_idx += 1
-                            goal_pursuit_trace.append(step_trace)
-                            continue
+                    result = input_data.copy()
+                    result["content"] = paused_question
+                    result["messages"] = messages + [
+                        {"role": "assistant", "content": paused_question}
+                    ]
+                    result["paused"] = True
+                    result["pending_question"] = paused_question
+                    result["plan"] = snap_remaining
+                    result["completed_steps"] = completed_steps
+                    result["step_results"] = step_results
+                    result["remaining_steps"] = remaining_steps
+                    result["replan_count"] = replan_count
+                    result["iterations"] = total_iterations
+                    result["goal_pursuit_trace"] = goal_pursuit_trace
+                    result["agent_loop_trace"] = goal_pursuit_trace
+                    result["repl_state"] = {
+                        "variables": list(repl_state["variables"].keys()),
+                        "variable_count": len(repl_state["variables"]),
+                    }
+                    self._thinking_steps = thinking_steps
+                    return result
 
+                # ── Replan if a step needs it ─────────────────────────────
+                if replan_trigger is not None:
                     if replan_count >= max_replan_depth:
-                        step_trace["replan_skipped"] = "max_replan_depth reached"
-                        goal_pursuit_trace.append(step_trace)
+                        logger.warning(
+                            "[GoalPursuit] Max replan depth reached; stopping"
+                        )
+                        _replan_depth_hit = True
                         break
 
                     replan_count += 1
+                    failure_reason = replan_trigger["failure_reason"]
+                    failed_step = replan_trigger["step"]
                     logger.info(
-                        f"[GoalPursuit] Replanning (attempt {replan_count}/{max_replan_depth}): "
+                        f"[GoalPursuit] Replanning "
+                        f"(attempt {replan_count}/{max_replan_depth}): "
                         f"{failure_reason[:80]}"
                     )
                     await _push_thinking({
@@ -3877,48 +4173,54 @@ class GoalPursuitExecutor(HybridAgentExecutor):
                     })
                     self._log_agent_event("goal_pursuit_replan", {
                         "replan_count": replan_count,
-                        "failed_step": step.get("step"),
+                        "failed_step": failed_step.get("step"),
                         "failure_reason": failure_reason,
                     })
-
                     new_remaining = await self._replan(
                         original_request=user_goal,
                         completed_steps=completed_steps,
                         step_results=step_results,
-                        failed_step=step,
+                        failed_step=failed_step,
                         failure_reason=failure_reason,
                         config=config,
-                        tool_history=tool_history,
+                        tool_history=replan_trigger["tool_history"],
                     )
-                    step_trace["replanned"] = True
-                    step_trace["new_steps_count"] = len(new_remaining)
-
                     if new_remaining:
                         if enable_dependency_graph:
                             new_remaining = self._topo_sort_steps(new_remaining)
                         remaining_steps = new_remaining
-                        step_idx = 0
-                        consecutive_failures = 0
-                    else:
-                        step_trace["replan_empty"] = True
-                        consecutive_failures = 0
-                        step_idx += 1
+                    elif not remaining_steps:
+                        break
 
-                    # Checkpoint partial progress after replan
                     if episode is not None and sm is not None:
                         try:
                             sm.save_episode_state(
                                 phase=EpisodeState.PHASE_REPLANNING,
                                 replan_count=replan_count,
                                 completed_steps=[s.get("step") for s in completed_steps],
-                                current_step=step_idx,
-                                plan=remaining_steps[step_idx:] if step_idx < len(remaining_steps) else [],
+                                current_step=len(completed_steps),
+                                plan=remaining_steps,
                                 add_checkpoint=False,
                             )
                         except Exception as e:
-                            logger.warning(f"[GoalPursuit] Episode checkpoint (replan) failed: {e}")
+                            logger.warning(
+                                f"[GoalPursuit] Episode checkpoint (replan) failed: {e}"
+                            )
 
-                goal_pursuit_trace.append(step_trace)
+                # Post-wave episode checkpoint on successful wave.
+                elif completed_steps and episode is not None and sm is not None:
+                    try:
+                        sm.save_episode_state(
+                            phase=EpisodeState.PHASE_EXECUTING,
+                            replan_count=replan_count,
+                            completed_steps=[s.get("step") for s in completed_steps],
+                            current_step=len(completed_steps),
+                            plan=remaining_steps,
+                            metadata={"repl_variables": dict(repl_state["variables"])},
+                            add_checkpoint=True,
+                        )
+                    except Exception as e:
+                        logger.warning(f"[GoalPursuit] Episode checkpoint failed: {e}")
 
             # Step 3: synthesize final answer
             if completed_steps and enable_synthesis and len(completed_steps) > 1:
@@ -3956,7 +4258,7 @@ class GoalPursuitExecutor(HybridAgentExecutor):
             else:
                 final_content = ""
 
-            remaining_after = remaining_steps[step_idx:] if step_idx <= len(remaining_steps) else []
+            remaining_after = remaining_steps  # wave loop already removes executed steps
             result = input_data.copy()
             result["messages"] = messages
             result["content"] = final_content
@@ -3973,7 +4275,7 @@ class GoalPursuitExecutor(HybridAgentExecutor):
                 "variable_count": len(repl_state["variables"]),
             }
             result["replan_needed"] = bool(remaining_after)
-            result["replan_depth_exceeded"] = replan_count >= max_replan_depth and bool(remaining_after)
+            result["replan_depth_exceeded"] = _replan_depth_hit or (replan_count >= max_replan_depth and bool(remaining_after))
 
             if episode is not None and sm is not None:
                 try:
