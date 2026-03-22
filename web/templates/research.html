@@ -52,7 +52,7 @@
             <!-- Experiments Tab -->
             <div id="view-experiments" class="view-content"
                  hx-get="/research/experiments"
-                 hx-trigger="revealed"
+                 hx-trigger="tabLoad, researchChanged from:body[detail.type=='intervention']"
                  hx-swap="innerHTML">
             </div>
 
@@ -67,21 +67,21 @@
             <!-- Literature Tab -->
             <div id="view-literature" class="view-content"
                  hx-get="/research/articles"
-                 hx-trigger="revealed, researchChanged from:body[detail.type=='article']"
+                 hx-trigger="tabLoad, researchChanged from:body[detail.type=='article']"
                  hx-swap="innerHTML">
             </div>
 
             <!-- Studies Tab -->
             <div id="view-studies" class="view-content"
                  hx-get="/research/study-designs"
-                 hx-trigger="revealed, researchChanged from:body[detail.type=='study']"
+                 hx-trigger="tabLoad, researchChanged from:body[detail.type=='study']"
                  hx-swap="innerHTML">
             </div>
 
             <!-- Findings Tab -->
             <div id="view-findings" class="view-content"
                  hx-get="/research/findings"
-                 hx-trigger="revealed, researchChanged from:body[detail.type=='finding']"
+                 hx-trigger="tabLoad, researchChanged from:body[detail.type=='finding']"
                  hx-swap="innerHTML">
             </div>
 
@@ -110,7 +110,7 @@
             btn.classList.remove('text-slate-400', 'hover:bg-slate-800', 'hover:text-white');
             const view = document.getElementById('view-' + name);
             view.classList.add('active');
-            htmx.trigger(view, 'revealed');
+            htmx.trigger(view, 'tabLoad');
         }
 
         // Global toast (reuse from navbar if available, else define fallback)

@@ -1099,6 +1099,8 @@ async def get_executor_class(node_type_id: str):
         return REPLEnvironmentExecutor
     if node_type_id == "hybrid_agent":
         return HybridAgentExecutor
+    if node_type_id == "goal_pursuit":
+        return GoalPursuitExecutor
     return None
 
 
@@ -2549,6 +2551,788 @@ class HybridAgentExecutor(AgentBaseExecutor):
         result["hybrid_trace"] = trace
         result["agent_loop_trace"] = trace
         # Fix 2: assign thinking_steps to instance attr at the end of all exit paths
+        self._thinking_steps = thinking_steps
+        return result
+
+    async def send(self, processed_data: dict) -> dict:
+        return processed_data
+
+
+# ---------------------------------------------------------------------------
+# Goal Pursuit Agent Loop
+# ---------------------------------------------------------------------------
+
+class GoalPursuitExecutor(HybridAgentExecutor):
+    """
+    Goal Pursuit Agent — hybrid agent loop with integrated planning, per-step
+    evaluation, and autonomous replanning.
+
+    Owns the full plan → execute step → evaluate → replan cycle in a single
+    ``receive()`` call.  No external planner node required: creates its own
+    plan, executes steps one by one using the hybrid tool loop, evaluates each
+    outcome semantically via a dedicated LLM call, and revises the plan when a
+    step fails — up to ``max_replan_depth`` times before giving up.
+
+    Key differences from HybridAgentExecutor:
+    - Creates its own step-by-step plan via LLM before executing.
+    - Runs a focused hybrid loop per step (not one monolithic loop).
+    - Evaluates each step's result with a separate LLM judge call.
+    - On failure: replans remaining steps incorporating what went wrong.
+    - Shares ``repl_state`` (variable storage) across all steps so large
+      outputs from step N are accessible in step N+1.
+    - Optionally synthesizes all step results into a final coherent answer.
+    - Full episode persistence and streaming support.
+    """
+
+    _library_cache: dict = {"mtime": 0.0, "data": {}, "file_mtimes": {}}
+
+    _DEFAULT_PLANNING_PROMPT = (
+        "You are a task planner. Break the user's request into clear, executable steps.\n\n"
+        "Rules:\n"
+        "- Return a JSON array of steps.\n"
+        "- Each step: {{\"step\": N, \"action\": \"verb phrase\", \"target\": \"what it applies to\", \"goal\": \"what success looks like\"}}\n"
+        "- If the task is simple (single action or question), return a 1-step array.\n"
+        "- Maximum {max_steps} steps. Keep steps atomic and independently testable.\n\n"
+        "User request: {request}\n\n"
+        "Respond with a JSON array only. No prose."
+    )
+
+    _DEFAULT_EVAL_PROMPT = (
+        "You are evaluating whether an agent successfully completed a step.\n\n"
+        "Step:\n"
+        "  Action: {action}\n"
+        "  Target: {target}\n"
+        "  Success criterion: {goal}\n\n"
+        "Agent response:\n{response}\n\n"
+        "Did the agent successfully complete this step? "
+        "Reply with JSON: {{\"success\": true/false, \"reason\": \"brief explanation\", "
+        "\"extracted_result\": \"key output or finding from this step\"}}"
+    )
+
+    _DEFAULT_REPLAN_PROMPT = (
+        "You are a task replanner. A step failed and you must create a revised plan.\n\n"
+        "Original goal: {original_request}\n\n"
+        "Completed steps:\n{completed_summary}\n\n"
+        "Failed step:\n"
+        "  Action: {failed_action}\n"
+        "  Target: {failed_target}\n"
+        "  Failure reason: {failure_reason}\n\n"
+        "Create a revised plan for the REMAINING work (do not re-list completed steps). "
+        "Work around the failure — skip, modify, or replace the failed step.\n\n"
+        "Return a JSON array: [{{\"step\": N, \"action\": \"...\", \"target\": \"...\", "
+        "\"goal\": \"what success looks like\"}}]\n\n"
+        "Respond with JSON array only. No prose."
+    )
+
+    _DEFAULT_SYNTHESIS_PROMPT = (
+        "You have completed a multi-step task. Synthesize the results into a final, "
+        "coherent response for the user.\n\n"
+        "Original goal: {original_request}\n\n"
+        "Step results:\n{step_summary}\n\n"
+        "Provide a complete, well-structured final answer."
+    )
+
+    # ------------------------------------------------------------------
+    # Planning helpers
+    # ------------------------------------------------------------------
+
+    async def _parse_plan_response(self, content: str, max_steps: int, step_offset: int = 0) -> list:
+        """Parse LLM JSON plan response into a list of step dicts."""
+        import re
+        content = re.sub(r'//.*', '', content)
+        content = re.sub(r'/\*.*?\*/', '', content, flags=re.DOTALL)
+        content = content.strip()
+        try:
+            parsed = json.loads(content)
+            if isinstance(parsed, list):
+                plan = []
+                for i, step in enumerate(parsed[:max_steps]):
+                    if isinstance(step, dict):
+                        plan.append({
+                            "step": step_offset + i + 1,
+                            "action": step.get("action", step.get("task", "unknown")),
+                            "target": step.get("target", step.get("query", "")),
+                            "goal": step.get("goal", step.get("success_criterion", step.get("action", ""))),
+                        })
+                return plan
+        except (json.JSONDecodeError, ValueError):
+            pass
+        return []
+
+    async def _create_plan(self, user_request: str, config: dict) -> list:
+        """Call LLM to create an initial step-by-step plan."""
+        max_steps = int(config.get("max_steps", 10))
+        prompt = config.get("planning_prompt", self._DEFAULT_PLANNING_PROMPT)
+        prompt = prompt.replace("{request}", user_request).replace("{max_steps}", str(max_steps))
+        model = config.get("model") or settings.get("default_model")
+        response = await self._llm_with_retry(
+            messages=[
+                {"role": "system", "content": prompt},
+                {"role": "user", "content": user_request},
+            ],
+            model=model,
+            temperature=float(config.get("planning_temperature", 0.1)),
+            max_tokens=max(500, 60 * max_steps),
+            tools=[],
+            max_retries=int(config.get("max_llm_retries", 3)),
+            retry_delay=float(config.get("retry_delay", 1.0)),
+        )
+        if not response or "choices" not in response:
+            return []
+        content = response["choices"][0]["message"].get("content", "")
+        return await self._parse_plan_response(content, max_steps)
+
+    async def _evaluate_step(self, step: dict, execution_result: str, config: dict) -> dict:
+        """LLM judge: did the step's result actually satisfy its goal?
+
+        Returns ``{"success": bool, "reason": str, "extracted_result": str}``.
+        """
+        import re
+        prompt = config.get("eval_prompt", self._DEFAULT_EVAL_PROMPT)
+        prompt = (
+            prompt
+            .replace("{action}", step.get("action", ""))
+            .replace("{target}", step.get("target", ""))
+            .replace("{goal}", step.get("goal", step.get("action", "")))
+            .replace("{response}", execution_result[:3000])
+        )
+        model = config.get("model") or settings.get("default_model")
+        response = await self._llm_with_retry(
+            messages=[
+                {"role": "system", "content": "You evaluate task completion. Reply with JSON only."},
+                {"role": "user", "content": prompt},
+            ],
+            model=model,
+            temperature=float(config.get("eval_temperature", 0.1)),
+            max_tokens=300,
+            tools=[],
+            max_retries=int(config.get("max_llm_retries", 3)),
+            retry_delay=float(config.get("retry_delay", 1.0)),
+        )
+        if not response or "choices" not in response:
+            return {"success": False, "reason": "Evaluator LLM failed", "extracted_result": ""}
+
+        raw = response["choices"][0]["message"].get("content", "").strip()
+        raw = re.sub(r'//.*', '', raw)
+        raw = re.sub(r'/\*.*?\*/', '', raw, flags=re.DOTALL)
+        try:
+            match = re.search(r'\{.*\}', raw, re.DOTALL)
+            if match:
+                parsed = json.loads(match.group())
+                return {
+                    "success": bool(parsed.get("success", False)),
+                    "reason": str(parsed.get("reason", "")),
+                    "extracted_result": str(parsed.get("extracted_result", "")),
+                }
+        except (json.JSONDecodeError, ValueError):
+            pass
+        positive = {"success", "completed", "achieved", "done", "yes", "true"}
+        success = bool(positive.intersection(raw.lower().split()))
+        return {"success": success, "reason": raw[:200], "extracted_result": ""}
+
+    async def _replan(
+        self,
+        original_request: str,
+        completed_steps: list,
+        step_results: list,
+        failed_step: dict,
+        failure_reason: str,
+        config: dict,
+    ) -> list:
+        """Generate a revised plan for remaining work after a step failure."""
+        max_steps = int(config.get("max_steps", 10))
+        if completed_steps:
+            lines = []
+            for i, step in enumerate(completed_steps):
+                r = step_results[i] if i < len(step_results) else {}
+                extracted = r.get("extracted_result", "")[:150]
+                suffix = f" → {extracted}" if extracted else ""
+                lines.append(f"  ✓ {step.get('action', '?')}: {step.get('target', '')}{suffix}")
+            completed_summary = "\n".join(lines)
+        else:
+            completed_summary = "(none)"
+
+        prompt = config.get("replan_prompt", self._DEFAULT_REPLAN_PROMPT)
+        prompt = (
+            prompt
+            .replace("{original_request}", original_request)
+            .replace("{completed_summary}", completed_summary)
+            .replace("{failed_action}", failed_step.get("action", ""))
+            .replace("{failed_target}", failed_step.get("target", ""))
+            .replace("{failure_reason}", failure_reason)
+        )
+        model = config.get("model") or settings.get("default_model")
+        response = await self._llm_with_retry(
+            messages=[
+                {"role": "system", "content": prompt},
+                {"role": "user", "content": f"Create a revised plan to achieve: {original_request}"},
+            ],
+            model=model,
+            temperature=float(config.get("planning_temperature", 0.1)),
+            max_tokens=max(500, 60 * max_steps),
+            tools=[],
+            max_retries=int(config.get("max_llm_retries", 3)),
+            retry_delay=float(config.get("retry_delay", 1.0)),
+        )
+        if not response or "choices" not in response:
+            return []
+        content = response["choices"][0]["message"].get("content", "")
+        return await self._parse_plan_response(content, max_steps, step_offset=len(completed_steps))
+
+    def _build_plan_context(
+        self,
+        completed_steps: list,
+        remaining_steps: list,
+        current_idx: int,
+        step_results: list,
+    ) -> str:
+        """Format a progress-aware plan context string."""
+        lines = []
+        for i, step in enumerate(completed_steps):
+            r = step_results[i] if i < len(step_results) else {}
+            extracted = r.get("extracted_result", "")[:100]
+            suffix = f" → {extracted}" if extracted else ""
+            lines.append(
+                f"✓ {step.get('step', i+1)}. {step.get('action','?')}: "
+                f"{step.get('target','')}{suffix} (DONE)"
+            )
+        for i, step in enumerate(remaining_steps):
+            prefix = "→" if i == current_idx else " "
+            tag = " (CURRENT)" if i == current_idx else ""
+            lines.append(
+                f"{prefix} {step.get('step','?')}. {step.get('action','?')}: "
+                f"{step.get('target','')}{tag}"
+            )
+        total = len(completed_steps) + len(remaining_steps)
+        done = len(completed_steps)
+        return f"## Execution Plan\nProgress: {done}/{total} steps done.\n" + "\n".join(lines)
+
+    def _build_step_system_prompt(
+        self,
+        step: dict,
+        plan_context: str,
+        input_data: dict,
+        config: dict,
+        large_output_threshold: int,
+    ) -> str:
+        """Assemble the system prompt for a single step execution."""
+        parts = [plan_context]
+        if config.get("include_memory_context", True):
+            v = input_data.get("_memory_context")
+            if v:
+                parts.append(f"## User Memories\n{v}")
+        if config.get("include_knowledge_context", True):
+            v = input_data.get("knowledge_context")
+            if v:
+                parts.append(f"## Relevant Knowledge\n{v}")
+        if config.get("include_reasoning_context", True):
+            v = input_data.get("reasoning_context")
+            if v:
+                parts.append(f"## Previous Reasoning\n{v}")
+        parts.append(self._build_variable_system_note(large_output_threshold))
+        parts.append(
+            f"## Current Step\n"
+            f"Action: {step.get('action', '')}\n"
+            f"Target: {step.get('target', '')}\n"
+            f"Success criterion: {step.get('goal', step.get('action', ''))}"
+        )
+        return "\n\n".join(parts)
+
+    # ------------------------------------------------------------------
+    # Main entry point
+    # ------------------------------------------------------------------
+
+    async def receive(self, input_data: dict, config: dict = None) -> dict:
+        """
+        Goal pursuit loop.
+
+        1. Extract user goal from messages.
+        2. Create a step-by-step plan via LLM (or restore from episode).
+        3. For each step:
+           a. Execute via the hybrid tool loop.
+           b. Evaluate the result with an LLM judge (skippable via config).
+           c. On success: record and advance.
+           d. On failure: replan up to ``max_replan_depth`` times.
+        4. Optionally synthesize all step results into a final answer.
+
+        Config keys (in addition to all HybridAgentExecutor config keys):
+            max_steps (int, default 10): max steps in initial plan.
+            max_iterations_per_step (int, default 10): hybrid loop iterations per step.
+            enable_step_evaluation (bool, default True): LLM judge per step outcome.
+            enable_synthesis (bool, default True): final LLM synthesis pass.
+            planning_temperature (float, default 0.1)
+            eval_temperature (float, default 0.1)
+            planning_prompt / eval_prompt / replan_prompt / synthesis_prompt (str)
+
+        Output keys:
+            content, messages, plan, completed_steps, step_results,
+            remaining_steps, replan_count, goal_pursuit_trace,
+            agent_loop_trace, iterations, episode_id (when persistence enabled)
+        """
+        if input_data is None:
+            input_data = {}
+        config = config or {}
+
+        # --- Session init ---
+        try:
+            sm = get_session_manager()
+            sm.load_or_create_session()
+            sm.log_agent_event("agent_start", {
+                "node": "goal_pursuit",
+                "input_keys": list(input_data.keys()),
+            })
+        except Exception as e:
+            logger.warning(f"[GoalPursuit] Session init failed: {e}")
+            sm = None
+
+        # --- Config ---
+        max_iterations_per_step = int(config.get("max_iterations_per_step", 10))
+        max_tokens = int(config.get("max_tokens", 4096))
+        temperature = float(config.get("temperature", 0.7))
+        max_llm_retries = int(config.get("max_llm_retries", 3))
+        retry_delay = float(config.get("retry_delay", 1.0))
+        tool_error_strategy = str(config.get("tool_error_strategy", "continue"))
+        timeout = float(config.get("timeout", 300))
+        max_replan_depth = int(config.get("max_replan_depth", 3))
+        large_output_threshold = int(config.get("large_output_threshold", 3000))
+        enable_step_evaluation = bool(config.get("enable_step_evaluation", True))
+        enable_synthesis = bool(config.get("enable_synthesis", True))
+        stream_queue = config.get("_stream_queue")
+        model = config.get("model") or settings.get("default_model")
+
+        # --- Episode persistence ---
+        enable_episode = config.get("enable_episode_persistence", False)
+        episode_id = config.get("episode_id")
+        checkpoint_interval = max(1, int(config.get("checkpoint_interval", 1)))
+        episode = None
+        iteration_count = 0
+
+        if enable_episode and sm:
+            try:
+                existing = sm.load_episode_state()
+                should_resume = (
+                    existing
+                    and existing.phase not in [EpisodeState.PHASE_COMPLETED, EpisodeState.PHASE_FAILED]
+                    and (episode_id is None or existing.episode_id == episode_id)
+                )
+                if should_resume:
+                    episode = existing
+                    input_data.setdefault("plan", existing.plan)
+                    input_data.setdefault("completed_steps", existing.completed_steps)
+                    input_data.setdefault("current_step", existing.current_step)
+                    iteration_count = len(existing.checkpoints)
+                    if existing.messages and config.get("resume_from_episode_messages", True):
+                        input_data.setdefault("messages", existing.messages)
+                    existing.update_phase(EpisodeState.PHASE_EXECUTING)
+                    logger.info(f"[GoalPursuit] Resuming episode {existing.episode_id}")
+                elif episode_id or config.get("auto_create_episode", True):
+                    episode = sm.create_episode(
+                        input_data={"initial_input": list(input_data.keys())},
+                        budgets={"max_replan_depth": max_replan_depth, "timeout": timeout},
+                        metadata={"episode_id": episode_id} if episode_id else {},
+                    )
+                    logger.info(f"[GoalPursuit] Created episode {episode.episode_id}")
+            except Exception as e:
+                logger.warning(f"[GoalPursuit] Episode init failed: {e}")
+
+        # --- Replan depth guard ---
+        replan_count = int(input_data.get("replan_count", 0))
+        if episode:
+            replan_count = max(replan_count, episode.replan_count)
+
+        messages = input_data.get("messages", [])
+        if not messages:
+            result = input_data.copy()
+            result["content"] = ""
+            result["agent_loop_error"] = "No messages provided"
+            return result
+
+        # Extract user goal
+        user_goal = ""
+        for msg in reversed(messages):
+            if isinstance(msg, dict) and msg.get("role") == "user":
+                content = msg.get("content", "")
+                user_goal = content if isinstance(content, str) else (
+                    " ".join(
+                        p.get("text", "") for p in content
+                        if isinstance(p, dict) and p.get("type") == "text"
+                    )
+                )
+                if user_goal:
+                    break
+
+        if not user_goal:
+            result = input_data.copy()
+            result["content"] = ""
+            result["agent_loop_error"] = "No user message found"
+            return result
+
+        # --- Load tools and tool library ---
+        tools_def = self._load_tools()
+        tools_list = []
+        for tool_name, tool_data in (tools_def or {}).items():
+            if not isinstance(tool_data, dict) or not tool_data.get("enabled", True):
+                continue
+            if tool_name in self._EXCLUDED_TOOLS:
+                continue
+            definition = tool_data.get("definition")
+            if definition:
+                tools_list.append(definition)
+        tool_library = self._load_tool_library()
+
+        # Shared repl_state: variable storage is shared across all steps so
+        # step N+1 can access large outputs stored by step N.
+        repl_state: dict = {
+            "variables": {},
+            "_var_counts": {},
+            "sub_call_count": 0,
+            "max_sub_calls": int(config.get("max_sub_calls", 20)),
+            "recursion_depth": 0,
+            "max_recursion_depth": int(config.get("max_recursion_depth", 3)),
+            "estimated_cost": 0.0,
+            "max_cost_usd": float(config.get("max_cost_usd", 1.0)),
+            "sub_call_model": config.get("sub_call_model") or model,
+        }
+
+        goal_pursuit_trace: list = []
+        thinking_steps: list = []
+        total_iterations = 0
+
+        async def _execute():
+            nonlocal replan_count, iteration_count, total_iterations
+
+            # Step 1: create or restore plan
+            remaining_steps = list(input_data.get("plan", []))
+            completed_steps = list(input_data.get("completed_steps", []))
+            step_results: list = list(input_data.get("step_results", []))
+
+            if not remaining_steps:
+                logger.info(f"[GoalPursuit] Creating plan for: {user_goal[:100]}")
+                remaining_steps = await _create_plan_with_trace()
+                if not remaining_steps:
+                    return await _fallback_hybrid()
+
+            # Step 2: execute steps
+            step_idx = 0
+            while step_idx < len(remaining_steps):
+                if replan_count > max_replan_depth:
+                    break
+
+                step = remaining_steps[step_idx]
+                step_trace = {
+                    "step": step.get("step"),
+                    "action": step.get("action"),
+                    "target": step.get("target"),
+                    "replan_count": replan_count,
+                }
+
+                plan_context = self._build_plan_context(
+                    completed_steps, remaining_steps, step_idx, step_results
+                )
+                system_prompt = self._build_step_system_prompt(
+                    step, plan_context, input_data, config, large_output_threshold
+                )
+                step_messages = [
+                    {"role": "system", "content": system_prompt},
+                    {
+                        "role": "user",
+                        "content": (
+                            f"Complete this step: {step.get('action', '')}: {step.get('target', '')}.\n"
+                            f"Original goal: {user_goal}"
+                        ),
+                    },
+                ]
+
+                logger.info(
+                    f"[GoalPursuit] Executing step {step.get('step')}: {step.get('action')}"
+                )
+                final_response, iters, had_tool_error = await self._run_hybrid_loop(
+                    llm_messages=step_messages,
+                    tools_list=tools_list,
+                    tool_library=tool_library,
+                    repl_state=repl_state,
+                    model=model,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                    max_iterations=max_iterations_per_step,
+                    max_llm_retries=max_llm_retries,
+                    retry_delay=retry_delay,
+                    tool_error_strategy=tool_error_strategy,
+                    large_output_threshold=large_output_threshold,
+                    trace=goal_pursuit_trace,
+                    stream_queue=stream_queue,
+                    thinking_steps=thinking_steps,
+                )
+                total_iterations += iters
+                iteration_count += iters
+
+                step_content = ""
+                if final_response and "choices" in final_response:
+                    step_content = (
+                        final_response["choices"][0]["message"].get("content") or ""
+                    )
+
+                step_trace["iterations"] = iters
+                step_trace["had_tool_error"] = had_tool_error
+                step_trace["content_preview"] = step_content[:200]
+
+                # Evaluate step outcome
+                if enable_step_evaluation:
+                    evaluation = await self._evaluate_step(step, step_content, config)
+                else:
+                    has_error_flag = (
+                        final_response.get("error") is not None if final_response else False
+                    )
+                    success = bool(step_content) and not has_error_flag
+                    evaluation = {
+                        "success": success,
+                        "reason": (
+                            "tool_error" if had_tool_error
+                            else ("no_content" if not step_content else "ok")
+                        ),
+                        "extracted_result": step_content[:500],
+                    }
+
+                step_trace["evaluation"] = evaluation
+                logger.info(
+                    f"[GoalPursuit] Step {step.get('step')} "
+                    f"success={evaluation['success']}, reason={evaluation['reason'][:80]}"
+                )
+
+                if evaluation["success"]:
+                    completed_steps.append(step)
+                    step_results.append(evaluation)
+                    step_idx += 1
+
+                    if episode is not None and sm is not None:
+                        try:
+                            sm.save_episode_state(
+                                phase=EpisodeState.PHASE_EXECUTING,
+                                replan_count=replan_count,
+                                completed_steps=[s.get("step") for s in completed_steps],
+                                current_step=step_idx,
+                                plan=remaining_steps[step_idx:] if step_idx < len(remaining_steps) else [],
+                                add_checkpoint=True,
+                            )
+                        except Exception as e:
+                            logger.warning(f"[GoalPursuit] Episode checkpoint failed: {e}")
+                else:
+                    if replan_count >= max_replan_depth:
+                        step_trace["replan_skipped"] = "max_replan_depth reached"
+                        goal_pursuit_trace.append(step_trace)
+                        break
+
+                    replan_count += 1
+                    failure_reason = evaluation.get("reason", "Unknown failure")
+                    logger.info(
+                        f"[GoalPursuit] Replanning (attempt {replan_count}/{max_replan_depth}): "
+                        f"{failure_reason[:80]}"
+                    )
+                    self._log_agent_event("goal_pursuit_replan", {
+                        "replan_count": replan_count,
+                        "failed_step": step.get("step"),
+                        "failure_reason": failure_reason,
+                    })
+
+                    new_remaining = await self._replan(
+                        original_request=user_goal,
+                        completed_steps=completed_steps,
+                        step_results=step_results,
+                        failed_step=step,
+                        failure_reason=failure_reason,
+                        config=config,
+                    )
+                    step_trace["replanned"] = True
+                    step_trace["new_steps_count"] = len(new_remaining)
+
+                    if new_remaining:
+                        remaining_steps = new_remaining
+                        step_idx = 0
+                    else:
+                        step_trace["replan_empty"] = True
+                        step_idx += 1
+
+                goal_pursuit_trace.append(step_trace)
+
+            # Step 3: synthesize final answer
+            if completed_steps and enable_synthesis and len(completed_steps) > 1:
+                final_content = await _synthesize(completed_steps, step_results)
+            elif completed_steps:
+                final_content = step_results[-1].get("extracted_result", "") if step_results else ""
+                if not final_content and goal_pursuit_trace:
+                    final_content = goal_pursuit_trace[-1].get("content_preview", "")
+            else:
+                final_content = ""
+
+            remaining_after = remaining_steps[step_idx:] if step_idx <= len(remaining_steps) else []
+            result = input_data.copy()
+            result["messages"] = messages
+            result["content"] = final_content
+            result["plan"] = remaining_steps
+            result["completed_steps"] = completed_steps
+            result["step_results"] = step_results
+            result["remaining_steps"] = remaining_after
+            result["replan_count"] = replan_count
+            result["iterations"] = total_iterations
+            result["goal_pursuit_trace"] = goal_pursuit_trace
+            result["agent_loop_trace"] = goal_pursuit_trace
+            result["repl_state"] = {
+                "variables": list(repl_state["variables"].keys()),
+                "variable_count": len(repl_state["variables"]),
+            }
+            result["replan_needed"] = bool(remaining_after)
+            result["replan_depth_exceeded"] = replan_count >= max_replan_depth and bool(remaining_after)
+
+            if episode is not None and sm is not None:
+                try:
+                    final_phase = (
+                        EpisodeState.PHASE_COMPLETED
+                        if not remaining_after and final_content
+                        else EpisodeState.PHASE_FAILED
+                    )
+                    sm.save_episode_state(
+                        phase=final_phase,
+                        replan_count=replan_count,
+                        completed_steps=[s.get("step") for s in completed_steps],
+                        current_step=len(completed_steps),
+                        plan=remaining_after,
+                        add_checkpoint=True,
+                    )
+                    result["episode_id"] = episode.episode_id
+                except Exception as e:
+                    logger.warning(f"[GoalPursuit] Episode finalization failed: {e}")
+
+            self._log_agent_event("goal_pursuit_end", {
+                "completed_steps": len(completed_steps),
+                "total_steps": len(remaining_steps),
+                "replan_count": replan_count,
+                "total_iterations": total_iterations,
+            })
+            self._thinking_steps = thinking_steps
+            return result
+
+        async def _create_plan_with_trace() -> list:
+            plan = await self._create_plan(user_goal, config)
+            self._log_agent_event("goal_pursuit_plan_created", {
+                "steps": len(plan),
+                "goal_preview": user_goal[:100],
+            })
+            return plan
+
+        async def _synthesize(completed: list, results: list) -> str:
+            lines = []
+            for i, step in enumerate(completed):
+                r = results[i] if i < len(results) else {}
+                extracted = r.get("extracted_result", "")[:500]
+                lines.append(
+                    f"Step {step.get('step')}: {step.get('action')}: {step.get('target')}\n"
+                    f"Result: {extracted}"
+                )
+            step_summary = "\n\n".join(lines)
+            prompt = config.get("synthesis_prompt", self._DEFAULT_SYNTHESIS_PROMPT)
+            prompt = (
+                prompt
+                .replace("{original_request}", user_goal)
+                .replace("{step_summary}", step_summary)
+            )
+            model_ = config.get("model") or settings.get("default_model")
+            response = await self._llm_with_retry(
+                messages=[
+                    {"role": "system", "content": prompt},
+                    {"role": "user", "content": f"Provide a final answer for: {user_goal}"},
+                ],
+                model=model_,
+                temperature=float(config.get("temperature", 0.7)),
+                max_tokens=max_tokens,
+                tools=[],
+                max_retries=int(config.get("max_llm_retries", 3)),
+                retry_delay=float(config.get("retry_delay", 1.0)),
+            )
+            if response and "choices" in response:
+                return response["choices"][0]["message"].get("content") or ""
+            return ""
+
+        async def _fallback_hybrid() -> dict:
+            """Empty plan — run hybrid loop directly on original messages."""
+            logger.info("[GoalPursuit] Empty plan, falling back to direct hybrid execution")
+            llm_messages = list(messages)
+            context_prompt = self._build_system_prompt(input_data, config)
+            var_note = self._build_variable_system_note(large_output_threshold)
+            full_prompt = "\n\n".join(filter(None, [context_prompt, var_note]))
+            has_system = any(m.get("role") == "system" for m in llm_messages)
+            if has_system:
+                for m in llm_messages:
+                    if m.get("role") == "system":
+                        m["content"] = m["content"] + "\n\n" + full_prompt
+                        break
+            else:
+                llm_messages.insert(0, {"role": "system", "content": full_prompt})
+
+            final_response, iters, had_tool_error = await self._run_hybrid_loop(
+                llm_messages=llm_messages,
+                tools_list=tools_list,
+                tool_library=tool_library,
+                repl_state=repl_state,
+                model=model,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                max_iterations=max_iterations_per_step,
+                max_llm_retries=max_llm_retries,
+                retry_delay=retry_delay,
+                tool_error_strategy=tool_error_strategy,
+                large_output_threshold=large_output_threshold,
+                trace=goal_pursuit_trace,
+                stream_queue=stream_queue,
+                thinking_steps=thinking_steps,
+            )
+            content = ""
+            if final_response and "choices" in final_response:
+                content = final_response["choices"][0]["message"].get("content") or ""
+            result = input_data.copy()
+            result["messages"] = llm_messages
+            result["content"] = content
+            result["plan"] = []
+            result["completed_steps"] = []
+            result["step_results"] = []
+            result["remaining_steps"] = []
+            result["replan_count"] = 0
+            result["iterations"] = iters
+            result["goal_pursuit_trace"] = goal_pursuit_trace
+            result["agent_loop_trace"] = goal_pursuit_trace
+            self._thinking_steps = thinking_steps
+            return result
+
+        # --- Execute with timeout ---
+        try:
+            if timeout > 0:
+                result = await asyncio.wait_for(_execute(), timeout=timeout)
+            else:
+                result = await _execute()
+        except asyncio.TimeoutError:
+            result = input_data.copy()
+            result["content"] = ""
+            result["agent_loop_error"] = f"Goal pursuit timed out after {timeout}s"
+            result["iterations"] = total_iterations
+            result["goal_pursuit_trace"] = goal_pursuit_trace
+            result["agent_loop_trace"] = goal_pursuit_trace
+            result["replan_count"] = replan_count
+            self._thinking_steps = thinking_steps
+            self._log_agent_event("goal_pursuit_timeout", {"timeout": timeout})
+            return result
+        except Exception as e:
+            result = input_data.copy()
+            result["content"] = ""
+            result["agent_loop_error"] = str(e)
+            result["iterations"] = total_iterations
+            result["goal_pursuit_trace"] = goal_pursuit_trace
+            result["agent_loop_trace"] = goal_pursuit_trace
+            result["replan_count"] = replan_count
+            self._thinking_steps = thinking_steps
+            logger.exception(f"[GoalPursuit] Unexpected error: {e}")
+            return result
+
+        result["goal_pursuit_trace"] = goal_pursuit_trace
+        result["agent_loop_trace"] = goal_pursuit_trace
         self._thinking_steps = thinking_steps
         return result
 

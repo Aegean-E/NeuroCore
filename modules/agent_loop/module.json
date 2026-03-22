@@ -49,6 +49,13 @@
             "description": "Agent loop that combines standard tool calling with RLM-style adaptive output routing. Large tool outputs are stored as named variables instead of bloating the context window. Provides access to both standard and RLM variable-access tools (GetVariable, Peek, Search, Chunk).",
             "singleton": false,
             "configurable": true
+        },
+        {
+            "id": "goal_pursuit",
+            "name": "Goal Pursuit Agent",
+            "description": "Hybrid agent with integrated planning, per-step evaluation, and autonomous replanning. Creates its own step-by-step plan, executes each step via the hybrid tool loop, evaluates the outcome with an LLM judge, and revises the plan when steps fail — up to max_replan_depth times.",
+            "singleton": false,
+            "configurable": true
         }
     ],
     "hybrid_agent_config": {
@@ -60,5 +67,25 @@
         "tool_error_strategy": "continue",
         "timeout": 120,
         "large_output_threshold": 3000
+    },
+    "goal_pursuit_config": {
+        "max_steps": 10,
+        "max_iterations_per_step": 10,
+        "max_tokens": 4096,
+        "temperature": 0.7,
+        "planning_temperature": 0.1,
+        "eval_temperature": 0.1,
+        "max_llm_retries": 3,
+        "retry_delay": 1.0,
+        "tool_error_strategy": "continue",
+        "timeout": 300,
+        "max_replan_depth": 3,
+        "large_output_threshold": 3000,
+        "enable_step_evaluation": true,
+        "enable_synthesis": true,
+        "include_plan_in_context": true,
+        "include_memory_context": true,
+        "include_knowledge_context": true,
+        "include_reasoning_context": true
     }
 }
