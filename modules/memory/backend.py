@@ -431,6 +431,33 @@ class MemoryStore:
         
         return []
 
+    def keyword_search(self, query: str, limit: int = 5) -> List[Dict]:
+        """Text-based fallback search used when no embedding model is configured."""
+        current_time = int(time.time())
+        words = [w.strip() for w in query.split() if len(w.strip()) > 2]
+        if not words:
+            # Return most recent memories when query has no useful terms
+            with self._connect() as con:
+                rows = con.execute("""
+                    SELECT id, text, created_at, type FROM memories
+                    WHERE deleted = 0 AND parent_id IS NULL
+                    AND (expires_at IS NULL OR expires_at > ?)
+                    ORDER BY created_at DESC LIMIT ?
+                """, (current_time, limit)).fetchall()
+            return [{"id": r[0], "text": r[1], "created_at": r[2], "type": r[3], "score": 0.5} for r in rows]
+
+        like_clauses = " AND ".join(["m.text LIKE ?" for _ in words])
+        params = [f"%{w}%" for w in words] + [current_time, limit]
+        with self._connect() as con:
+            rows = con.execute(f"""
+                SELECT m.id, m.text, m.created_at, m.type FROM memories m
+                WHERE m.deleted = 0 AND m.parent_id IS NULL
+                AND ({like_clauses})
+                AND (m.expires_at IS NULL OR m.expires_at > ?)
+                ORDER BY m.created_at DESC LIMIT ?
+            """, params).fetchall()
+        return [{"id": r[0], "text": r[1], "created_at": r[2], "type": r[3], "score": 0.5} for r in rows]
+
     def get_recent(self, limit: int = 20) -> List[Dict]:
         with self._connect() as con:
             rows = con.execute("SELECT id, text, created_at FROM memories WHERE deleted = 0 AND parent_id IS NULL ORDER BY created_at DESC LIMIT ?", (limit,)).fetchall()

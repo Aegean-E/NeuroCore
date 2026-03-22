@@ -62,11 +62,8 @@ class MemoryRecallExecutor:
 
         # Generate embedding using cached bridge
         embedding = await self._llm_bridge.get_embedding(query_text)
-        
-        if not embedding:
-            return input_data
 
-        # Search memory
+        # Resolve config values
         limit_val = config.get("limit")
         if limit_val is None:
             limit_val = self.config.get("recall_limit", 3)
@@ -91,13 +88,19 @@ class MemoryRecallExecutor:
         access_weight = float(config.get("recall_access_weight", 0.0))
 
         loop = asyncio.get_running_loop()
-        results = await loop.run_in_executor(
-            memory_store.executor, 
-            partial(memory_store.search, embedding, limit=limit, source_filter=source_filter, access_weight=access_weight)
-        )
-        
-        # Filter results by minimum score if configured
-        results = [r for r in results if r.get('score', 0) >= min_score]
+        if embedding:
+            results = await loop.run_in_executor(
+                memory_store.executor,
+                partial(memory_store.search, embedding, limit=limit, source_filter=source_filter, access_weight=access_weight)
+            )
+            results = [r for r in results if r.get('score', 0) >= min_score]
+        else:
+            # No embedding model configured — fall back to keyword search so
+            # memories saved without vectors are still retrievable.
+            results = await loop.run_in_executor(
+                memory_store.executor,
+                partial(memory_store.keyword_search, query_text, limit)
+            )
 
         if not results:
             return input_data
@@ -219,17 +222,18 @@ class MemorySaveExecutor:
                     continue
                 
                 embedding = await llm_bridge.get_embedding(fact)
-                if embedding:
-                    await self.arbiter.consider(
-                        text=fact,
-                        confidence=confidence,
-                        subject=subject,
-                        source=source,
-                        embedding=embedding,
-                        mem_type=mem_type,
-                        verified=verified,
-                        expires_at=expires_at
-                    )
+                # Save even without embedding — memory is still useful as text,
+                # just won't be vector-searchable until an embedding model is configured.
+                await self.arbiter.consider(
+                    text=fact,
+                    confidence=confidence,
+                    subject=subject,
+                    source=source,
+                    embedding=embedding,  # may be None
+                    mem_type=mem_type,
+                    verified=verified,
+                    expires_at=expires_at
+                )
         except Exception as e:
             logger.error(f"Background memory save failed: {e}")
 
