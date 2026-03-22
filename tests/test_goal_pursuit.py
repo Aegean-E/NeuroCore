@@ -1429,3 +1429,85 @@ async def test_subgoal_result_content_returned_as_tool_result():
 
     assert result["success"] is True
     assert result["content"] == "Sub done with findings."
+
+
+# ---------------------------------------------------------------------------
+# Bug 5 regression: _parse_plan_response must apply step_offset to depends_on
+# ---------------------------------------------------------------------------
+
+async def test_parse_plan_response_applies_offset_to_depends_on():
+    """
+    When step_offset > 0 (as used in _replan), the depends_on values in the
+    parsed plan must be shifted by step_offset so they reference the same
+    numbering space as the offset step numbers.
+    """
+    ex = make_executor()
+    # LLM returns a 3-step plan where step 3 depends on steps 1 and 2.
+    raw = json.dumps([
+        {"step": 1, "action": "A", "target": "t1", "goal": "g1", "depends_on": []},
+        {"step": 2, "action": "B", "target": "t2", "goal": "g2", "depends_on": []},
+        {"step": 3, "action": "C", "target": "t3", "goal": "g3", "depends_on": [1, 2]},
+    ])
+    # Simulate a replan after 3 completed steps → step_offset=3
+    result = await ex._parse_plan_response(raw, max_steps=10, step_offset=3)
+
+    assert len(result) == 3
+    # Step numbers must be shifted
+    assert result[0]["step"] == 4
+    assert result[1]["step"] == 5
+    assert result[2]["step"] == 6
+    # depends_on must also be shifted so they match the new step numbers
+    assert result[2]["depends_on"] == [4, 5]
+
+
+async def test_parse_plan_response_zero_offset_depends_on_unchanged():
+    """With step_offset=0 (initial plan) depends_on must be kept as-is."""
+    ex = make_executor()
+    raw = json.dumps([
+        {"step": 1, "action": "A", "target": "t1", "goal": "g1", "depends_on": []},
+        {"step": 2, "action": "B", "target": "t2", "goal": "g2", "depends_on": [1]},
+    ])
+    result = await ex._parse_plan_response(raw, max_steps=10, step_offset=0)
+    assert result[0]["step"] == 1
+    assert result[1]["step"] == 2
+    assert result[1]["depends_on"] == [1]
+
+
+# ---------------------------------------------------------------------------
+# Bug 9 regression: RLM SubCall tool_call_id must be set from the tool_call
+# ---------------------------------------------------------------------------
+
+async def test_rlm_subcall_tool_call_id_override():
+    """
+    RLMAgentLoopExecutor._execute_tool must override the tool_call_id returned
+    by _execute_sub_call with the id from the actual tool_call dict.
+    """
+    from modules.agent_loop.node import RLMAgentLoopExecutor
+    with patch("modules.agent_loop.node.LLMBridge"):
+        ex = RLMAgentLoopExecutor()
+    ex.llm = MagicMock()
+
+    tool_call = {
+        "id": "real_id_123",
+        "function": {
+            "name": "SubCall",
+            "arguments": json.dumps({"prompt": "hello"}),
+        },
+    }
+    repl_state = {
+        "sub_call_count": 0,
+        "max_sub_calls": 10,
+        "recursion_depth": 0,
+        "max_recursion_depth": 3,
+        "estimated_cost": 0.0,
+        "max_cost_usd": 1.0,
+    }
+
+    async def _fake_sub_call(args, rs):
+        return {"tool_call_id": "", "role": "tool", "name": "sub_call",
+                "content": "answer", "success": True}
+
+    with patch.object(ex, "_execute_sub_call", side_effect=_fake_sub_call):
+        result = await ex._execute_tool(tool_call, {}, repl_state)
+
+    assert result["tool_call_id"] == "real_id_123"

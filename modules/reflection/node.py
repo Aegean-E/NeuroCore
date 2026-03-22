@@ -198,7 +198,7 @@ class ReflectionExecutor:
         try:
             response = await self.llm.chat_completion(
                 messages=reflection_messages,
-                model=settings.get("default_model"),
+                model=config.get("model") or settings.get("default_model"),
                 temperature=0.1,
                 max_tokens=300
             )

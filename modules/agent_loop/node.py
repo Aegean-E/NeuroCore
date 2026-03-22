@@ -88,9 +88,7 @@ class AgentBaseExecutor:
         if not messages:
             return messages
 
-        total_tokens = sum(
-            self._estimate_tokens(m.get("content", "")) for m in messages
-        )
+        total_tokens = self._estimate_messages_tokens(messages)
         if total_tokens <= max_context_tokens:
             return messages
 
@@ -103,14 +101,14 @@ class AgentBaseExecutor:
                 non_system.append(msg)
 
         system_tokens = (
-            self._estimate_tokens(system_msg.get("content", "")) if system_msg else 0
+            self._estimate_messages_tokens([system_msg]) if system_msg else 0
         )
         available = max_context_tokens - system_tokens
 
         result = []
         used = 0
         for msg in reversed(non_system):
-            t = self._estimate_tokens(msg.get("content", ""))
+            t = self._estimate_messages_tokens([msg])
             if used + t <= available:
                 result.append(msg)
                 used += t
@@ -718,7 +716,7 @@ class AgentLoopExecutor(AgentBaseExecutor):
                     iteration_trace["errors"].append(
                         f"Duplicate tool call skipped: '{tool_name}' with identical args in same response"
                     )
-                    break
+                    continue
                 seen_calls.add(call_signature)
 
                 iteration_trace["tool_calls"].append(tool_name)
@@ -929,9 +927,9 @@ class AgentLoopExecutor(AgentBaseExecutor):
                         m.get("content", "") for m in llm_messages if m.get("role") == "system"
                     )
                     if not any(marker in sys_content for marker in context_markers):
-                        for m in llm_messages:
+                        for idx, m in enumerate(llm_messages):
                             if m.get("role") == "system":
-                                m["content"] = m["content"] + "\n\n" + system_prompt
+                                llm_messages[idx] = dict(m, content=m["content"] + "\n\n" + system_prompt)
                                 break
                 else:
                     llm_messages.insert(0, {"role": "system", "content": system_prompt})
@@ -1369,6 +1367,7 @@ Call set_final() when complete."""
         if func_name.lower() in ("subcall", "sub_call"):
             self._log_rlm_event("sub_call", {"prompt_preview": str(args.get("prompt", ""))[:200]})
             result = await self._execute_sub_call(args, repl_state)
+            result["tool_call_id"] = tool_call.get("id", "")
             self._log_rlm_event("sub_call_result", {
                 "success": result.get("success", False),
                 "model_used": result.get("model_used"),
@@ -1526,6 +1525,11 @@ Call set_final() when complete."""
                 if repl_state.get("final") is not None:
                     break
                 break
+
+            # Append the assistant message with its tool_calls array before any
+            # tool result messages.  The OpenAI API requires tool result messages
+            # to follow an assistant message that contains the matching tool_calls.
+            llm_messages.append(assistant_message)
 
             for tool_call in tool_calls:
                 tool_name = tool_call.get("function", {}).get("name", "unknown")
@@ -2177,7 +2181,7 @@ class HybridAgentExecutor(AgentBaseExecutor):
                     iteration_trace["errors"].append(
                         f"Duplicate tool call skipped: '{tool_name}' with identical args in same response"
                     )
-                    break
+                    continue
                 seen_calls.add(call_sig)
 
                 iteration_trace["tool_calls"].append(tool_name)
@@ -2355,9 +2359,9 @@ class HybridAgentExecutor(AgentBaseExecutor):
                 m.get("content", "") for m in llm_messages if m.get("role") == "system"
             )
             if not any(marker in sys_content for marker in context_markers):
-                for m in llm_messages:
+                for idx, m in enumerate(llm_messages):
                     if m.get("role") == "system":
-                        m["content"] = m["content"] + "\n\n" + system_prompt
+                        llm_messages[idx] = dict(m, content=m["content"] + "\n\n" + system_prompt)
                         break
         else:
             llm_messages.insert(0, {"role": "system", "content": system_prompt})
@@ -2645,9 +2649,9 @@ class GoalPursuitExecutor(HybridAgentExecutor):
         "You are a task planner. Break the user's request into clear, executable steps.\n\n"
         "Rules:\n"
         "- Return a JSON array of steps.\n"
-        "- Each step: {{\"step\": N, \"action\": \"tool name or specific action\", "
+        "- Each step: {\"step\": N, \"action\": \"tool name or specific action\", "
         "\"target\": \"what it applies to\", "
-        "\"goal\": \"what success looks like\", \"depends_on\": []}}\n"
+        "\"goal\": \"what success looks like\", \"depends_on\": []}\n"
         "- IMPORTANT: The 'action' field must match an available tool name wherever possible. "
         "Do not invent generic actions like 'open', 'navigate', 'access' when a specific tool exists. "
         "For example: use 'GetYouTubeTranscript' not 'open video', use 'WebSearch' not 'search the web'.\n"
@@ -2691,8 +2695,8 @@ class GoalPursuitExecutor(HybridAgentExecutor):
         "Create a revised plan for the REMAINING work (do not re-list completed steps). "
         "Use the tool call history above to understand what was tried and why it failed — "
         "your revised plan should take a different approach if the same tools/approach failed.\n\n"
-        "Return a JSON array: [{{\"step\": N, \"action\": \"...\", \"target\": \"...\", "
-        "\"goal\": \"what success looks like\", \"depends_on\": []}}]\n"
+        "Return a JSON array: [{\"step\": N, \"action\": \"...\", \"target\": \"...\", "
+        "\"goal\": \"what success looks like\", \"depends_on\": []}]\n"
         "depends_on should list step numbers (from this revised plan) that must finish first. "
         "Use [] for independent steps.\n\n"
         "Respond with JSON array only. No prose."
@@ -2887,8 +2891,12 @@ class GoalPursuitExecutor(HybridAgentExecutor):
                             "action": step.get("action", step.get("task", "unknown")),
                             "target": step.get("target", step.get("query", "")),
                             "goal": step.get("goal", step.get("success_criterion", step.get("action", ""))),
+                            # Apply step_offset so depends_on values reference the
+                            # same numbering space as the offset step numbers above.
+                            # e.g. if step_offset=3 and LLM wrote depends_on=[1,2],
+                            # the actual step numbers are 4 and 5.
                             "depends_on": [
-                                int(d) for d in raw_deps
+                                step_offset + int(d) for d in raw_deps
                                 if str(d).lstrip("-").isdigit() and int(d) > 0
                             ],
                         })

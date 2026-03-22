@@ -484,6 +484,33 @@ async def test_auto_track_matches_tracker_behavior():
     assert result_auto["plan_complete"] == result_tracker["plan_complete"]
 
 
+# ---------------------------------------------------------------------------
+# Bug 8 regression: Planner must use config["model"] when provided
+# ---------------------------------------------------------------------------
+
+async def test_planner_uses_config_model_override():
+    """PlannerExecutor must pass config['model'] to the LLM, not always default_model."""
+    import json
+    executor = make_executor()
+    executor.llm.chat_completion = AsyncMock(return_value={
+        "choices": [{"message": {"content": json.dumps([
+            {"step": 1, "action": "Do it", "target": "thing"}
+        ])}}]
+    })
+    input_data = {"messages": [{"role": "user", "content": "Do something"}]}
+    await executor.receive(input_data, config={"model": "custom-model-xyz"})
+
+    call_kwargs = executor.llm.chat_completion.call_args
+    assert call_kwargs.kwargs.get("model") == "custom-model-xyz" or \
+           call_kwargs.args[0] if call_kwargs.args else False or \
+           executor.llm.chat_completion.call_args[1].get("model") == "custom-model-xyz"
+
+    # More direct: check the model kwarg
+    actual_model = executor.llm.chat_completion.call_args.kwargs.get("model") or \
+                   executor.llm.chat_completion.call_args[1].get("model")
+    assert actual_model == "custom-model-xyz"
+
+
 if __name__ == "__main__":
     import pytest
     pytest.main([__file__, "-v"])

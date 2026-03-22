@@ -764,6 +764,29 @@ class TestReflectionGetExecutorClass:
         assert isinstance(instance, ReflectionExecutor)
 
 
+# ---------------------------------------------------------------------------
+# Bug 8 regression: Reflection must use config["model"] when provided
+# ---------------------------------------------------------------------------
+
+async def test_reflection_uses_config_model_override():
+    """ReflectionExecutor must pass config['model'] to the LLM, not always default_model."""
+    executor = make_executor()
+    executor.llm.chat_completion = AsyncMock(return_value={
+        "choices": [{"message": {"content": '{"satisfied": true, "reason": "ok", "needs_improvement": null}'}}]
+    })
+    input_data = {
+        "messages": [
+            {"role": "user", "content": "Do something"},
+            {"role": "assistant", "content": "Done."},
+        ],
+    }
+    await executor.receive(input_data, config={"model": "custom-reflect-model"})
+
+    actual_model = executor.llm.chat_completion.call_args.kwargs.get("model") or \
+                   executor.llm.chat_completion.call_args[1].get("model")
+    assert actual_model == "custom-reflect-model"
+
+
 if __name__ == "__main__":
     import pytest
     pytest.main([__file__, "-v"])

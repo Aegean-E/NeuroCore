@@ -25,7 +25,7 @@ import pytest
 import asyncio
 from unittest.mock import AsyncMock, MagicMock, call, patch
 
-from modules.agent_loop.node import AgentLoopExecutor, HybridAgentExecutor, get_executor_class
+from modules.agent_loop.node import AgentLoopExecutor, HybridAgentExecutor, RLMAgentLoopExecutor, get_executor_class
 
 
 # ---------------------------------------------------------------------------
@@ -1426,6 +1426,261 @@ class TestHybridAgentExecutor:
         ex = self._make_executor()
         data = {"messages": [], "content": "hi"}
         assert await ex.send(data) is data
+
+
+# ---------------------------------------------------------------------------
+# Regression tests for fixed bugs
+# ---------------------------------------------------------------------------
+
+class TestBugFixes:
+    """Regression tests that cover the specific bugs identified and fixed."""
+
+    # ------------------------------------------------------------------
+    # Bug 1: deduplication used break instead of continue, causing all
+    # subsequent tool calls after the first duplicate to be skipped.
+    # ------------------------------------------------------------------
+
+    async def test_duplicate_tool_call_skips_only_duplicate_not_subsequent(self):
+        """After a duplicate, remaining unique tool calls in the same batch must still execute."""
+        dup_call = make_tool_call("Calc", '{"x": 1}', "c1")
+        unique_call = make_tool_call("Lookup", '{"q": "foo"}', "c2")
+        responses = [
+            # First response: two calls — dup_call appears twice, then a unique call
+            {
+                "choices": [{
+                    "message": {
+                        "role": "assistant",
+                        "content": "",
+                        "tool_calls": [dup_call, dup_call, unique_call],
+                    }
+                }]
+            },
+            make_llm_response("done"),
+        ]
+        library = {
+            "Calc": "result = 'calc_result'",
+            "Lookup": "result = 'lookup_result'",
+        }
+        executor = make_executor(library=library)
+        executor.llm.chat_completion = AsyncMock(side_effect=responses)
+
+        result = await executor.receive(
+            {"messages": [{"role": "user", "content": "go"}]},
+            config={"timeout": 0},
+        )
+        trace = result["agent_loop_trace"]
+        # Lookup must appear in the first iteration's tool_calls
+        assert "Lookup" in trace[0]["tool_calls"]
+        # One duplicate error logged
+        assert any("Duplicate" in e for e in trace[0]["errors"])
+
+    # ------------------------------------------------------------------
+    # Bug 2: shallow copy of messages meant dicts were mutated in-place,
+    # corrupting the original input_data["messages"].
+    # ------------------------------------------------------------------
+
+    async def test_input_messages_not_mutated_by_receive(self):
+        """Original messages list and its dicts must be unchanged after receive()."""
+        executor = make_executor()
+        executor.llm.chat_completion = AsyncMock(return_value=make_llm_response("Hi"))
+        sys_msg = {"role": "system", "content": "original"}
+        user_msg = {"role": "user", "content": "hello"}
+        original_sys_content = sys_msg["content"]
+        input_data = {
+            "messages": [sys_msg, user_msg],
+            "plan_context": "## Execution Plan\nstep 1",
+        }
+        await executor.receive(input_data, config={"timeout": 0})
+        # The original dict object must be unchanged
+        assert sys_msg["content"] == original_sys_content
+
+    # ------------------------------------------------------------------
+    # Bug 3: _truncate_messages ignored tool_calls JSON in token estimates.
+    # ------------------------------------------------------------------
+
+    async def test_truncate_messages_counts_tool_calls_tokens(self):
+        """_truncate_messages must account for tool_calls payload in token budget."""
+        executor = make_executor()
+        # Build a message whose tool_calls JSON is large (>1000 tokens worth)
+        huge_tool_calls = [
+            {"function": {"name": "Tool", "arguments": "x" * 4000}}
+        ] * 2
+        msg_with_tool_calls = {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": huge_tool_calls,
+        }
+        system_msg = {"role": "system", "content": "sys"}
+        user_msg = {"role": "user", "content": "u"}
+        messages = [system_msg, msg_with_tool_calls, user_msg]
+
+        # With a tight budget (200 tokens), the large tool_calls message should be dropped
+        truncated = executor._truncate_messages(messages, max_context_tokens=200)
+        # The huge tool_calls message must be absent from the result
+        assert not any(m.get("tool_calls") for m in truncated)
+
+    # ------------------------------------------------------------------
+    # Bug 7: _DEFAULT_PLANNING_PROMPT used {{ }} which .replace() does not
+    # convert, sending literal {{ to the LLM.
+    # ------------------------------------------------------------------
+
+    async def test_planning_prompt_has_no_double_braces(self):
+        """_DEFAULT_PLANNING_PROMPT must not contain {{ or }} after .replace() processing."""
+        from modules.agent_loop.node import GoalPursuitExecutor
+        prompt = GoalPursuitExecutor._DEFAULT_PLANNING_PROMPT
+        prompt = prompt.replace("{request}", "test").replace("{max_steps}", "10")
+        assert "{{" not in prompt
+        assert "}}" not in prompt
+
+    async def test_replan_prompt_has_no_double_braces(self):
+        """_DEFAULT_REPLAN_PROMPT must not contain {{ or }} after .replace() processing."""
+        from modules.agent_loop.node import GoalPursuitExecutor
+        prompt = GoalPursuitExecutor._DEFAULT_REPLAN_PROMPT
+        for key in [
+            "{original_request}", "{completed_summary}", "{failed_action}",
+            "{failed_target}", "{failure_reason}", "{tool_history}",
+        ]:
+            prompt = prompt.replace(key, "test")
+        assert "{{" not in prompt
+        assert "}}" not in prompt
+
+
+class TestHybridBugFixes:
+    """Regression tests for HybridAgentExecutor-specific fixes."""
+
+    def _make_executor(self):
+        ex = HybridAgentExecutor()
+        ex._load_tools = MagicMock(return_value={})
+        ex._load_tool_library = MagicMock(return_value={})
+        return ex
+
+    async def test_input_messages_not_mutated_by_hybrid_receive(self):
+        """Hybrid receive() must not mutate the original system message dict."""
+        ex = self._make_executor()
+        ex.llm = MagicMock()
+        ex.llm.chat_completion = AsyncMock(
+            return_value=make_llm_response("done")
+        )
+        sys_msg = {"role": "system", "content": "original system"}
+        original_content = sys_msg["content"]
+        input_data = {
+            "messages": [sys_msg, {"role": "user", "content": "hi"}],
+            "plan_context": "## Execution Plan\nstep 1",
+        }
+        await ex.receive(input_data, config={"timeout": 0})
+        assert sys_msg["content"] == original_content
+
+    async def test_duplicate_tool_call_skips_only_duplicate_in_hybrid(self):
+        """Hybrid loop must continue past a duplicate to execute remaining unique calls."""
+        dup = make_tool_call("A", '{"v": 1}', "c1")
+        uniq = make_tool_call("B", '{"v": 2}', "c2")
+        responses = [
+            {
+                "choices": [{
+                    "message": {
+                        "role": "assistant",
+                        "content": "",
+                        "tool_calls": [dup, dup, uniq],
+                    }
+                }]
+            },
+            make_llm_response("ok"),
+        ]
+        ex = self._make_executor()
+        ex.llm = MagicMock()
+        ex.llm.chat_completion = AsyncMock(side_effect=responses)
+        ex._load_tool_library = MagicMock(return_value={
+            "A": "result = 'a'",
+            "B": "result = 'b'",
+        })
+        ex._sandbox = MagicMock()
+        ex._sandbox.execute = MagicMock(return_value={"result": "r"})
+
+        result = await ex.receive(
+            {"messages": [{"role": "user", "content": "go"}]},
+            config={"timeout": 0},
+        )
+        trace = result["agent_loop_trace"]
+        assert "B" in trace[0]["tool_calls"]
+
+
+class TestRLMBugFixes:
+    """Regression tests for RLMAgentLoopExecutor-specific fixes."""
+
+    # ------------------------------------------------------------------
+    # Bug 4: RLM loop did not append the assistant message (with tool_calls)
+    # before tool result messages, violating the OpenAI API contract.
+    # ------------------------------------------------------------------
+
+    async def test_rlm_loop_appends_assistant_message_before_tool_results(self):
+        """_run_rlm_loop must insert an assistant message carrying tool_calls
+        immediately before the corresponding tool result messages."""
+        from unittest.mock import patch
+
+        tool_call = make_tool_call("Echo", '{"text": "hi"}', "tc_rlm_1")
+        # First LLM response: assistant wants to call a tool
+        tool_response = {
+            "choices": [{
+                "message": {
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": [tool_call],
+                }
+            }]
+        }
+        # Second LLM response: done (sets final via content)
+        final_response = make_llm_response("final answer")
+
+        ex = RLMAgentLoopExecutor()
+        ex._load_tool_library = MagicMock(return_value={"Echo": "result = args.get('text', '')"})
+        ex.llm = MagicMock()
+        ex.llm.chat_completion = AsyncMock(side_effect=[tool_response, final_response])
+
+        # Patch _execute_tool so we don't need a real sandbox
+        async def fake_execute_tool(tool_call, library, repl_state):
+            return {
+                "role": "tool",
+                "tool_call_id": tool_call.get("id", ""),
+                "content": "echo result",
+                "success": True,
+            }
+
+        repl_state = {
+            "variables": {},
+            "stdout_history": [],
+            "iteration": 0,
+            "_var_counts": {},
+            "final": None,
+        }
+        trace = []
+        tools_list = [{"function": {"name": "Echo"}}]
+
+        with patch.object(ex, "_execute_tool", side_effect=fake_execute_tool):
+            _, _, messages = await ex._run_rlm_loop(
+                initial_messages=[{"role": "user", "content": "echo hi"}],
+                repl_state=repl_state,
+                tools_list=tools_list,
+                tool_library={"Echo": "result = args.get('text', '')"},
+                model="test-model",
+                config={"max_iterations": 5, "max_llm_retries": 1, "retry_delay": 0},
+                trace=trace,
+            )
+
+        # Find any tool result message
+        tool_result_indices = [i for i, m in enumerate(messages) if m.get("role") == "tool"]
+        assert tool_result_indices, "Expected at least one tool result message in history"
+
+        for tool_idx in tool_result_indices:
+            # The message immediately before must be an assistant message with tool_calls
+            assert tool_idx > 0, "Tool result is first message — no assistant message before it"
+            preceding = messages[tool_idx - 1]
+            assert preceding.get("role") == "assistant", (
+                f"Message before tool result at index {tool_idx} has role "
+                f"'{preceding.get('role')}', expected 'assistant'"
+            )
+            assert "tool_calls" in preceding, (
+                "Assistant message preceding a tool result must carry the tool_calls array"
+            )
 
 
 if __name__ == "__main__":
