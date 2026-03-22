@@ -2586,11 +2586,37 @@ class GoalPursuitExecutor(HybridAgentExecutor):
 
     _library_cache: dict = {"mtime": 0.0, "data": {}, "file_mtimes": {}}
 
+    _ASK_USER_TOOL_DEF = {
+        "type": "function",
+        "function": {
+            "name": "AskUser",
+            "description": (
+                "Pause the current plan and ask the user a clarifying question. "
+                "Use this ONLY when you cannot proceed without information only the user can provide. "
+                "Execution resumes automatically when the user replies. "
+                "The user's answer will then be available via GetVariable(\"_user_answer\")."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "question": {
+                        "type": "string",
+                        "description": "The specific question to ask the user.",
+                    }
+                },
+                "required": ["question"],
+            },
+        },
+    }
+
     _DEFAULT_PLANNING_PROMPT = (
         "You are a task planner. Break the user's request into clear, executable steps.\n\n"
         "Rules:\n"
         "- Return a JSON array of steps.\n"
-        "- Each step: {{\"step\": N, \"action\": \"verb phrase\", \"target\": \"what it applies to\", \"goal\": \"what success looks like\"}}\n"
+        "- Each step: {{\"step\": N, \"action\": \"verb phrase\", \"target\": \"what it applies to\", "
+        "\"goal\": \"what success looks like\", \"depends_on\": []}}\n"
+        "- depends_on: list of step numbers that must complete before this step can run. "
+        "Use [] for steps with no prerequisites. Example: step 3 that needs steps 1 and 2 → \"depends_on\": [1, 2]\n"
         "- If the task is simple (single action or question), return a 1-step array.\n"
         "- Maximum {max_steps} steps. Keep steps atomic and independently testable.\n\n"
         "User request: {request}\n\n"
@@ -2603,8 +2629,11 @@ class GoalPursuitExecutor(HybridAgentExecutor):
         "  Action: {action}\n"
         "  Target: {target}\n"
         "  Success criterion: {goal}\n\n"
-        "Agent response:\n{response}\n\n"
-        "Did the agent successfully complete this step? "
+        "Tool calls made during this step:\n{tool_history}\n\n"
+        "Agent final response:\n{response}\n\n"
+        "Evaluate based on BOTH the tool calls and the final response. "
+        "A step that called relevant tools with meaningful results may be successful "
+        "even if the final text is terse.\n\n"
         "Reply with JSON: {{\"success\": true/false, \"reason\": \"brief explanation\", "
         "\"extracted_result\": \"key output or finding from this step\"}}"
     )
@@ -2617,24 +2646,106 @@ class GoalPursuitExecutor(HybridAgentExecutor):
         "  Action: {failed_action}\n"
         "  Target: {failed_target}\n"
         "  Failure reason: {failure_reason}\n\n"
+        "Tool calls attempted during the failed step:\n{tool_history}\n\n"
         "Create a revised plan for the REMAINING work (do not re-list completed steps). "
-        "Work around the failure — skip, modify, or replace the failed step.\n\n"
+        "Use the tool call history above to understand what was tried and why it failed — "
+        "your revised plan should take a different approach if the same tools/approach failed.\n\n"
         "Return a JSON array: [{{\"step\": N, \"action\": \"...\", \"target\": \"...\", "
-        "\"goal\": \"what success looks like\"}}]\n\n"
+        "\"goal\": \"what success looks like\", \"depends_on\": []}}]\n"
+        "depends_on should list step numbers (from this revised plan) that must finish first. "
+        "Use [] for independent steps.\n\n"
         "Respond with JSON array only. No prose."
     )
 
     _DEFAULT_SYNTHESIS_PROMPT = (
         "You have completed a multi-step task. Synthesize the results into a final, "
         "coherent response for the user.\n\n"
+        "IMPORTANT: Each step's FULL output is stored as a variable named step_N_result. "
+        "Use GetVariable(\"step_N_result\") to retrieve the complete output for each step "
+        "before writing your answer. Do not rely solely on the short hints below.\n\n"
         "Original goal: {original_request}\n\n"
-        "Step results:\n{step_summary}\n\n"
-        "Provide a complete, well-structured final answer."
+        "Step results (hints only — retrieve full outputs with GetVariable):\n{step_summary}\n\n"
+        "Retrieve each step's full output, then provide a complete, well-structured final answer."
     )
+
+    # ------------------------------------------------------------------
+    # AskUser interception
+    # ------------------------------------------------------------------
+
+    async def _execute_tool(
+        self,
+        tool_call: dict,
+        tool_library: dict,
+        repl_state: dict,
+        large_output_threshold: int,
+    ) -> dict:
+        """Intercept AskUser before delegating to the parent hybrid executor."""
+        func_name = tool_call.get("function", {}).get("name", "")
+        if func_name == "AskUser":
+            try:
+                args = json.loads(tool_call["function"].get("arguments", "{}"))
+            except Exception:
+                args = {}
+            question = args.get("question", "").strip()
+            if question:
+                repl_state["_pending_question"] = question
+            return {
+                "tool_call_id": tool_call.get("id", ""),
+                "role": "tool",
+                "name": "AskUser",
+                "content": (
+                    "Execution paused — waiting for the user to respond. "
+                    "Do not call any more tools. Write a brief acknowledgement and stop."
+                ),
+                "success": True,
+            }
+        return await super()._execute_tool(
+            tool_call, tool_library, repl_state, large_output_threshold
+        )
 
     # ------------------------------------------------------------------
     # Planning helpers
     # ------------------------------------------------------------------
+
+    @staticmethod
+    def _topo_sort_steps(steps: list) -> list:
+        """
+        Kahn's topological sort on a step list.
+
+        Steps reference each other by the ``step`` number in their ``depends_on``
+        list.  Any dependency that points outside the current plan is silently
+        ignored (could be a completed step number).
+
+        Returns steps in a valid execution order.  If a cycle is detected the
+        original order is returned unchanged.
+        """
+        if not steps:
+            return steps
+        step_map = {s["step"]: s for s in steps}
+        valid_nums = set(step_map.keys())
+        # Filter deps to only those that exist in this plan
+        deps: dict[int, set] = {
+            n: set(step_map[n].get("depends_on", [])) & valid_nums
+            for n in step_map
+        }
+        queue = sorted(n for n in step_map if not deps[n])
+        result: list = []
+        while queue:
+            n = queue.pop(0)
+            result.append(step_map[n])
+            for m in list(step_map):
+                if n in deps[m]:
+                    deps[m].discard(n)
+                    if not deps[m]:
+                        queue.append(m)
+                        queue.sort()
+        if len(result) != len(steps):
+            import logging as _log
+            _log.getLogger(__name__).warning(
+                "[GoalPursuit] Dependency cycle detected in plan; using original step order"
+            )
+            return steps
+        return result
 
     async def _parse_plan_response(self, content: str, max_steps: int, step_offset: int = 0) -> list:
         """Parse LLM JSON plan response into a list of step dicts."""
@@ -2648,11 +2759,18 @@ class GoalPursuitExecutor(HybridAgentExecutor):
                 plan = []
                 for i, step in enumerate(parsed[:max_steps]):
                     if isinstance(step, dict):
+                        raw_deps = step.get("depends_on", [])
+                        if not isinstance(raw_deps, list):
+                            raw_deps = []
                         plan.append({
                             "step": step_offset + i + 1,
                             "action": step.get("action", step.get("task", "unknown")),
                             "target": step.get("target", step.get("query", "")),
                             "goal": step.get("goal", step.get("success_criterion", step.get("action", ""))),
+                            "depends_on": [
+                                int(d) for d in raw_deps
+                                if str(d).lstrip("-").isdigit() and int(d) > 0
+                            ],
                         })
                 return plan
         except (json.JSONDecodeError, ValueError):
@@ -2682,19 +2800,30 @@ class GoalPursuitExecutor(HybridAgentExecutor):
         content = response["choices"][0]["message"].get("content", "")
         return await self._parse_plan_response(content, max_steps)
 
-    async def _evaluate_step(self, step: dict, execution_result: str, config: dict) -> dict:
+    async def _evaluate_step(
+        self,
+        step: dict,
+        execution_result: str,
+        config: dict,
+        tool_history: list = None,
+    ) -> dict:
         """LLM judge: did the step's result actually satisfy its goal?
 
         Returns ``{"success": bool, "reason": str, "extracted_result": str}``.
         """
         import re
+        if tool_history:
+            tool_history_str = "\n".join(tool_history[:40])
+        else:
+            tool_history_str = "(no tool calls)"
         prompt = config.get("eval_prompt", self._DEFAULT_EVAL_PROMPT)
         prompt = (
             prompt
             .replace("{action}", step.get("action", ""))
             .replace("{target}", step.get("target", ""))
             .replace("{goal}", step.get("goal", step.get("action", "")))
-            .replace("{response}", execution_result[:3000])
+            .replace("{tool_history}", tool_history_str)
+            .replace("{response}", execution_result[:2000])
         )
         model = config.get("model") or settings.get("default_model")
         response = await self._llm_with_retry(
@@ -2743,6 +2872,7 @@ class GoalPursuitExecutor(HybridAgentExecutor):
         failed_step: dict,
         failure_reason: str,
         config: dict,
+        tool_history: list = None,
     ) -> list:
         """Generate a revised plan for remaining work after a step failure."""
         max_steps = int(config.get("max_steps", 10))
@@ -2757,6 +2887,11 @@ class GoalPursuitExecutor(HybridAgentExecutor):
         else:
             completed_summary = "(none)"
 
+        if tool_history:
+            tool_history_str = "\n".join(tool_history[:40])
+        else:
+            tool_history_str = "(no tool calls recorded)"
+
         prompt = config.get("replan_prompt", self._DEFAULT_REPLAN_PROMPT)
         prompt = (
             prompt
@@ -2765,6 +2900,7 @@ class GoalPursuitExecutor(HybridAgentExecutor):
             .replace("{failed_action}", failed_step.get("action", ""))
             .replace("{failed_target}", failed_step.get("target", ""))
             .replace("{failure_reason}", failure_reason)
+            .replace("{tool_history}", tool_history_str)
         )
         model = config.get("model") or settings.get("default_model")
         response = await self._llm_with_retry(
@@ -2804,9 +2940,11 @@ class GoalPursuitExecutor(HybridAgentExecutor):
         for i, step in enumerate(remaining_steps):
             prefix = "→" if i == current_idx else " "
             tag = " (CURRENT)" if i == current_idx else ""
+            deps = step.get("depends_on", [])
+            deps_str = f" [needs: {', '.join(str(d) for d in deps)}]" if deps else ""
             lines.append(
                 f"{prefix} {step.get('step','?')}. {step.get('action','?')}: "
-                f"{step.get('target','')}{tag}"
+                f"{step.get('target','')}{deps_str}{tag}"
             )
         total = len(completed_steps) + len(remaining_steps)
         done = len(completed_steps)
@@ -2914,6 +3052,8 @@ class GoalPursuitExecutor(HybridAgentExecutor):
         enable_synthesis = bool(config.get("enable_synthesis", True))
         max_step_retries = int(config.get("max_step_retries", 2))
         step_timeout = float(config.get("step_timeout", 0))
+        enable_dependency_graph = bool(config.get("enable_dependency_graph", True))
+        enable_ask_user = bool(config.get("enable_ask_user", True))
         stream_queue = config.get("_stream_queue")
         model = config.get("model") or settings.get("default_model")
 
@@ -2940,6 +3080,28 @@ class GoalPursuitExecutor(HybridAgentExecutor):
                     iteration_count = len(existing.checkpoints)
                     if existing.messages and config.get("resume_from_episode_messages", True):
                         input_data.setdefault("messages", existing.messages)
+                    # Restore repl_state variables persisted by the previous run
+                    saved_vars = existing.metadata.get("repl_variables", {})
+                    if saved_vars:
+                        input_data["_repl_variables"] = saved_vars
+                    # If resuming from a paused state, inject the user's new message
+                    # as _user_answer so the resumed step can access it via GetVariable.
+                    if existing.phase == EpisodeState.PHASE_PAUSED:
+                        new_msgs = input_data.get("messages", [])
+                        for msg in reversed(new_msgs):
+                            if isinstance(msg, dict) and msg.get("role") == "user":
+                                answer = msg.get("content", "")
+                                if isinstance(answer, list):
+                                    answer = " ".join(
+                                        p.get("text", "") for p in answer
+                                        if isinstance(p, dict) and p.get("type") == "text"
+                                    )
+                                if answer.strip():
+                                    repl_vars = input_data.get("_repl_variables", {})
+                                    repl_vars["_user_answer"] = answer.strip()
+                                    input_data["_repl_variables"] = repl_vars
+                                    logger.info("[GoalPursuit] Injected _user_answer for paused step")
+                                    break
                     existing.update_phase(EpisodeState.PHASE_EXECUTING)
                     logger.info(f"[GoalPursuit] Resuming episode {existing.episode_id}")
                 elif episode_id or config.get("auto_create_episode", True):
@@ -2995,6 +3157,8 @@ class GoalPursuitExecutor(HybridAgentExecutor):
             definition = tool_data.get("definition")
             if definition:
                 tools_list.append(definition)
+        if enable_ask_user:
+            tools_list.append(self._ASK_USER_TOOL_DEF)
         tool_library = self._load_tool_library()
 
         # Shared repl_state: variable storage is shared across all steps so
@@ -3010,6 +3174,11 @@ class GoalPursuitExecutor(HybridAgentExecutor):
             "max_cost_usd": float(config.get("max_cost_usd", 1.0)),
             "sub_call_model": config.get("sub_call_model") or model,
         }
+        # Restore persisted variables from a previous interrupted run.
+        restored_vars = input_data.pop("_repl_variables", {})
+        if restored_vars:
+            repl_state["variables"].update(restored_vars)
+            logger.info(f"[GoalPursuit] Restored {len(restored_vars)} repl variables from episode")
 
         goal_pursuit_trace: list = []
         thinking_steps: list = []
@@ -3023,11 +3192,22 @@ class GoalPursuitExecutor(HybridAgentExecutor):
             completed_steps = list(input_data.get("completed_steps", []))
             step_results: list = list(input_data.get("step_results", []))
 
+            # Track completed step numbers for dependency checking.
+            completed_step_numbers: set = set()
+            for s in completed_steps:
+                n = s.get("step") if isinstance(s, dict) else (s if isinstance(s, int) else None)
+                if n is not None:
+                    completed_step_numbers.add(n)
+
             if not remaining_steps:
                 logger.info(f"[GoalPursuit] Creating plan for: {user_goal[:100]}")
                 remaining_steps = await _create_plan_with_trace()
                 if not remaining_steps:
                     return await _fallback_hybrid()
+
+            # Apply topological sort so steps with dependencies run after their prerequisites.
+            if enable_dependency_graph:
+                remaining_steps = self._topo_sort_steps(remaining_steps)
 
             # Step 2: execute steps
             step_idx = 0
@@ -3037,12 +3217,54 @@ class GoalPursuitExecutor(HybridAgentExecutor):
                     break
 
                 step = remaining_steps[step_idx]
+
+                # Dependency check: defer step if prerequisites are not met.
+                if enable_dependency_graph:
+                    unmet = set(step.get("depends_on", [])) - completed_step_numbers
+                    if unmet:
+                        # Move to end and try the next step.
+                        remaining_steps.append(remaining_steps.pop(step_idx))
+                        # Detect deadlock: if all remaining steps have unmet deps, break.
+                        all_blocked = all(
+                            (set(s.get("depends_on", [])) - completed_step_numbers)
+                            for s in remaining_steps[step_idx:]
+                        )
+                        if all_blocked:
+                            logger.warning(
+                                f"[GoalPursuit] All remaining steps blocked by unmet deps; stopping"
+                            )
+                            break
+                        continue
+
                 step_trace = {
                     "step": step.get("step"),
                     "action": step.get("action"),
                     "target": step.get("target"),
                     "replan_count": replan_count,
+                    "depends_on": step.get("depends_on", []),
                 }
+
+                # Pre-step checkpoint: records current state (including repl variables)
+                # so a crash-during-step can resume cleanly by re-running this step.
+                if episode is not None and sm is not None:
+                    try:
+                        sm.save_episode_state(
+                            phase=EpisodeState.PHASE_EXECUTING,
+                            replan_count=replan_count,
+                            completed_steps=[
+                                s.get("step") if isinstance(s, dict) else s
+                                for s in completed_steps
+                            ],
+                            current_step=step_idx,
+                            plan=remaining_steps[step_idx:],
+                            metadata={
+                                "repl_variables": dict(repl_state["variables"]),
+                                "step_started": step.get("step"),
+                            },
+                            add_checkpoint=False,
+                        )
+                    except Exception as e:
+                        logger.warning(f"[GoalPursuit] Pre-step checkpoint failed: {e}")
 
                 plan_context = self._build_plan_context(
                     completed_steps, remaining_steps, step_idx, step_results
@@ -3109,14 +3331,91 @@ class GoalPursuitExecutor(HybridAgentExecutor):
                         final_response["choices"][0]["message"].get("content") or ""
                     )
 
+                # Build tool history from the mutated step_messages so the evaluator
+                # and replanner can see what was actually attempted, not just the summary.
+                tool_history: list = []
+                if not _step_timed_out:
+                    for msg in step_messages:
+                        role = msg.get("role", "")
+                        if role == "assistant" and msg.get("tool_calls"):
+                            for tc in msg["tool_calls"]:
+                                fn = tc.get("function", {})
+                                args_raw = fn.get("arguments", "")[:150]
+                                tool_history.append(
+                                    f"→ Called: {fn.get('name', '?')}({args_raw})"
+                                )
+                        elif role == "tool":
+                            t_name = msg.get("name", "tool")
+                            t_content = (msg.get("content") or "")[:200]
+                            ok = "✓" if msg.get("success", True) else "✗"
+                            tool_history.append(f"  {ok} {t_name}: {t_content}")
+
                 step_trace["iterations"] = iters
                 step_trace["had_tool_error"] = had_tool_error
                 step_trace["timed_out"] = _step_timed_out
                 step_trace["content_preview"] = step_content[:200]
+                step_trace["tool_calls_count"] = len(
+                    [t for t in tool_history if t.startswith("→")]
+                )
+
+                # ── AskUser pause detection ────────────────────────────────
+                pending_q = repl_state.pop("_pending_question", None)
+                if pending_q:
+                    step_trace["paused"] = True
+                    step_trace["pending_question"] = pending_q
+                    goal_pursuit_trace.append(step_trace)
+                    await _push_thinking({
+                        "type": "tool_call",
+                        "name": "AskUser",
+                        "content": pending_q[:300],
+                    })
+                    if episode is not None and sm is not None:
+                        try:
+                            sm.save_episode_state(
+                                phase=EpisodeState.PHASE_PAUSED,
+                                replan_count=replan_count,
+                                completed_steps=[
+                                    s.get("step") if isinstance(s, dict) else s
+                                    for s in completed_steps
+                                ],
+                                current_step=step_idx,
+                                plan=remaining_steps[step_idx:],
+                                metadata={
+                                    "repl_variables": dict(repl_state["variables"]),
+                                    "pending_question": pending_q,
+                                    "paused_at_step": step.get("step"),
+                                },
+                                add_checkpoint=True,
+                            )
+                        except Exception as _pe:
+                            logger.warning(f"[GoalPursuit] Pause checkpoint failed: {_pe}")
+                    result = input_data.copy()
+                    result["content"] = pending_q
+                    result["messages"] = messages + [
+                        {"role": "assistant", "content": pending_q}
+                    ]
+                    result["paused"] = True
+                    result["pending_question"] = pending_q
+                    result["plan"] = remaining_steps
+                    result["completed_steps"] = completed_steps
+                    result["step_results"] = step_results
+                    result["remaining_steps"] = remaining_steps[step_idx:]
+                    result["replan_count"] = replan_count
+                    result["iterations"] = total_iterations
+                    result["goal_pursuit_trace"] = goal_pursuit_trace
+                    result["agent_loop_trace"] = goal_pursuit_trace
+                    result["repl_state"] = {
+                        "variables": list(repl_state["variables"].keys()),
+                        "variable_count": len(repl_state["variables"]),
+                    }
+                    self._thinking_steps = thinking_steps
+                    return result
 
                 # Evaluate step outcome
                 if enable_step_evaluation:
-                    evaluation = await self._evaluate_step(step, step_content, config)
+                    evaluation = await self._evaluate_step(
+                        step, step_content, config, tool_history=tool_history
+                    )
                 else:
                     has_error_flag = (
                         final_response.get("error") is not None if final_response else False
@@ -3147,9 +3446,11 @@ class GoalPursuitExecutor(HybridAgentExecutor):
                     completed_steps.append(step)
                     step_results.append(evaluation)
                     consecutive_failures = 0
+                    step_num = step.get("step", step_idx + 1)
+                    completed_step_numbers.add(step_num)
                     # Store full step output as a named variable so later steps
                     # (and the synthesizer) can retrieve it via GetVariable.
-                    var_key = f"step_{step.get('step', step_idx + 1)}_result"
+                    var_key = f"step_{step_num}_result"
                     repl_state["variables"][var_key] = step_content
                     step_idx += 1
 
@@ -3158,9 +3459,13 @@ class GoalPursuitExecutor(HybridAgentExecutor):
                             sm.save_episode_state(
                                 phase=EpisodeState.PHASE_EXECUTING,
                                 replan_count=replan_count,
-                                completed_steps=[s.get("step") for s in completed_steps],
+                                completed_steps=[
+                                    s.get("step") if isinstance(s, dict) else s
+                                    for s in completed_steps
+                                ],
                                 current_step=step_idx,
                                 plan=remaining_steps[step_idx:] if step_idx < len(remaining_steps) else [],
+                                metadata={"repl_variables": dict(repl_state["variables"])},
                                 add_checkpoint=True,
                             )
                         except Exception as e:
@@ -3215,11 +3520,14 @@ class GoalPursuitExecutor(HybridAgentExecutor):
                         failed_step=step,
                         failure_reason=failure_reason,
                         config=config,
+                        tool_history=tool_history,
                     )
                     step_trace["replanned"] = True
                     step_trace["new_steps_count"] = len(new_remaining)
 
                     if new_remaining:
+                        if enable_dependency_graph:
+                            new_remaining = self._topo_sort_steps(new_remaining)
                         remaining_steps = new_remaining
                         step_idx = 0
                         consecutive_failures = 0
@@ -3328,16 +3636,19 @@ class GoalPursuitExecutor(HybridAgentExecutor):
             lines = []
             for i, step in enumerate(completed):
                 r = results[i] if i < len(results) else {}
-                extracted = r.get("extracted_result", "")[:300]
+                extracted = r.get("extracted_result", "")[:80]
                 var_key = f"step_{step.get('step', i + 1)}_result"
-                hint = (
-                    f' (full output available via GetVariable("{var_key}"))'
-                    if var_key in repl_state["variables"] else ""
-                )
-                lines.append(
-                    f"Step {step.get('step')}: {step.get('action')}: {step.get('target')}\n"
-                    f"Result summary: {extracted}{hint}"
-                )
+                if var_key in repl_state["variables"]:
+                    lines.append(
+                        f"Step {step.get('step')}: {step.get('action')}: {step.get('target')}\n"
+                        f"Hint: {extracted}...\n"
+                        f"→ Call GetVariable(\"{var_key}\") to retrieve the full output."
+                    )
+                else:
+                    lines.append(
+                        f"Step {step.get('step')}: {step.get('action')}: {step.get('target')}\n"
+                        f"Result: {extracted}"
+                    )
             step_summary = "\n\n".join(lines)
             prompt = config.get("synthesis_prompt", self._DEFAULT_SYNTHESIS_PROMPT)
             prompt = (

@@ -700,3 +700,256 @@ async def test_receive_step_timeout_treated_as_failure():
     assert len(result["completed_steps"]) == 0
     timed_out_traces = [t for t in result["goal_pursuit_trace"] if t.get("timed_out")]
     assert len(timed_out_traces) == 1
+
+
+# ---------------------------------------------------------------------------
+# _topo_sort_steps — dependency graph ordering
+# ---------------------------------------------------------------------------
+
+def test_topo_sort_linear_no_deps():
+    """Steps with no depends_on come out in original order."""
+    steps = [
+        {"step": 1, "action": "A", "depends_on": []},
+        {"step": 2, "action": "B", "depends_on": []},
+        {"step": 3, "action": "C", "depends_on": []},
+    ]
+    result = GoalPursuitExecutor._topo_sort_steps(steps)
+    assert [s["step"] for s in result] == [1, 2, 3]
+
+
+def test_topo_sort_respects_dependencies():
+    """Step 3 depends on step 1; step 2 is independent. Valid orders: 1,2,3 or 1,3 after 1, or 2,1,3."""
+    steps = [
+        {"step": 1, "action": "A", "depends_on": []},
+        {"step": 2, "action": "B", "depends_on": []},
+        {"step": 3, "action": "C", "depends_on": [1]},
+    ]
+    result = GoalPursuitExecutor._topo_sort_steps(steps)
+    step_nums = [s["step"] for s in result]
+    assert step_nums.index(1) < step_nums.index(3), "Step 1 must come before step 3"
+    assert len(step_nums) == 3
+
+
+def test_topo_sort_chain():
+    """3 → 2 → 1 dependency chain must run as 1, 2, 3."""
+    steps = [
+        {"step": 3, "action": "C", "depends_on": [2]},
+        {"step": 1, "action": "A", "depends_on": []},
+        {"step": 2, "action": "B", "depends_on": [1]},
+    ]
+    result = GoalPursuitExecutor._topo_sort_steps(steps)
+    assert [s["step"] for s in result] == [1, 2, 3]
+
+
+def test_topo_sort_cycle_returns_original():
+    """Cyclic deps are detected and original order is returned unchanged."""
+    steps = [
+        {"step": 1, "action": "A", "depends_on": [2]},
+        {"step": 2, "action": "B", "depends_on": [1]},
+    ]
+    result = GoalPursuitExecutor._topo_sort_steps(steps)
+    # Should return original order unchanged (cycle detection)
+    assert [s["step"] for s in result] == [1, 2]
+
+
+def test_topo_sort_ignores_external_deps():
+    """Deps pointing to step numbers not in the plan are ignored."""
+    steps = [
+        {"step": 3, "action": "C", "depends_on": [99]},  # 99 not in plan
+        {"step": 4, "action": "D", "depends_on": [3]},
+    ]
+    result = GoalPursuitExecutor._topo_sort_steps(steps)
+    assert [s["step"] for s in result] == [3, 4]
+
+
+# ---------------------------------------------------------------------------
+# _parse_plan_response — depends_on extraction
+# ---------------------------------------------------------------------------
+
+async def test_parse_plan_response_extracts_depends_on():
+    """depends_on field is parsed from plan JSON."""
+    ex = make_executor()
+    content = json.dumps([
+        {"step": 1, "action": "Fetch", "target": "data", "goal": "g", "depends_on": []},
+        {"step": 2, "action": "Process", "target": "data", "goal": "g", "depends_on": [1]},
+        {"step": 3, "action": "Report", "target": "findings", "goal": "g", "depends_on": [1, 2]},
+    ])
+    plan = await ex._parse_plan_response(content, max_steps=10)
+    assert plan[0]["depends_on"] == []
+    assert plan[1]["depends_on"] == [1]
+    assert plan[2]["depends_on"] == [1, 2]
+
+
+async def test_parse_plan_response_default_empty_depends_on():
+    """Steps without depends_on get an empty list."""
+    ex = make_executor()
+    content = json.dumps([{"step": 1, "action": "Do", "target": "x", "goal": "g"}])
+    plan = await ex._parse_plan_response(content, max_steps=10)
+    assert plan[0]["depends_on"] == []
+
+
+# ---------------------------------------------------------------------------
+# receive() — dependency graph execution ordering
+# ---------------------------------------------------------------------------
+
+async def test_receive_dependency_respected():
+    """Steps with depends_on are deferred until their prerequisites complete."""
+    ex = make_executor()
+
+    # Two-step plan where step 2 depends on step 1.
+    plan_json_str = json.dumps([
+        {"step": 1, "action": "Gather", "target": "data", "goal": "g", "depends_on": []},
+        {"step": 2, "action": "Analyze", "target": "data", "goal": "g", "depends_on": [1]},
+    ])
+    plan_resp = llm_response(plan_json_str)
+    step1_resp = llm_response("Data gathered.")
+    eval1 = llm_response(eval_json(True, "ok", "gathered"))
+    step2_resp = llm_response("Analysis done.")
+    eval2 = llm_response(eval_json(True, "ok", "done"))
+
+    ex.llm.chat_completion = AsyncMock(side_effect=[
+        plan_resp, step1_resp, eval1, step2_resp, eval2,
+    ])
+
+    executed_order = []
+    original_run = ex._run_hybrid_loop
+
+    async def tracking_run(*args, llm_messages, **kwargs):
+        # Extract the step name from the user message
+        user_msg = next((m["content"] for m in llm_messages if m["role"] == "user"), "")
+        executed_order.append(user_msg[:30])
+        return await original_run(*args, llm_messages=llm_messages, **kwargs)
+
+    with patch.object(ex, "_run_hybrid_loop", side_effect=tracking_run), \
+         patch.object(ex, "_load_tool_library", return_value={}), \
+         patch.object(ex, "_load_tools", return_value={}):
+        result = await ex.receive(
+            {"messages": MESSAGES},
+            config={"enable_synthesis": False},
+        )
+
+    assert len(result["completed_steps"]) == 2
+    # Step 1 must have been executed before step 2
+    assert executed_order[0].startswith("Complete this step: Gather")
+    assert executed_order[1].startswith("Complete this step: Analyze")
+
+
+# ---------------------------------------------------------------------------
+# receive() — repl_state variables restored from _repl_variables
+# ---------------------------------------------------------------------------
+
+async def test_receive_repl_variables_restored_from_input():
+    """Variables in input_data['_repl_variables'] are loaded into repl_state at startup."""
+    ex = make_executor()
+
+    plan_resp = llm_response(plan_json("Use cached data"))
+    step_resp = llm_response("Used it.")
+    eval_resp = llm_response(eval_json(True, "ok", "Used it."))
+
+    ex.llm.chat_completion = AsyncMock(side_effect=[plan_resp, step_resp, eval_resp])
+
+    captured_vars = {}
+    original_run = ex._run_hybrid_loop
+
+    async def capture(*args, repl_state, **kwargs):
+        captured_vars.update(repl_state["variables"])
+        return await original_run(*args, repl_state=repl_state, **kwargs)
+
+    with patch.object(ex, "_run_hybrid_loop", side_effect=capture), \
+         patch.object(ex, "_load_tool_library", return_value={}), \
+         patch.object(ex, "_load_tools", return_value={}):
+        await ex.receive(
+            {
+                "messages": MESSAGES,
+                "_repl_variables": {"step_0_result": "previously computed result"},
+            },
+            config={"enable_synthesis": False},
+        )
+
+    # The pre-seeded variable should be visible during step execution
+    assert "step_0_result" in captured_vars
+    assert captured_vars["step_0_result"] == "previously computed result"
+
+
+# ---------------------------------------------------------------------------
+# AskUser — mid-plan pause / resume
+# ---------------------------------------------------------------------------
+
+async def test_ask_user_pauses_execution():
+    """When the agent calls AskUser during a step, receive() returns immediately with paused=True."""
+    ex = make_executor()
+
+    plan_resp = llm_response(plan_json("Clarify requirements", "Do the work"))
+    # AskUser is handled by _execute_tool override — simulate by making _run_hybrid_loop
+    # set _pending_question on repl_state directly (as the override would do).
+    step1_resp = llm_response("Pausing to ask.")
+
+    ex.llm.chat_completion = AsyncMock(side_effect=[plan_resp, step1_resp])
+
+    async def run_with_ask_user(*args, repl_state, llm_messages, **kwargs):
+        repl_state["_pending_question"] = "What format do you want the output in?"
+        return ({"content": "Pausing to ask."}, 1, False)
+
+    with patch.object(ex, "_run_hybrid_loop", side_effect=run_with_ask_user), \
+         patch.object(ex, "_load_tool_library", return_value={}), \
+         patch.object(ex, "_load_tools", return_value={}):
+        result = await ex.receive(
+            {"messages": MESSAGES},
+            config={"enable_synthesis": False, "enable_ask_user": True},
+        )
+
+    assert result.get("paused") is True
+    assert result["pending_question"] == "What format do you want the output in?"
+    assert result["content"] == "What format do you want the output in?"
+
+
+async def test_ask_user_resume_injects_answer():
+    """_user_answer injected via _repl_variables (as episode-resume path does) is visible in repl_state."""
+    ex = make_executor()
+
+    # The episode-resume path writes _user_answer into _repl_variables before calling receive().
+    # Simulate that by pre-seeding _repl_variables directly.
+    pre_seeded_vars = {"_user_answer": "Bullet points please"}
+
+    plan_resp = llm_response(plan_json("Do the work"))
+    step_resp = llm_response("Done in bullet points.")
+    eval_resp = llm_response(eval_json(True, "ok", "Done."))
+
+    ex.llm.chat_completion = AsyncMock(side_effect=[plan_resp, step_resp, eval_resp])
+
+    captured_vars = {}
+
+    async def capture(*args, repl_state, llm_messages, **kwargs):
+        captured_vars.update(repl_state.get("variables", {}))
+        return ({"content": "Done in bullet points."}, 1, False)
+
+    with patch.object(ex, "_run_hybrid_loop", side_effect=capture), \
+         patch.object(ex, "_load_tool_library", return_value={}), \
+         patch.object(ex, "_load_tools", return_value={}):
+        result = await ex.receive(
+            {"messages": MESSAGES, "_repl_variables": pre_seeded_vars},
+            config={"enable_synthesis": False, "enable_ask_user": True},
+        )
+
+    assert captured_vars.get("_user_answer") == "Bullet points please"
+    assert result.get("paused") is not True
+
+
+async def test_execute_tool_intercepts_ask_user():
+    """_execute_tool override sets _pending_question and does not call super()."""
+    ex = make_executor()
+    repl_state = {"variables": {}}
+    tool_call = {
+        "id": "tc1",
+        "function": {
+            "name": "AskUser",
+            "arguments": json.dumps({"question": "Which dataset should I use?"})
+        }
+    }
+    result = await ex._execute_tool(tool_call, {}, repl_state, large_output_threshold=3000)
+
+    assert repl_state.get("_pending_question") == "Which dataset should I use?"
+    assert result["name"] == "AskUser"
+    assert result["success"] is True
+    # Content should acknowledge pause without executing anything
+    assert "paused" in result["content"].lower() or "waiting" in result["content"].lower()
