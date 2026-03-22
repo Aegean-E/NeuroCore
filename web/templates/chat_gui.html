@@ -380,4 +380,31 @@
     document.querySelectorAll('.markdown-content').forEach(el => {
         el.innerHTML = marked.parse(el.textContent);
     });
+
+    // Pre-fill message input from ?goal= URL param (set by Goals page "Run with Agent" button)
+    (function() {
+        const params = new URLSearchParams(window.location.search);
+        const goal = params.get('goal');
+        const goalId = params.get('goal_id');
+        if (!goal) return;
+        const input = document.querySelector('input[name="message"]');
+        if (input) {
+            input.value = goal;
+            input.focus();
+        }
+        // Store goal_id so the form can send it alongside the message
+        if (goalId) {
+            const form = input && input.closest('form');
+            if (form) {
+                const hidden = document.createElement('input');
+                hidden.type = 'hidden';
+                hidden.name = 'goal_id';
+                hidden.value = goalId;
+                form.appendChild(hidden);
+            }
+        }
+        // Clean URL without reloading
+        const clean = window.location.pathname + (window.location.hash || '');
+        window.history.replaceState(null, '', clean);
+    })();
 </script>

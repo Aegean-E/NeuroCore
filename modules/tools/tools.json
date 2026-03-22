@@ -408,6 +408,46 @@
         },
         "enabled": true
     },
+    "GetGoals": {
+        "definition": {
+            "type": "function",
+            "function": {
+                "name": "GetGoals",
+                "description": "Retrieves goals from the system. Returns a list of goals with their IDs, descriptions, priorities, statuses, and deadlines.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "status": {
+                            "type": "string",
+                            "description": "Filter by status: 'active', 'pending', 'completed'. Omit to get all goals.",
+                            "enum": ["active", "pending", "completed"]
+                        },
+                        "limit": {
+                            "type": "number",
+                            "description": "Maximum number of goals to return (default 20)."
+                        }
+                    },
+                    "required": []
+                }
+            }
+        },
+        "enabled": true
+    },
+    "GetNextGoal": {
+        "definition": {
+            "type": "function",
+            "function": {
+                "name": "GetNextGoal",
+                "description": "Returns the highest-priority pending or active goal. Useful for autonomous agents that should pick up and work on the next available goal.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {},
+                    "required": []
+                }
+            }
+        },
+        "enabled": true
+    },
     "Peek": {
         "definition": {
             "type": "function",

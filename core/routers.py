@@ -2607,8 +2607,8 @@ async def clear_debug_logs(request: Request, _: bool = Depends(require_debug_mod
 @router.get("/goals", response_class=HTMLResponse)
 async def goals_page(request: Request, module_manager: ModuleManager = Depends(get_module_manager), settings_man: SettingsManager = Depends(get_settings_manager)):
     return templates.TemplateResponse(request, "goals.html", {
+        "settings": settings_man.settings,
         "modules": module_manager.get_all_modules(),
-        "settings": settings_man.settings
     })
 
 

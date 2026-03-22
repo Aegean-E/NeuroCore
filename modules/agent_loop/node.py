@@ -3600,6 +3600,17 @@ class GoalPursuitExecutor(HybridAgentExecutor):
                 except Exception as e:
                     logger.warning(f"[GoalPursuit] Episode finalization failed: {e}")
 
+            # Auto-complete the goal in the DB if goal_id was provided and we succeeded
+            goal_id = input_data.get("goal_id")
+            if goal_id and not remaining_after and final_content:
+                try:
+                    import httpx as _httpx, os as _os
+                    _api = _os.getenv("MEMORY_API_URL", "http://localhost:8000")
+                    _httpx.post(f"{_api}/memory/goals/{int(goal_id)}/complete", timeout=5.0)
+                    logger.info(f"[GoalPursuit] Auto-completed goal {goal_id}")
+                except Exception as _gce:
+                    logger.warning(f"[GoalPursuit] Auto-complete goal {goal_id} failed: {_gce}")
+
             self._log_agent_event("goal_pursuit_end", {
                 "completed_steps": len(completed_steps),
                 "total_steps": len(remaining_steps),

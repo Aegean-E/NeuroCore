@@ -285,6 +285,7 @@ async def send_message(
     message: str = Form(...),
     session_id: str = Query(None),
     image: UploadFile = File(None),
+    goal_id: str = Form(None),
     llm: LLMBridge = Depends(get_llm_bridge)
 ):
     if not session_id:
@@ -359,6 +360,11 @@ async def send_message(
             try:
                 runner = FlowRunner(flow_id=active_flow['id'])
                 initial_data = {"messages": active_session["history"], "_input_source": "chat"}
+                if goal_id:
+                    try:
+                        initial_data["goal_id"] = int(goal_id)
+                    except (ValueError, TypeError):
+                        pass
                 flow_result = await runner.run(initial_data, stream_queue=queue)
                 logger.info(f"[Chat] flow_result: {flow_result}")
                 
