@@ -349,8 +349,92 @@ async def test_get_executor_class_dispatcher():
     recall_cls = await get_executor_class("memory_recall")
     save_cls = await get_executor_class("memory_save")
     check_cls = await get_executor_class("check_goal")
-    
+
     assert recall_cls.__name__ == MemoryRecallExecutor.__name__
     assert save_cls.__name__ == MemorySaveExecutor.__name__
     assert check_cls.__name__ == CheckGoalExecutor.__name__
     assert await get_executor_class("unknown") is None
+
+
+# ---------------------------------------------------------------------------
+# Shutdown / persistence tests
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_pending_save_task_registered(mock_store):
+    """receive() must register the background task in _pending_save_tasks."""
+    import asyncio as _asyncio
+    import modules.memory.node as mem_node
+
+    # Clear any tasks left by previous tests in this module.
+    mem_node._pending_save_tasks.clear()
+
+    executor = MemorySaveExecutor()
+    with patch.object(executor, "_save_background", new_callable=AsyncMock):
+        await executor.receive({"content": "Hello world"}, config={"save_delay": 0.0})
+        # Flush two event-loop iterations:
+        # 1st: task coroutine runs and completes → done callbacks scheduled via call_soon
+        # 2nd: call_soon callbacks fire → task removed from set
+        await _asyncio.sleep(0)
+        await _asyncio.sleep(0)
+        assert len(mem_node._pending_save_tasks) == 0
+
+
+@pytest.mark.asyncio
+async def test_pending_save_task_removed_on_completion(mock_store):
+    """Done callback must remove the task from _pending_save_tasks once it finishes."""
+    import asyncio as _asyncio
+    import modules.memory.node as mem_node
+
+    mem_node._pending_save_tasks.clear()
+    resolved = _asyncio.Event()
+
+    async def _slow_save(*args, **kwargs):
+        await resolved.wait()
+
+    executor = MemorySaveExecutor()
+    with patch.object(executor, "_save_background", side_effect=_slow_save):
+        await executor.receive({"content": "Pending fact"}, config={"save_delay": 0.0})
+        # Task is now running (blocked on resolved.wait())
+        assert len(mem_node._pending_save_tasks) == 1
+        # Unblock, then flush two loop iterations for callback to fire
+        resolved.set()
+        await _asyncio.sleep(0)
+        await _asyncio.sleep(0)
+        assert len(mem_node._pending_save_tasks) == 0
+
+
+@pytest.mark.asyncio
+async def test_memory_shutdown_awaits_pending_tasks():
+    """shutdown() in modules.memory should wait for pending save tasks to complete."""
+    import asyncio as _asyncio
+    import modules.memory.node as mem_node
+    from modules.memory import shutdown
+
+    finished = []
+
+    async def _task():
+        await _asyncio.sleep(0.01)
+        finished.append(True)
+
+    task = _asyncio.create_task(_task())
+    mem_node._pending_save_tasks.add(task)
+    task.add_done_callback(mem_node._pending_save_tasks.discard)
+
+    await shutdown()
+
+    assert finished == [True], "shutdown() should have awaited the pending save task"
+    assert len(mem_node._pending_save_tasks) == 0
+
+
+@pytest.mark.asyncio
+async def test_memory_shutdown_noop_when_no_pending_tasks():
+    """shutdown() must be a no-op when there are no pending tasks."""
+    import modules.memory.node as mem_node
+    from modules.memory import shutdown
+
+    # Ensure no leftover tasks from other tests
+    mem_node._pending_save_tasks.clear()
+
+    # Should not raise and should return quickly
+    await shutdown()

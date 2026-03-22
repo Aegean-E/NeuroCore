@@ -2613,8 +2613,12 @@ class GoalPursuitExecutor(HybridAgentExecutor):
         "You are a task planner. Break the user's request into clear, executable steps.\n\n"
         "Rules:\n"
         "- Return a JSON array of steps.\n"
-        "- Each step: {{\"step\": N, \"action\": \"verb phrase\", \"target\": \"what it applies to\", "
+        "- Each step: {{\"step\": N, \"action\": \"tool name or specific action\", "
+        "\"target\": \"what it applies to\", "
         "\"goal\": \"what success looks like\", \"depends_on\": []}}\n"
+        "- IMPORTANT: The 'action' field must match an available tool name wherever possible. "
+        "Do not invent generic actions like 'open', 'navigate', 'access' when a specific tool exists. "
+        "For example: use 'GetYouTubeTranscript' not 'open video', use 'WebSearch' not 'search the web'.\n"
         "- depends_on: list of step numbers that must complete before this step can run. "
         "Use [] for steps with no prerequisites. Example: step 3 that needs steps 1 and 2 → \"depends_on\": [1, 2]\n"
         "- If the task is simple (single action or question), return a 1-step array.\n"
@@ -4027,15 +4031,18 @@ class GoalPursuitExecutor(HybridAgentExecutor):
                 await stream_queue.put({"type": "thinking", "content": list(thinking_steps)})
 
         async def _create_plan_with_trace() -> list:
-            # Build a compact tools summary so the planner knows what's available
+            # Build a tools summary so the planner knows what's available.
+            # Include full descriptions so the model can match the right tool
+            # to each step rather than inventing generic actions.
             tools_summary = ""
             if tools_list:
                 lines = []
                 for tool_def in tools_list:
-                    name = tool_def.get("function", {}).get("name", "")
-                    desc = tool_def.get("function", {}).get("description", "")
+                    fn = tool_def.get("function", {})
+                    name = fn.get("name", "")
+                    desc = fn.get("description", "")
                     if name:
-                        lines.append(f"- {name}: {desc[:120]}" if desc else f"- {name}")
+                        lines.append(f"- {name}: {desc}" if desc else f"- {name}")
                 tools_summary = "\n".join(lines)
 
             # Fetch past goal_reflection lessons and compress if needed

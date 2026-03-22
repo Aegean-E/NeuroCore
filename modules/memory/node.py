@@ -12,6 +12,12 @@ from .consolidation import MemoryConsolidator, consolidation_state
 
 logger = logging.getLogger(__name__)
 
+# Module-level registry of pending background save tasks.
+# Tracked so the shutdown() hook can await them before the process exits,
+# preventing memory loss when the server restarts while a save is in flight.
+_pending_save_tasks: set = set()
+
+
 class ConfigLoader:
     _cache = {"mtime": 0, "data": {}}
     _path = os.path.join(os.path.dirname(__file__), "module.json")
@@ -300,8 +306,8 @@ class MemorySaveExecutor:
             save_delay = float(config.get("save_delay", self.config.get("save_delay", 3.0)))
 
             # Fire and forget: Don't block the flow for embedding generation.
-            # Store task reference to prevent GC before it runs.
-            self._save_task = asyncio.create_task(self._save_background(
+            # Register in module-level set so shutdown() can await completion.
+            task = asyncio.create_task(self._save_background(
                 text_to_save,
                 subject=subject,
                 source=source,
@@ -311,6 +317,8 @@ class MemorySaveExecutor:
                 expires_at=expires_at,
                 save_delay=save_delay,
             ))
+            _pending_save_tasks.add(task)
+            task.add_done_callback(_pending_save_tasks.discard)
 
             # Auto-Consolidation Check with timeout to prevent deadlock
             try:
