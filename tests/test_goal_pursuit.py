@@ -2965,3 +2965,508 @@ async def test_estimated_cost_reserved_before_await():
     assert cost_seen_during_call[0] > 0.0, (
         "estimated_cost must be incremented before the LLM call, not after"
     )
+
+
+# ---------------------------------------------------------------------------
+# Fix 2b: estimated_cost parallel-step budget enforcement
+# Two steps whose individual costs each fit within the budget but together
+# exceed it must not both slip through — the second must be blocked.
+# ---------------------------------------------------------------------------
+
+async def test_estimated_cost_parallel_steps_blocked_together():
+    """Second sub-call is blocked when its cost would push the total over max.
+
+    Cost formula: delta = ((len(prompt)//4 + max_tokens) / 1000) * 0.001
+
+    Call A: prompt=4 chars, max_tokens=1000  → delta ≈ 0.001001  (total: 0.001001)
+    Call B: prompt=4 chars, max_tokens=3000  → delta ≈ 0.003001  (total: 0.004002)
+    Budget = 0.003 — call A passes, call B must be blocked.
+    """
+    ex = make_executor()
+    repl_state = {
+        "variables": {},
+        "sub_call_count": 0,
+        "recursion_depth": 0,
+        "max_recursion_depth": 5,
+        "estimated_cost": 0.0,
+        "max_cost_usd": 0.003,
+        "stdout_history": [],
+        "final": None,
+        "_var_counts": {},
+    }
+
+    async def fake_chat(**kwargs):
+        return {"choices": [{"message": {"content": "ok"}}]}
+
+    ex.llm = MagicMock()
+    ex.llm.chat_completion = fake_chat
+
+    result_a = await ex._execute_sub_call(
+        args={"prompt": "aaaa", "max_tokens": 1000},
+        repl_state=repl_state,
+    )
+    assert result_a["success"] is True, "First call should succeed (cost fits in budget)"
+
+    result_b = await ex._execute_sub_call(
+        args={"prompt": "bbbb", "max_tokens": 3000},
+        repl_state=repl_state,
+    )
+    assert result_b["success"] is False, "Second call must be blocked (combined cost exceeds budget)"
+    assert "max_cost_usd" in result_b["content"]
+
+
+async def test_estimated_cost_reverted_on_block():
+    """When a sub-call is blocked, the cost reservation must be reverted.
+
+    Start just below the limit; a large-token call pushes over → must revert.
+    prompt=4 chars, max_tokens=3000 → delta ≈ 0.003001
+    Starting cost = 0.0029 → total after reserve = 0.0059 > 0.003 → blocked + reverted.
+    """
+    ex = make_executor()
+    repl_state = {
+        "variables": {},
+        "sub_call_count": 0,
+        "recursion_depth": 0,
+        "max_recursion_depth": 5,
+        "estimated_cost": 0.0029,   # already near limit
+        "max_cost_usd": 0.003,
+        "stdout_history": [],
+        "final": None,
+        "_var_counts": {},
+    }
+
+    async def fake_chat(**kwargs):
+        return {"choices": [{"message": {"content": "ok"}}]}
+
+    ex.llm = MagicMock()
+    ex.llm.chat_completion = fake_chat
+
+    cost_before = repl_state["estimated_cost"]
+
+    result = await ex._execute_sub_call(
+        args={"prompt": "xxxx", "max_tokens": 3000},
+        repl_state=repl_state,
+    )
+
+    assert result["success"] is False
+    # Cost must be reverted — not left at the inflated value
+    assert repl_state["estimated_cost"] == pytest.approx(cost_before), (
+        "Blocked call must revert the cost reservation"
+    )
+
+
+# ---------------------------------------------------------------------------
+# _synthesize_results: extracted class method tests
+# ---------------------------------------------------------------------------
+
+async def test_synthesize_results_all_empty_returns_failure_message():
+    """When all steps produced no output, synthesize must return a clear failure."""
+    ex = make_executor()
+    repl_state = {"variables": {}, "_step_reasoning_history": []}
+    config = {"temperature": 0.7, "max_llm_retries": 1, "retry_delay": 0.0}
+
+    completed = [{"step": 1, "action": "Search", "target": "query"}]
+    results = [{"extracted_result": ""}]   # empty result
+
+    out = await ex._synthesize_results(
+        completed=completed,
+        results=results,
+        repl_state=repl_state,
+        config=config,
+        user_goal="find data",
+        tools_list=[],
+        tool_library={},
+        model="test-model",
+        max_tokens=512,
+        tool_error_strategy="continue",
+        large_output_threshold=1000,
+    )
+    assert "Unable to produce" in out
+    assert "failed" in out.lower()
+
+
+async def test_synthesize_results_inlines_small_result():
+    """Results <=600 chars must appear directly in the system message without GetVariable."""
+    ex = make_executor()
+    small_result = "The answer is 42."
+    repl_state = {
+        "variables": {"step_1_result": small_result},
+        "_step_reasoning_history": [],
+    }
+    config = {"temperature": 0.7, "max_llm_retries": 1, "retry_delay": 0.0}
+    completed = [{"step": 1, "action": "Compute", "target": "answer"}]
+    results = [{"extracted_result": small_result}]
+
+    captured_messages = []
+
+    async def fake_run_hybrid_loop(llm_messages, **kwargs):
+        captured_messages.extend(llm_messages)
+        return ({"choices": [{"message": {"content": "42"}}]}, 1, False)
+
+    ex._run_hybrid_loop = fake_run_hybrid_loop
+
+    await ex._synthesize_results(
+        completed=completed,
+        results=results,
+        repl_state=repl_state,
+        config=config,
+        user_goal="compute answer",
+        tools_list=[],
+        tool_library={},
+        model="test-model",
+        max_tokens=512,
+        tool_error_strategy="continue",
+        large_output_threshold=1000,
+    )
+
+    system_msg = next(m["content"] for m in captured_messages if m["role"] == "system")
+    assert small_result in system_msg, "Small result must be inlined, not just hinted"
+    # The step-specific GetVariable instruction must NOT appear for a small result
+    assert 'Call GetVariable("step_1_result")' not in system_msg, (
+        "Small result must not have a GetVariable fetch instruction"
+    )
+
+
+async def test_synthesize_results_uses_get_variable_for_large_result():
+    """Results >600 chars must use GetVariable instruction, not inline full text."""
+    ex = make_executor()
+    large_result = "x" * 1000
+    repl_state = {
+        "variables": {"step_1_result": large_result},
+        "_step_reasoning_history": [],
+    }
+    config = {"temperature": 0.7, "max_llm_retries": 1, "retry_delay": 0.0}
+    completed = [{"step": 1, "action": "Fetch", "target": "page"}]
+    results = [{"extracted_result": "hint text"}]
+
+    captured_messages = []
+
+    async def fake_run_hybrid_loop(llm_messages, **kwargs):
+        captured_messages.extend(llm_messages)
+        return ({"choices": [{"message": {"content": "summary"}}]}, 1, False)
+
+    ex._run_hybrid_loop = fake_run_hybrid_loop
+
+    await ex._synthesize_results(
+        completed=completed,
+        results=results,
+        repl_state=repl_state,
+        config=config,
+        user_goal="fetch page",
+        tools_list=[],
+        tool_library={},
+        model="test-model",
+        max_tokens=512,
+        tool_error_strategy="continue",
+        large_output_threshold=1000,
+    )
+
+    system_msg = next(m["content"] for m in captured_messages if m["role"] == "system")
+    assert 'GetVariable("step_1_result")' in system_msg
+    assert large_result not in system_msg, "Large result must NOT be inlined"
+
+
+async def test_synthesize_results_includes_reasoning_history():
+    """_step_reasoning_history must appear in the synthesis system message."""
+    ex = make_executor()
+    repl_state = {
+        "variables": {"step_1_result": "some answer"},
+        "_step_reasoning_history": [
+            "Step 1 (Search): use web_search first, avoid cached results",
+            "Step 2 (Extract): prior result has the key data in section 3",
+        ],
+    }
+    config = {"temperature": 0.7, "max_llm_retries": 1, "retry_delay": 0.0}
+    completed = [{"step": 1, "action": "Search", "target": "query"}]
+    results = [{"extracted_result": "some answer"}]
+
+    captured_messages = []
+
+    async def fake_run_hybrid_loop(llm_messages, **kwargs):
+        captured_messages.extend(llm_messages)
+        return ({"choices": [{"message": {"content": "done"}}]}, 1, False)
+
+    ex._run_hybrid_loop = fake_run_hybrid_loop
+
+    await ex._synthesize_results(
+        completed=completed,
+        results=results,
+        repl_state=repl_state,
+        config=config,
+        user_goal="search query",
+        tools_list=[],
+        tool_library={},
+        model="test-model",
+        max_tokens=512,
+        tool_error_strategy="continue",
+        large_output_threshold=1000,
+    )
+
+    system_msg = next(m["content"] for m in captured_messages if m["role"] == "system")
+    assert "Step Reasoning History" in system_msg
+    assert "use web_search first" in system_msg
+
+
+async def test_synthesize_results_no_reasoning_section_when_history_empty():
+    """No reasoning section must appear in the prompt when history is empty."""
+    ex = make_executor()
+    repl_state = {
+        "variables": {"step_1_result": "answer"},
+        "_step_reasoning_history": [],
+    }
+    config = {"temperature": 0.7, "max_llm_retries": 1, "retry_delay": 0.0}
+    completed = [{"step": 1, "action": "Compute", "target": "x"}]
+    results = [{"extracted_result": "answer"}]
+
+    captured_messages = []
+
+    async def fake_run_hybrid_loop(llm_messages, **kwargs):
+        captured_messages.extend(llm_messages)
+        return ({"choices": [{"message": {"content": "done"}}]}, 1, False)
+
+    ex._run_hybrid_loop = fake_run_hybrid_loop
+
+    await ex._synthesize_results(
+        completed=completed,
+        results=results,
+        repl_state=repl_state,
+        config=config,
+        user_goal="compute x",
+        tools_list=[],
+        tool_library={},
+        model="test-model",
+        max_tokens=512,
+        tool_error_strategy="continue",
+        large_output_threshold=1000,
+    )
+
+    system_msg = next(m["content"] for m in captured_messages if m["role"] == "system")
+    assert "Step Reasoning History" not in system_msg
+
+
+# ---------------------------------------------------------------------------
+# Claim 1 fix: _run_insights semantic accumulation
+# ---------------------------------------------------------------------------
+
+def test_run_insights_appended_after_success():
+    """A successful step must append the extracted_result to _run_insights."""
+    repl_state = {"_run_insights": []}
+    insight = "Revenue was $42M in Q3"
+    evaluation = {"success": True, "reason": "found data", "extracted_result": insight}
+
+    # Simulate what _run_one_step does after a successful evaluation
+    _insight = evaluation.get("extracted_result", "")[:150]
+    if _insight:
+        repl_state.setdefault("_run_insights", []).append(
+            f"Step 1 (Search): {_insight}"
+        )
+
+    assert len(repl_state["_run_insights"]) == 1
+    assert insight in repl_state["_run_insights"][0]
+
+
+def test_run_insights_not_appended_on_empty_extracted_result():
+    """Steps with empty extracted_result must not pollute _run_insights."""
+    repl_state = {"_run_insights": []}
+    evaluation = {"success": True, "reason": "ok", "extracted_result": ""}
+
+    _insight = evaluation.get("extracted_result", "")[:150]
+    if _insight:
+        repl_state.setdefault("_run_insights", []).append(f"Step 1 (X): {_insight}")
+
+    assert repl_state["_run_insights"] == []
+
+
+async def test_build_step_system_prompt_shows_insights():
+    """_build_step_system_prompt must include Established Findings when insights exist."""
+    ex = make_executor()
+    step = {"step": 2, "action": "Analyze", "target": "data", "goal": "find trend"}
+    repl_state = {
+        "variables": {"step_1_result": "some data"},
+        "_run_insights": ["Step 1 (Fetch): Revenue was $42M in Q3"],
+    }
+    prompt = ex._build_step_system_prompt(
+        step=step,
+        plan_context="## Plan\n...",
+        input_data={},
+        config={},
+        large_output_threshold=1000,
+        repl_state=repl_state,
+    )
+    assert "Established Findings" in prompt
+    assert "Revenue was $42M" in prompt
+
+
+async def test_build_step_system_prompt_no_findings_section_when_empty():
+    """No Established Findings section must appear when _run_insights is empty."""
+    ex = make_executor()
+    step = {"step": 1, "action": "Search", "target": "x", "goal": "find x"}
+    repl_state = {"variables": {}, "_run_insights": []}
+    prompt = ex._build_step_system_prompt(
+        step=step,
+        plan_context="## Plan\n...",
+        input_data={},
+        config={},
+        large_output_threshold=1000,
+        repl_state=repl_state,
+    )
+    assert "Established Findings" not in prompt
+
+
+async def test_reason_about_step_includes_insights(monkeypatch):
+    """_reason_about_step must include _run_insights in the LLM prompt."""
+    # Restore the real method (autouse fixture stubs it out for unrelated tests)
+    monkeypatch.setattr(GoalPursuitExecutor, "_reason_about_step", _real_reason_about_step)
+    ex = make_executor()
+    captured = []
+
+    async def fake_llm_with_retry(messages, **kwargs):
+        captured.extend(messages)
+        return {"choices": [{"message": {"content": "use search"}}]}
+
+    step = {"step": 2, "action": "Analyze", "target": "data", "goal": "find trend"}
+    repl_state = {
+        "variables": {},
+        "_run_insights": ["Step 1 (Fetch): The Q3 revenue was $42M"],
+    }
+    config = {}
+    with patch.object(ex, "_llm_with_retry", side_effect=fake_llm_with_retry):
+        await ex._reason_about_step(
+            step=step,
+            repl_state=repl_state,
+            config=config,
+            user_goal="analyze financials",
+        )
+
+    combined = " ".join(m.get("content", "") for m in captured)
+    assert "Established findings" in combined
+    assert "$42M" in combined
+
+
+async def test_reason_about_step_no_insights_section_when_empty(monkeypatch):
+    """No insights section must appear in the reasoning prompt when history is empty."""
+    monkeypatch.setattr(GoalPursuitExecutor, "_reason_about_step", _real_reason_about_step)
+    ex = make_executor()
+    captured = []
+
+    async def fake_llm_with_retry(messages, **kwargs):
+        captured.extend(messages)
+        return {"choices": [{"message": {"content": "use search"}}]}
+
+    step = {"step": 1, "action": "Search", "target": "x", "goal": "find x"}
+    repl_state = {"variables": {}, "_run_insights": []}
+    config = {}
+    with patch.object(ex, "_llm_with_retry", side_effect=fake_llm_with_retry):
+        await ex._reason_about_step(step=step, repl_state=repl_state, config=config, user_goal="x")
+
+    combined = " ".join(m.get("content", "") for m in captured)
+    assert "Established findings" not in combined
+
+
+# ---------------------------------------------------------------------------
+# Claim 2 fix: evidence quality classification in _evaluate_step
+# ---------------------------------------------------------------------------
+
+async def test_evaluate_step_evidence_quality_no_tools():
+    """NO_TOOLS_CALLED must be injected when tool_history has no result lines."""
+    ex = make_executor()
+    captured_prompts = []
+
+    async def fake_llm_with_retry(messages, **kwargs):
+        captured_prompts.extend(messages)
+        return {"choices": [{"message": {"content": '{"success": true, "reason": "ok", "extracted_result": "data"}'}}]}
+
+    step = {"step": 1, "action": "Search", "target": "x", "goal": "find x"}
+    # tool_history has only "Called" lines, no "✓"/"✗" result lines
+    tool_history = ["→ Called: web_search(x)"]
+
+    with patch.object(ex, "_llm_with_retry", side_effect=fake_llm_with_retry):
+        await ex._evaluate_step(step, "I searched and found some general info", {}, tool_history=tool_history)
+
+    combined = " ".join(m.get("content", "") for m in captured_prompts)
+    assert "NO_TOOLS_CALLED" in combined
+
+
+async def test_evaluate_step_evidence_quality_all_failed():
+    """ALL_FAILED must be injected when every tool result is an error."""
+    ex = make_executor()
+    captured_prompts = []
+
+    async def fake_llm_with_retry(messages, **kwargs):
+        captured_prompts.extend(messages)
+        return {"choices": [{"message": {"content": '{"success": false, "reason": "no data", "extracted_result": ""}'}}]}
+
+    step = {"step": 1, "action": "Fetch", "target": "url", "goal": "get page"}
+    tool_history = [
+        "→ Called: fetch_url(url)",
+        "  ✗ fetch_url: Error: connection refused",
+    ]
+
+    with patch.object(ex, "_llm_with_retry", side_effect=fake_llm_with_retry):
+        await ex._evaluate_step(step, "I tried but failed", {}, tool_history=tool_history)
+
+    combined = " ".join(m.get("content", "") for m in captured_prompts)
+    assert "ALL_FAILED" in combined
+
+
+async def test_evaluate_step_evidence_quality_all_empty():
+    """ALL_EMPTY must be injected when every successful tool returned no-data content."""
+    ex = make_executor()
+    captured_prompts = []
+
+    async def fake_llm_with_retry(messages, **kwargs):
+        captured_prompts.extend(messages)
+        return {"choices": [{"message": {"content": '{"success": false, "reason": "empty", "extracted_result": ""}'}}]}
+
+    step = {"step": 1, "action": "Search", "target": "rare topic", "goal": "find info"}
+    tool_history = [
+        "→ Called: web_search(rare topic)",
+        "  ✓ web_search: no results found",
+    ]
+
+    with patch.object(ex, "_llm_with_retry", side_effect=fake_llm_with_retry):
+        await ex._evaluate_step(step, "I searched but found nothing useful", {}, tool_history=tool_history)
+
+    combined = " ".join(m.get("content", "") for m in captured_prompts)
+    assert "ALL_EMPTY" in combined
+
+
+async def test_evaluate_step_evidence_quality_has_data():
+    """HAS_DATA must be injected when at least one tool returned useful content."""
+    ex = make_executor()
+    captured_prompts = []
+
+    async def fake_llm_with_retry(messages, **kwargs):
+        captured_prompts.extend(messages)
+        return {"choices": [{"message": {"content": '{"success": true, "reason": "found it", "extracted_result": "$42M"}'}}]}
+
+    step = {"step": 1, "action": "Search", "target": "revenue", "goal": "find Q3 revenue"}
+    tool_history = [
+        "→ Called: web_search(Q3 revenue)",
+        "  ✓ web_search: Q3 revenue was $42M according to the annual report",
+    ]
+
+    with patch.object(ex, "_llm_with_retry", side_effect=fake_llm_with_retry):
+        await ex._evaluate_step(step, "Q3 revenue was $42M", {}, tool_history=tool_history)
+
+    combined = " ".join(m.get("content", "") for m in captured_prompts)
+    assert "HAS_DATA" in combined
+
+
+async def test_evaluate_step_prompt_contains_anti_filler_rules():
+    """The eval prompt must contain explicit anti-filler and fabrication rules."""
+    ex = make_executor()
+    captured_prompts = []
+
+    async def fake_llm_with_retry(messages, **kwargs):
+        captured_prompts.extend(messages)
+        return {"choices": [{"message": {"content": '{"success": false, "reason": "filler", "extracted_result": ""}'}}]}
+
+    step = {"step": 1, "action": "Research", "target": "x", "goal": "find x"}
+
+    with patch.object(ex, "_llm_with_retry", side_effect=fake_llm_with_retry):
+        await ex._evaluate_step(step, "I found some general information about x.", {}, tool_history=[])
+
+    combined = " ".join(m.get("content", "") for m in captured_prompts)
+    assert "fabricat" in combined.lower()
+    assert "vague" in combined.lower()

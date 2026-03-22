@@ -432,15 +432,6 @@ class AgentBaseExecutor:
                 "content": "Error: max_recursion_depth limit reached",
                 "success": False,
             }
-        if repl_state.get("estimated_cost", 0.0) >= repl_state.get("max_cost_usd", 1.0):
-            return {
-                "tool_call_id": "",
-                "role": "tool",
-                "name": "sub_call",
-                "content": "Error: max_cost_usd limit reached",
-                "success": False,
-            }
-
         prompt = args.get("prompt", "")
         if not prompt:
             return {
@@ -461,14 +452,24 @@ class AgentBaseExecutor:
         repl_state["sub_call_count"] = repl_state.get("sub_call_count", 0) + 1
         old_depth = repl_state.get("recursion_depth", 0)
         repl_state["recursion_depth"] = old_depth + 1
-        # Reserve the cost estimate BEFORE awaiting the LLM call.  This closes
-        # the check-then-act window: parallel steps that share repl_state both
-        # see the updated total before their own LLM calls begin, so the cost
-        # guard at the top of this function is not bypassed when sub-calls from
-        # two concurrent steps are interleaved at the await point.
+        # Reserve cost BEFORE the first await, then check after.
+        # Increment-then-check (not check-then-increment) closes the parallel
+        # step window: if steps A and B each see cost = 0.9 (< limit 1.0) and
+        # would each pass a pre-increment guard, together they'd push the total
+        # to 1.8.  By incrementing first and reverting on over-budget we ensure
+        # that the second concurrent caller sees the already-updated total.
         estimated_tokens = len(prompt) // 4 + max_tokens
         _cost_delta = (estimated_tokens / 1000) * 0.001
         repl_state["estimated_cost"] = repl_state.get("estimated_cost", 0.0) + _cost_delta
+        if repl_state["estimated_cost"] > repl_state.get("max_cost_usd", 1.0):
+            repl_state["estimated_cost"] -= _cost_delta  # revert reservation
+            return {
+                "tool_call_id": "",
+                "role": "tool",
+                "name": "sub_call",
+                "content": "Error: max_cost_usd limit reached",
+                "success": False,
+            }
         try:
             response = await self.llm.chat_completion(
                 messages=[{"role": "user", "content": prompt}],
@@ -2760,14 +2761,23 @@ class GoalPursuitExecutor(HybridAgentExecutor, RLMAgentLoopExecutor):
         "  Target: {target}\n"
         "  Success criterion: {goal}\n\n"
         "Tool calls made during this step:\n{tool_history}\n\n"
+        "Tool evidence quality: {evidence_quality}\n\n"
         "Agent final response:\n{response}\n\n"
-        "Evaluate based on BOTH the tool calls and the final response. "
-        "A step that called relevant tools with meaningful results may be successful "
-        "even if the final text is terse. "
-        "Be skeptical of claimed results that are not backed by tool calls — "
-        "an assertion without evidence should not be marked successful.\n\n"
+        "Evaluation rules (apply strictly in order):\n"
+        "1. If evidence_quality is ALL_FAILED or ALL_EMPTY: the step FAILED unless "
+        "the response explicitly acknowledges it could not find the data. "
+        "A fabricated or guessed answer built on empty tool results is ALWAYS a failure.\n"
+        "2. Reject vague success language without cited facts: phrases like "
+        "'I found some general information', 'the results suggest', 'based on my "
+        "research', or 'it appears that' — without quoting specific facts visible "
+        "in the tool outputs above — indicate the agent is fabricating. Mark as FAILED.\n"
+        "3. For informational steps (research, search, fetch, read): "
+        "extracted_result must be a specific fact, number, name, date, or direct "
+        "quotation from the tool outputs — not a restatement of the original question.\n"
+        "4. A terse response backed by real tool data is better than a long response "
+        "backed by no data.\n\n"
         "Reply with JSON: {{\"success\": true/false, \"reason\": \"brief explanation\", "
-        "\"extracted_result\": \"key output or finding from this step\"}}"
+        "\"extracted_result\": \"specific key finding from tool outputs, or empty string if none\"}}"
     )
 
     _DEFAULT_REPLAN_PROMPT = (
@@ -3155,6 +3165,34 @@ class GoalPursuitExecutor(HybridAgentExecutor, RLMAgentLoopExecutor):
             tool_history_str = "\n".join(tool_history[:40])
         else:
             tool_history_str = "(no tool calls)"
+
+        # Classify the quality of tool evidence so the evaluator can apply
+        # hard rules instead of relying on tone matching alone.
+        # Lines starting with "  ✓" are successful tool results;
+        # lines starting with "  ✗" are errors.
+        _ok_lines = [l for l in (tool_history or []) if l.startswith("  ✓")]
+        _fail_lines = [l for l in (tool_history or []) if l.startswith("  ✗")]
+        _total_result_lines = len(_ok_lines) + len(_fail_lines)
+        if _total_result_lines == 0:
+            evidence_quality = "NO_TOOLS_CALLED — no external data was retrieved"
+        elif not _ok_lines:
+            evidence_quality = (
+                f"ALL_FAILED — all {len(_fail_lines)} tool call(s) returned errors"
+            )
+        elif all(
+            self._is_unhelpful_result(l.split(": ", 1)[-1] if ": " in l else l)
+            for l in _ok_lines
+        ):
+            evidence_quality = (
+                "ALL_EMPTY — tool(s) completed but returned no useful data "
+                "(empty, 'not found', or error-like responses)"
+            )
+        else:
+            evidence_quality = (
+                f"HAS_DATA — {len(_ok_lines)} tool call(s) returned content "
+                f"({len(_fail_lines)} failed)"
+            )
+
         prompt = config.get("eval_prompt", self._DEFAULT_EVAL_PROMPT)
         prompt = (
             prompt
@@ -3163,6 +3201,7 @@ class GoalPursuitExecutor(HybridAgentExecutor, RLMAgentLoopExecutor):
             .replace("{target}", step.get("target", ""))
             .replace("{goal}", step.get("goal", step.get("action", "")))
             .replace("{tool_history}", tool_history_str)
+            .replace("{evidence_quality}", evidence_quality)
             .replace("{response}", execution_result[:int(config.get("eval_response_max_chars", 8000))])
         )
         model = config.get("model") or settings.get("default_model")
@@ -3361,6 +3400,16 @@ class GoalPursuitExecutor(HybridAgentExecutor, RLMAgentLoopExecutor):
                     f"## Available Step Results\n"
                     f"Previous steps stored their full outputs as variables: {var_list}.\n"
                     f"Use GetVariable(\"<name>\") to retrieve any of them."
+                )
+        if repl_state:
+            run_insights = repl_state.get("_run_insights", [])
+            if run_insights:
+                insight_lines = "\n".join(f"  - {ins}" for ins in run_insights[-5:])
+                parts.append(
+                    f"## Established Findings\n"
+                    f"The following facts have been confirmed by prior steps. "
+                    f"Do NOT re-derive or re-search for information already known:\n"
+                    f"{insight_lines}"
                 )
         step_risk = step.get("risk", "low")
         step_reversible = step.get("reversible", True)
@@ -3628,6 +3677,137 @@ class GoalPursuitExecutor(HybridAgentExecutor, RLMAgentLoopExecutor):
         return compressed_count
 
     # ------------------------------------------------------------------
+    # Synthesis
+    # ------------------------------------------------------------------
+
+    async def _synthesize_results(
+        self,
+        completed: list,
+        results: list,
+        repl_state: dict,
+        config: dict,
+        user_goal: str,
+        tools_list: list,
+        tool_library,
+        model: str,
+        max_tokens: int,
+        tool_error_strategy: str,
+        large_output_threshold: int,
+        goal_pursuit_trace: list = None,
+        stream_queue=None,
+        thinking_steps: list = None,
+    ) -> str:
+        """Synthesize step results into a final coherent answer.
+
+        Extracted as a class method (not a closure) so it is independently
+        testable.  Improvements over the original nested version:
+
+        - **All-empty guard**: if no step produced usable output, returns a
+          structured failure message rather than a confused synthesizer answer.
+        - **Inline small results**: results <= 600 chars are embedded directly
+          in the prompt; the synthesizer does not need to call GetVariable for
+          them, reducing brittleness.
+        - **Reasoning history**: the last 5 entries of ``_step_reasoning_history``
+          are appended to the system message so the synthesizer can explain
+          why certain steps failed or what trade-offs were made.
+        """
+        # Guard: if every step failed to produce content, return a clear
+        # failure message rather than running synthesis on empty data.
+        has_any_content = any(
+            r.get("extracted_result") or
+            repl_state.get("variables", {}).get(f"step_{s.get('step', i + 1)}_result")
+            for i, (s, r) in enumerate(
+                zip(completed, list(results) + [{}] * max(0, len(completed) - len(results)))
+            )
+        )
+        if not has_any_content:
+            return (
+                "Unable to produce a final answer: all plan steps failed to return "
+                "usable results. Review the step traces for details on what went wrong."
+            )
+
+        lines = []
+        for i, step in enumerate(completed):
+            r = results[i] if i < len(results) else {}
+            extracted = r.get("extracted_result", "")
+            var_key = f"step_{step.get('step', i + 1)}_result"
+            full_content = repl_state.get("variables", {}).get(var_key, "")
+
+            if full_content and len(full_content) <= 600:
+                # Small result — inline directly; no need for the LLM to call
+                # GetVariable, which it might skip if the hint seems sufficient.
+                lines.append(
+                    f"Step {step.get('step')}: {step.get('action')}: {step.get('target')}\n"
+                    f"Result: {full_content}"
+                )
+            elif full_content:
+                # Large result — provide a hint and GetVariable instruction.
+                hint = extracted[:80] if extracted else full_content[:80]
+                lines.append(
+                    f"Step {step.get('step')}: {step.get('action')}: {step.get('target')}\n"
+                    f"Hint: {hint}...\n"
+                    f"→ Call GetVariable(\"{var_key}\") to retrieve the full output."
+                )
+            elif extracted:
+                lines.append(
+                    f"Step {step.get('step')}: {step.get('action')}: {step.get('target')}\n"
+                    f"Result: {extracted}"
+                )
+            else:
+                lines.append(
+                    f"Step {step.get('step')}: {step.get('action')}: {step.get('target')}\n"
+                    f"Result: (step produced no output)"
+                )
+
+        step_summary = "\n\n".join(lines)
+
+        # Include step reasoning history so the synthesizer can explain why
+        # steps succeeded/failed and surface trade-offs in its final answer.
+        reasoning_history = repl_state.get("_step_reasoning_history", [])
+        reasoning_section = ""
+        if reasoning_history:
+            reasoning_section = (
+                "\n\n## Step Reasoning History\n"
+                + "\n".join(reasoning_history[-5:])
+            )
+
+        prompt = config.get("synthesis_prompt", self._DEFAULT_SYNTHESIS_PROMPT)
+        prompt = (
+            prompt
+            .replace("{original_request}", user_goal)
+            .replace("{step_summary}", step_summary)
+        )
+        var_note = self._build_variable_system_note(large_output_threshold)
+        synth_messages = [
+            {"role": "system", "content": f"{prompt}{reasoning_section}\n\n{var_note}"},
+            {"role": "user", "content": f"Provide a final answer for: {user_goal}"},
+        ]
+
+        _trace = goal_pursuit_trace if goal_pursuit_trace is not None else []
+        _thinking = thinking_steps if thinking_steps is not None else []
+
+        final_response, _, _ = await self._run_hybrid_loop(
+            llm_messages=synth_messages,
+            tools_list=tools_list,
+            tool_library=tool_library,
+            repl_state=repl_state,
+            model=model,
+            temperature=float(config.get("temperature", 0.7)),
+            max_tokens=max_tokens,
+            max_iterations=5,
+            max_llm_retries=int(config.get("max_llm_retries", 3)),
+            retry_delay=float(config.get("retry_delay", 1.0)),
+            tool_error_strategy=tool_error_strategy,
+            large_output_threshold=large_output_threshold,
+            trace=_trace,
+            stream_queue=stream_queue,
+            thinking_steps=_thinking,
+        )
+        if final_response and "choices" in final_response:
+            return final_response["choices"][0]["message"].get("content") or ""
+        return ""
+
+    # ------------------------------------------------------------------
     # Pre-step reasoning
     # ------------------------------------------------------------------
 
@@ -3689,6 +3869,17 @@ class GoalPursuitExecutor(HybridAgentExecutor, RLMAgentLoopExecutor):
                 f"{reasoning_history[:800]}\n"
             )
 
+        # Established findings: what the agent has actually discovered so far.
+        # This is the semantic accumulation layer — WHAT is known, not HOW to act.
+        run_insights = repl_state.get("_run_insights", [])
+        insights_note = ""
+        if run_insights:
+            insights_note = (
+                "\nEstablished findings from prior steps (treat as known facts):\n"
+                + "\n".join(f"  - {ins}" for ins in run_insights[-5:])
+                + "\n"
+            )
+
         prompt = (
             "You are about to execute one step of a multi-step plan.\n"
             "In 1-3 concise sentences reason about:\n"
@@ -3703,6 +3894,7 @@ class GoalPursuitExecutor(HybridAgentExecutor, RLMAgentLoopExecutor):
             f"Success criterion: {step.get('goal', step.get('action', ''))}\n"
             f"{tools_note}"
             f"{var_note}"
+            f"{insights_note}"
             f"{history_note}\n"
             "Respond with only your brief reasoning — no JSON, no preamble."
         )
@@ -3960,6 +4152,13 @@ class GoalPursuitExecutor(HybridAgentExecutor, RLMAgentLoopExecutor):
             # Cross-replan memory: accumulates failed attempts so the next
             # replanner knows what approaches to avoid.
             "_replan_history": [],
+            # Semantic belief accumulation: after each successful step the
+            # evaluator's extracted finding is appended here.  Unlike
+            # _step_reasoning_history (which is tactical — "use tool X"), this
+            # records WHAT was discovered — "revenue is $42M", "page not found".
+            # Injected into pre-step reasoning and the step system prompt so
+            # each new step builds on what is already known.
+            "_run_insights": [],
         }
         # Restore persisted variables from a previous interrupted run.
         restored_vars = input_data.pop("_repl_variables", {})
@@ -4306,6 +4505,15 @@ class GoalPursuitExecutor(HybridAgentExecutor, RLMAgentLoopExecutor):
                 })
 
                 if evaluation["success"]:
+                    # Accumulate semantic findings so later steps know what is
+                    # already established.  This is the "what do I now know"
+                    # layer — distinct from _step_reasoning_history which records
+                    # tactical how-to notes.
+                    _insight = evaluation.get("extracted_result", "")[:150]
+                    if _insight:
+                        repl_state.setdefault("_run_insights", []).append(
+                            f"Step {step.get('step')} ({step.get('action', '')}): {_insight}"
+                        )
                     goal_pursuit_trace.append(step_trace)
                     return {
                         "step": step, "success": True,
@@ -4863,54 +5071,24 @@ class GoalPursuitExecutor(HybridAgentExecutor, RLMAgentLoopExecutor):
             return plan
 
         async def _synthesize(completed: list, results: list) -> str:
-            lines = []
-            for i, step in enumerate(completed):
-                r = results[i] if i < len(results) else {}
-                extracted = r.get("extracted_result", "")[:80]
-                var_key = f"step_{step.get('step', i + 1)}_result"
-                if var_key in repl_state["variables"]:
-                    lines.append(
-                        f"Step {step.get('step')}: {step.get('action')}: {step.get('target')}\n"
-                        f"Hint: {extracted}...\n"
-                        f"→ Call GetVariable(\"{var_key}\") to retrieve the full output."
-                    )
-                else:
-                    lines.append(
-                        f"Step {step.get('step')}: {step.get('action')}: {step.get('target')}\n"
-                        f"Result: {extracted}"
-                    )
-            step_summary = "\n\n".join(lines)
-            prompt = config.get("synthesis_prompt", self._DEFAULT_SYNTHESIS_PROMPT)
-            prompt = (
-                prompt
-                .replace("{original_request}", user_goal)
-                .replace("{step_summary}", step_summary)
-            )
-            var_note = self._build_variable_system_note(large_output_threshold)
-            synth_messages = [
-                {"role": "system", "content": f"{prompt}\n\n{var_note}"},
-                {"role": "user", "content": f"Provide a final answer for: {user_goal}"},
-            ]
-            final_response, _, _ = await self._run_hybrid_loop(
-                llm_messages=synth_messages,
+            # Delegate to the extracted class method so this path is testable
+            # in isolation via GoalPursuitExecutor._synthesize_results().
+            return await self._synthesize_results(
+                completed=completed,
+                results=results,
+                repl_state=repl_state,
+                config=config,
+                user_goal=user_goal,
                 tools_list=tools_list,
                 tool_library=tool_library,
-                repl_state=repl_state,
                 model=model,
-                temperature=float(config.get("temperature", 0.7)),
                 max_tokens=max_tokens,
-                max_iterations=5,
-                max_llm_retries=int(config.get("max_llm_retries", 3)),
-                retry_delay=float(config.get("retry_delay", 1.0)),
                 tool_error_strategy=tool_error_strategy,
                 large_output_threshold=large_output_threshold,
-                trace=goal_pursuit_trace,
+                goal_pursuit_trace=goal_pursuit_trace,
                 stream_queue=stream_queue,
                 thinking_steps=thinking_steps,
             )
-            if final_response and "choices" in final_response:
-                return final_response["choices"][0]["message"].get("content") or ""
-            return ""
 
         async def _fallback_hybrid() -> dict:
             """Empty plan — run hybrid loop directly on original messages."""
