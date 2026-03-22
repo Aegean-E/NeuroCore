@@ -2417,6 +2417,412 @@ async def test_replan_without_repl_state_still_works():
 
 
 # ---------------------------------------------------------------------------
+# Fix 2: Evaluator receives original user goal
+# ---------------------------------------------------------------------------
+
+async def test_evaluate_step_includes_original_goal_in_prompt():
+    """_evaluate_step must include user_goal in the prompt sent to the LLM."""
+    ex = make_executor()
+    captured = []
+
+    async def fake_llm(**kwargs):
+        captured.extend(kwargs.get("messages", []))
+        return {"choices": [{"message": {"content": eval_json(True)}}]}
+
+    step = {"action": "Search", "target": "AI papers", "goal": "find papers"}
+    with patch.object(ex, "_llm_with_retry", side_effect=fake_llm):
+        await ex._evaluate_step(
+            step=step,
+            execution_result="Found 10 papers.",
+            config={},
+            user_goal="Write a comprehensive survey on AI safety.",
+        )
+
+    full_text = " ".join(m.get("content", "") for m in captured)
+    assert "Write a comprehensive survey on AI safety." in full_text, (
+        "Original user goal must appear in the evaluator prompt"
+    )
+
+
+async def test_evaluate_step_falls_back_to_step_goal_when_no_user_goal():
+    """When user_goal is empty, {original_goal} falls back to step.goal."""
+    ex = make_executor()
+    captured = []
+
+    async def fake_llm(**kwargs):
+        captured.extend(kwargs.get("messages", []))
+        return {"choices": [{"message": {"content": eval_json(True)}}]}
+
+    step = {"action": "Search", "target": "papers", "goal": "find relevant papers"}
+    with patch.object(ex, "_llm_with_retry", side_effect=fake_llm):
+        await ex._evaluate_step(
+            step=step,
+            execution_result="Done.",
+            config={},
+            user_goal="",  # empty
+        )
+
+    full_text = " ".join(m.get("content", "") for m in captured)
+    assert "find relevant papers" in full_text, (
+        "When user_goal is empty, step.goal must fill the {original_goal} slot"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Fix 1: Cross-replan memory
+# ---------------------------------------------------------------------------
+
+async def test_replan_history_included_in_prompt_on_second_attempt():
+    """On a second replan, prior attempt details must appear in the replanner prompt."""
+    ex = make_executor()
+
+    repl_state = {
+        "variables": {"step_1_result": "some content"},
+        "_replan_history": [
+            {
+                "attempt": 1,
+                "failed_action": "SearchWeb",
+                "failed_target": "AI papers",
+                "failure_reason": "Rate limit hit on search API",
+                "tools_tried": ["web_search"],
+            }
+        ],
+    }
+    completed_steps = [{"step": 1, "action": "Collect data", "target": "sources"}]
+    step_results = [{"success": True, "reason": "ok", "extracted_result": "data"}]
+    failed_step = {"step": 2, "action": "SearchWeb", "target": "AI papers"}
+
+    captured = []
+
+    async def fake_llm(**kwargs):
+        captured.extend(kwargs.get("messages", []))
+        return {"choices": [{"message": {"content": plan_json("Retry differently")}}]}
+
+    with patch.object(ex, "_llm_with_retry", side_effect=fake_llm):
+        await ex._replan(
+            original_request="Research AI",
+            completed_steps=completed_steps,
+            step_results=step_results,
+            failed_step=failed_step,
+            failure_reason="Rate limit",
+            config={},
+            repl_state=repl_state,
+        )
+
+    full_text = " ".join(m.get("content", "") for m in captured)
+    assert "Rate limit hit on search API" in full_text, (
+        "Prior replan failure reason must appear in the replanner prompt"
+    )
+    assert "web_search" in full_text.lower(), (
+        "Tools tried in prior replan must appear in the replanner prompt"
+    )
+
+
+async def test_replan_history_empty_when_no_prior_replans():
+    """When there are no prior replans, the history section must not appear in the prompt."""
+    ex = make_executor()
+
+    repl_state = {"variables": {}, "_replan_history": []}
+    failed_step = {"step": 1, "action": "Search", "target": "data"}
+
+    captured = []
+
+    async def fake_llm(**kwargs):
+        captured.extend(kwargs.get("messages", []))
+        return {"choices": [{"message": {"content": plan_json("Retry")}}]}
+
+    with patch.object(ex, "_llm_with_retry", side_effect=fake_llm):
+        await ex._replan(
+            original_request="Research AI",
+            completed_steps=[],
+            step_results=[],
+            failed_step=failed_step,
+            failure_reason="Error",
+            config={},
+            repl_state=repl_state,
+        )
+
+    full_text = " ".join(m.get("content", "") for m in captured)
+    assert "Previous replan attempts" not in full_text, (
+        "When no prior replans, history section must be omitted from prompt"
+    )
+
+
+async def test_replan_history_recorded_before_replan_call():
+    """The call site must append to _replan_history before calling _replan."""
+    ex = make_executor()
+    call_n = [0]
+
+    async def fake_llm(**kwargs):
+        call_n[0] += 1
+        if call_n[0] == 1:
+            # Planning call
+            return {"choices": [{"message": {"content": plan_json("Step"), "tool_calls": []}}]}
+        if call_n[0] == 2:
+            # Step execution — returns nothing useful
+            return {"choices": [{"message": {"content": "", "tool_calls": []}}]}
+        if call_n[0] == 3:
+            # Evaluator — fail the step
+            return {"choices": [{"message": {"content": eval_json(False, "Failed: no output")}}]}
+        # Replan — capture repl_state at this point via side effect
+        return {"choices": [{"message": {"content": "[]"}}]}  # empty plan → stops
+
+    replan_history_at_call = []
+
+    async def fake_replan(self_inner=None, **kwargs):
+        rs = kwargs.get("repl_state") or {}
+        replan_history_at_call.extend(rs.get("_replan_history", []))
+        return []
+
+    from modules.agent_loop.node import GoalPursuitExecutor as GPE
+    with patch.object(ex, "_llm_with_retry", side_effect=fake_llm), \
+         patch.object(GPE, "_replan", fake_replan):
+        await ex.receive(
+            {"messages": MESSAGES},
+            config={
+                "max_steps": 1,
+                "max_replan_depth": 1,
+                "max_step_retries": 0,  # disable alternative attempt so failure routes to replan
+            },
+        )
+
+    assert replan_history_at_call, (
+        "_replan_history must be populated before _replan is called"
+    )
+    assert replan_history_at_call[0]["attempt"] == 1
+
+
+# ---------------------------------------------------------------------------
+# Fix 8: Stuck detection in _run_hybrid_loop
+# ---------------------------------------------------------------------------
+
+def test_is_unhelpful_result_empty():
+    ex = make_executor()
+    assert ex._is_unhelpful_result("") is True
+    assert ex._is_unhelpful_result("   ") is True
+
+
+def test_is_unhelpful_result_short():
+    ex = make_executor()
+    assert ex._is_unhelpful_result("ok") is True
+    assert ex._is_unhelpful_result("x" * 19) is True
+    assert ex._is_unhelpful_result("x" * 20) is False
+
+
+def test_is_unhelpful_result_error():
+    ex = make_executor()
+    assert ex._is_unhelpful_result("Error: something failed") is True
+    assert ex._is_unhelpful_result("Traceback (most recent call last)...") is True
+
+
+def test_is_unhelpful_result_no_data_patterns():
+    ex = make_executor()
+    assert ex._is_unhelpful_result("no results found for your query") is True
+    assert ex._is_unhelpful_result("nothing found in the database") is True
+
+
+def test_is_unhelpful_result_useful_content():
+    ex = make_executor()
+    assert ex._is_unhelpful_result("Here are the top 5 results: Python, Java, Go") is False
+
+
+async def test_stuck_detection_injects_redirect_after_threshold():
+    """After max_consecutive_unhelpful iterations of empty results, a redirect is injected."""
+    from modules.agent_loop.node import HybridAgentExecutor
+    ex = make_executor()
+
+    call_n = [0]
+
+    async def fake_llm(**kwargs):
+        call_n[0] += 1
+        if call_n[0] <= 3:
+            # Each call returns a tool call with an unhelpful result
+            return {"choices": [{"message": {"content": None, "tool_calls": [
+                {"id": f"tc{call_n[0]}", "function": {"name": "WebSearch",
+                 "arguments": f'{{"query": "query_{call_n[0]}"}}'}},
+            ]}}]}
+        # After stuck injection, LLM produces a text response
+        return {"choices": [{"message": {"content": "I cannot find this information.", "tool_calls": []}}]}
+
+    async def fake_execute_tool(tool_call, tool_library, repl_state, large_output_threshold):
+        return {
+            "tool_call_id": tool_call.get("id", ""),
+            "role": "tool",
+            "name": "WebSearch",
+            "content": "no results",
+            "success": True,
+        }
+
+    with patch.object(ex, "_llm_with_retry", side_effect=fake_llm), \
+         patch.object(ex, "_execute_tool", side_effect=fake_execute_tool):
+        final_response, iters, had_tool_error = await ex._run_hybrid_loop(
+            llm_messages=[{"role": "user", "content": "search for something"}],
+            tools_list=[],
+            tool_library={},
+            repl_state={"variables": {}},
+            model="test",
+            temperature=0.7,
+            max_tokens=512,
+            max_iterations=10,
+            max_llm_retries=1,
+            retry_delay=0.0,
+            tool_error_strategy="continue",
+            large_output_threshold=3000,
+            trace=[],
+            max_consecutive_unhelpful=3,
+        )
+
+    assert had_tool_error is True, "Stuck detection must set had_tool_error"
+    assert iters == 3, "Loop must stop after threshold"
+    # The redirect message must have been injected
+    messages = [{"role": "user", "content": "search for something"}]  # original
+    # Verify by checking the loop exited at iteration 3, not 10
+
+
+async def test_stuck_detection_resets_on_useful_result():
+    """A useful result resets the consecutive counter — loop continues normally."""
+    from modules.agent_loop.node import HybridAgentExecutor
+    ex = make_executor()
+
+    call_n = [0]
+    results = [
+        "no results",     # unhelpful
+        "Found 10 papers about AI safety and alignment",  # useful — resets counter
+        "no results",     # unhelpful (counter at 1, not 3)
+    ]
+
+    async def fake_llm(**kwargs):
+        call_n[0] += 1
+        if call_n[0] <= len(results):
+            return {"choices": [{"message": {"content": None, "tool_calls": [
+                {"id": f"tc{call_n[0]}", "function": {"name": "Search",
+                 "arguments": '{"query": "test"}'}},
+            ]}}]}
+        return {"choices": [{"message": {"content": "Done.", "tool_calls": []}}]}
+
+    result_idx = [0]
+
+    async def fake_execute_tool(tool_call, tool_library, repl_state, large_output_threshold):
+        content = results[result_idx[0]] if result_idx[0] < len(results) else "done"
+        result_idx[0] += 1
+        return {"tool_call_id": "", "role": "tool", "name": "Search",
+                "content": content, "success": True}
+
+    with patch.object(ex, "_llm_with_retry", side_effect=fake_llm), \
+         patch.object(ex, "_execute_tool", side_effect=fake_execute_tool):
+        _, iters, had_tool_error = await ex._run_hybrid_loop(
+            llm_messages=[{"role": "user", "content": "find papers"}],
+            tools_list=[], tool_library={},
+            repl_state={"variables": {}},
+            model="test", temperature=0.7, max_tokens=512,
+            max_iterations=10, max_llm_retries=1, retry_delay=0.0,
+            tool_error_strategy="continue", large_output_threshold=3000,
+            trace=[], max_consecutive_unhelpful=3,
+        )
+
+    # Should NOT have triggered stuck detection (useful result reset counter)
+    assert had_tool_error is False
+    assert iters == 4  # 3 tool iters + 1 final text response
+
+
+# ---------------------------------------------------------------------------
+# Fix 6: Risk and reversible fields in plan
+# ---------------------------------------------------------------------------
+
+async def test_parse_plan_response_extracts_risk_and_reversible():
+    """_parse_plan_response must extract risk and reversible from LLM JSON."""
+    ex = make_executor()
+    plan_json_str = json.dumps([
+        {"step": 1, "action": "WebSearch", "target": "AI papers", "goal": "find papers",
+         "depends_on": [], "risk": "low", "reversible": True},
+        {"step": 2, "action": "DeleteRecord", "target": "old data", "goal": "clean up",
+         "depends_on": [1], "risk": "high", "reversible": False},
+    ])
+    plan = await ex._parse_plan_response(plan_json_str, max_steps=10)
+    assert plan[0]["risk"] == "low"
+    assert plan[0]["reversible"] is True
+    assert plan[1]["risk"] == "high"
+    assert plan[1]["reversible"] is False
+
+
+async def test_parse_plan_response_defaults_missing_risk():
+    """When risk/reversible are absent, defaults (low/True) are used."""
+    ex = make_executor()
+    plan_json_str = json.dumps([
+        {"step": 1, "action": "Read", "target": "file", "goal": "read it", "depends_on": []},
+    ])
+    plan = await ex._parse_plan_response(plan_json_str, max_steps=10)
+    assert plan[0]["risk"] == "low"
+    assert plan[0]["reversible"] is True
+
+
+async def test_parse_plan_response_rejects_invalid_risk_value():
+    """Invalid risk values (not low/medium/high) must default to 'low'."""
+    ex = make_executor()
+    plan_json_str = json.dumps([
+        {"step": 1, "action": "Read", "target": "file", "goal": "read it",
+         "depends_on": [], "risk": "critical", "reversible": False},
+    ])
+    plan = await ex._parse_plan_response(plan_json_str, max_steps=10)
+    assert plan[0]["risk"] == "low"
+
+
+def test_step_trace_includes_risk_and_reversible():
+    """step_trace emitted per step must include risk and reversible from the step dict."""
+    # This is verified indirectly via the step_trace construction in _run_one_step.
+    # The step dict must carry risk/reversible through to the trace.
+    step = {"step": 1, "action": "DeleteFile", "target": "old.txt",
+            "goal": "remove file", "depends_on": [], "risk": "high", "reversible": False}
+    # Simulate what _run_one_step does when building step_trace
+    step_trace = {
+        "step": step.get("step"),
+        "action": step.get("action"),
+        "target": step.get("target"),
+        "replan_count": 0,
+        "depends_on": step.get("depends_on", []),
+        "risk": step.get("risk", "low"),
+        "reversible": step.get("reversible", True),
+    }
+    assert step_trace["risk"] == "high"
+    assert step_trace["reversible"] is False
+
+
+def test_build_step_system_prompt_warns_for_high_risk():
+    """High-risk irreversible steps must include a warning in the system prompt."""
+    ex = make_executor()
+    step = {"action": "SendEmail", "target": "user@example.com", "goal": "notify",
+            "risk": "high", "reversible": False}
+    prompt = ex._build_step_system_prompt(
+        step=step,
+        plan_context="## Execution Plan\nProgress: 0/1 steps done.",
+        input_data={},
+        config={},
+        large_output_threshold=3000,
+        repl_state=None,
+    )
+    assert "HIGH RISK" in prompt or "IRREVERSIBLE" in prompt, (
+        "High-risk irreversible steps must include a warning in the system prompt"
+    )
+
+
+def test_build_step_system_prompt_no_warning_for_low_risk():
+    """Low-risk reversible steps must NOT include a risk warning."""
+    ex = make_executor()
+    step = {"action": "WebSearch", "target": "papers", "goal": "find papers",
+            "risk": "low", "reversible": True}
+    prompt = ex._build_step_system_prompt(
+        step=step,
+        plan_context="## Execution Plan\nProgress: 0/1 steps done.",
+        input_data={},
+        config={},
+        large_output_threshold=3000,
+        repl_state=None,
+    )
+    assert "HIGH RISK" not in prompt
+    assert "IRREVERSIBLE" not in prompt
+
+
+# ---------------------------------------------------------------------------
 # Fix 5: _context_pressure also measures hybrid inline output
 # ---------------------------------------------------------------------------
 

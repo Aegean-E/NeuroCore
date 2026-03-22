@@ -2087,6 +2087,28 @@ class HybridAgentExecutor(AgentBaseExecutor):
             "success": success,
         }
 
+    @staticmethod
+    def _is_unhelpful_result(content: str) -> bool:
+        """Return True when a tool result is too sparse to be useful.
+
+        Used by stuck detection: if all results in N consecutive iterations are
+        unhelpful the loop injects a redirect message and stops.
+        """
+        if not content:
+            return True
+        stripped = content.strip()
+        if len(stripped) < 20:
+            return True
+        lower = stripped.lower()
+        if lower.startswith("error") or lower.startswith("traceback"):
+            return True
+        # Common "no data" patterns returned by search/read tools
+        _NO_DATA = (
+            "no results", "not found", "no data", "empty", "none",
+            "0 results", "nothing found", "could not find",
+        )
+        return any(p in lower[:120] for p in _NO_DATA)
+
     async def _run_hybrid_loop(
         self,
         llm_messages: list,
@@ -2104,6 +2126,7 @@ class HybridAgentExecutor(AgentBaseExecutor):
         trace: list,
         stream_queue: asyncio.Queue = None,
         thinking_steps: list = None,
+        max_consecutive_unhelpful: int = 3,
     ) -> tuple:
         """Core hybrid loop.  Returns (final_response, iterations, had_tool_error)."""
         # Fix 2: use local thinking_steps instead of instance-level state
@@ -2113,6 +2136,7 @@ class HybridAgentExecutor(AgentBaseExecutor):
         iterations = 0
         final_response = None
         had_tool_error = False
+        _consecutive_unhelpful = 0  # iterations where every result was unhelpful
 
         for iteration in range(max_iterations):
             # Reset per-iteration: dedup catches duplicate calls within a single
@@ -2223,6 +2247,40 @@ class HybridAgentExecutor(AgentBaseExecutor):
             trace.append(iteration_trace)
 
             if tool_error_occurred and tool_error_strategy == "stop":
+                break
+
+            # ── Stuck detection ───────────────────────────────────────────
+            # Count this iteration as "unhelpful" if every tool result was
+            # empty, an error, or matched a no-data pattern.
+            _iter_tool_results = [
+                msg for msg in llm_messages[-len(tool_calls):]
+                if isinstance(msg, dict) and msg.get("role") == "tool"
+            ]
+            if _iter_tool_results and all(
+                self._is_unhelpful_result(msg.get("content") or "")
+                for msg in _iter_tool_results
+            ):
+                _consecutive_unhelpful += 1
+            else:
+                _consecutive_unhelpful = 0
+
+            if (
+                max_consecutive_unhelpful > 0
+                and _consecutive_unhelpful >= max_consecutive_unhelpful
+            ):
+                _stuck_msg = (
+                    f"[STUCK DETECTION] The last {_consecutive_unhelpful} consecutive "
+                    "tool call iterations all returned empty, error, or no-data results. "
+                    "Stop repeating the same approach. Either conclude that the information "
+                    "is unavailable and state that clearly, or try a fundamentally different "
+                    "tool or strategy. Do NOT call the same tools again."
+                )
+                llm_messages.append({"role": "user", "content": _stuck_msg})
+                had_tool_error = True
+                logger.warning(
+                    f"[HybridLoop] Stuck after {_consecutive_unhelpful} "
+                    "unhelpful iterations — injecting redirect"
+                )
                 break
 
         return final_response, iterations, had_tool_error
@@ -2672,7 +2730,12 @@ class GoalPursuitExecutor(HybridAgentExecutor, RLMAgentLoopExecutor):
         "- Return a JSON array of steps.\n"
         "- Each step: {\"step\": N, \"action\": \"tool name or specific action\", "
         "\"target\": \"what it applies to\", "
-        "\"goal\": \"what success looks like\", \"depends_on\": []}\n"
+        "\"goal\": \"what success looks like\", \"depends_on\": [], "
+        "\"risk\": \"low|medium|high\", \"reversible\": true|false}\n"
+        "- risk: assess the blast radius. \"low\" = read-only or no side effects. "
+        "\"medium\" = writes local state (files, DB rows). "
+        "\"high\" = sends network requests, deletes data, charges money, or has irreversible external effects.\n"
+        "- reversible: false if the action cannot be undone (sent email, deleted record, posted API call, etc.).\n"
         "- IMPORTANT: The 'action' field must match an available tool name wherever possible. "
         "Do not invent generic actions like 'open', 'navigate', 'access' when a specific tool exists. "
         "For example: use 'GetYouTubeTranscript' not 'open video', use 'WebSearch' not 'search the web'.\n"
@@ -2691,6 +2754,7 @@ class GoalPursuitExecutor(HybridAgentExecutor, RLMAgentLoopExecutor):
 
     _DEFAULT_EVAL_PROMPT = (
         "You are evaluating whether an agent successfully completed a step.\n\n"
+        "Overall user goal (ground truth — the step must serve this):\n{original_goal}\n\n"
         "Step:\n"
         "  Action: {action}\n"
         "  Target: {target}\n"
@@ -2699,7 +2763,9 @@ class GoalPursuitExecutor(HybridAgentExecutor, RLMAgentLoopExecutor):
         "Agent final response:\n{response}\n\n"
         "Evaluate based on BOTH the tool calls and the final response. "
         "A step that called relevant tools with meaningful results may be successful "
-        "even if the final text is terse.\n\n"
+        "even if the final text is terse. "
+        "Be skeptical of claimed results that are not backed by tool calls — "
+        "an assertion without evidence should not be marked successful.\n\n"
         "Reply with JSON: {{\"success\": true/false, \"reason\": \"brief explanation\", "
         "\"extracted_result\": \"key output or finding from this step\"}}"
     )
@@ -2713,6 +2779,7 @@ class GoalPursuitExecutor(HybridAgentExecutor, RLMAgentLoopExecutor):
         "  Target: {failed_target}\n"
         "  Failure reason: {failure_reason}\n\n"
         "Tool calls attempted during the failed step:\n{tool_history}\n\n"
+        "{replan_history_section}"
         "Create a revised plan for the REMAINING work (do not re-list completed steps). "
         "Use the tool call history above to understand what was tried and why it failed — "
         "your revised plan should take a different approach if the same tools/approach failed.\n\n"
@@ -2942,6 +3009,12 @@ class GoalPursuitExecutor(HybridAgentExecutor, RLMAgentLoopExecutor):
                         raw_deps = step.get("depends_on", [])
                         if not isinstance(raw_deps, list):
                             raw_deps = []
+                        # Validate risk field — only accept known values.
+                        raw_risk = step.get("risk", "low")
+                        risk = raw_risk if raw_risk in ("low", "medium", "high") else "low"
+                        # reversible defaults to True (safe assumption when missing).
+                        raw_rev = step.get("reversible", True)
+                        reversible = bool(raw_rev) if isinstance(raw_rev, bool) else True
                         plan.append({
                             "step": step_offset + i + 1,
                             "action": step.get("action", step.get("task", "unknown")),
@@ -2955,6 +3028,8 @@ class GoalPursuitExecutor(HybridAgentExecutor, RLMAgentLoopExecutor):
                                 step_offset + int(d) for d in raw_deps
                                 if str(d).lstrip("-").isdigit() and int(d) > 0
                             ],
+                            "risk": risk,
+                            "reversible": reversible,
                         })
                 return plan
         except (json.JSONDecodeError, ValueError):
@@ -3065,10 +3140,15 @@ class GoalPursuitExecutor(HybridAgentExecutor, RLMAgentLoopExecutor):
         execution_result: str,
         config: dict,
         tool_history: list = None,
+        user_goal: str = "",
     ) -> dict:
         """LLM judge: did the step's result actually satisfy its goal?
 
         Returns ``{"success": bool, "reason": str, "extracted_result": str}``.
+
+        ``user_goal`` is the original user request and acts as ground truth so
+        the evaluator can reject a step that succeeded locally but does not
+        actually serve the user's objective.
         """
         import re
         if tool_history:
@@ -3078,6 +3158,7 @@ class GoalPursuitExecutor(HybridAgentExecutor, RLMAgentLoopExecutor):
         prompt = config.get("eval_prompt", self._DEFAULT_EVAL_PROMPT)
         prompt = (
             prompt
+            .replace("{original_goal}", user_goal or step.get("goal", step.get("action", "")))
             .replace("{action}", step.get("action", ""))
             .replace("{target}", step.get("target", ""))
             .replace("{goal}", step.get("goal", step.get("action", "")))
@@ -3161,6 +3242,31 @@ class GoalPursuitExecutor(HybridAgentExecutor, RLMAgentLoopExecutor):
         else:
             tool_history_str = "(no tool calls recorded)"
 
+        # Build cross-replan memory section from accumulated history.
+        # This prevents the replanner from repeatedly proposing the same
+        # approach that already failed in a prior replan attempt.
+        replan_history = (repl_state or {}).get("_replan_history", [])
+        if replan_history:
+            history_lines = []
+            for entry in replan_history[-5:]:  # last 5 attempts
+                step_desc = (
+                    f"{entry.get('failed_action', '?')}: {entry.get('failed_target', '')}"
+                )
+                tools_tried = ", ".join(entry.get("tools_tried", [])) or "none"
+                history_lines.append(
+                    f"  - Attempt {entry.get('attempt', '?')}: "
+                    f"failed on \"{step_desc}\" "
+                    f"({entry.get('failure_reason', '')[:120]}). "
+                    f"Tools tried: {tools_tried}."
+                )
+            replan_history_section = (
+                "Previous replan attempts (DO NOT repeat these approaches):\n"
+                + "\n".join(history_lines)
+                + "\n\n"
+            )
+        else:
+            replan_history_section = ""
+
         prompt = config.get("replan_prompt", self._DEFAULT_REPLAN_PROMPT)
         prompt = (
             prompt
@@ -3170,6 +3276,7 @@ class GoalPursuitExecutor(HybridAgentExecutor, RLMAgentLoopExecutor):
             .replace("{failed_target}", failed_step.get("target", ""))
             .replace("{failure_reason}", failure_reason)
             .replace("{tool_history}", tool_history_str)
+            .replace("{replan_history_section}", replan_history_section)
         )
         model = config.get("model") or settings.get("default_model")
         response = await self._llm_with_retry(
@@ -3255,11 +3362,26 @@ class GoalPursuitExecutor(HybridAgentExecutor, RLMAgentLoopExecutor):
                     f"Previous steps stored their full outputs as variables: {var_list}.\n"
                     f"Use GetVariable(\"<name>\") to retrieve any of them."
                 )
+        step_risk = step.get("risk", "low")
+        step_reversible = step.get("reversible", True)
+        risk_note = ""
+        if step_risk == "high" or not step_reversible:
+            labels = []
+            if step_risk == "high":
+                labels.append("HIGH RISK")
+            if not step_reversible:
+                labels.append("IRREVERSIBLE")
+            risk_note = (
+                f"\n⚠️  Risk level: {' + '.join(labels)}. "
+                "This action may have external side effects that cannot be undone. "
+                "Proceed only if you are certain it is correct and necessary."
+            )
         parts.append(
             f"## Current Step\n"
             f"Action: {step.get('action', '')}\n"
             f"Target: {step.get('target', '')}\n"
             f"Success criterion: {step.get('goal', step.get('action', ''))}"
+            f"{risk_note}"
         )
         return "\n\n".join(parts)
 
@@ -3835,6 +3957,9 @@ class GoalPursuitExecutor(HybridAgentExecutor, RLMAgentLoopExecutor):
             # Required by _run_rlm_loop which reads/writes these keys directly.
             "stdout_history": list(input_data.get("stdout_history", [])),
             "final": None,
+            # Cross-replan memory: accumulates failed attempts so the next
+            # replanner knows what approaches to avoid.
+            "_replan_history": [],
         }
         # Restore persisted variables from a previous interrupted run.
         restored_vars = input_data.pop("_repl_variables", {})
@@ -3965,6 +4090,8 @@ class GoalPursuitExecutor(HybridAgentExecutor, RLMAgentLoopExecutor):
                     "target": step.get("target"),
                     "replan_count": replan_count,
                     "depends_on": step.get("depends_on", []),
+                    "risk": step.get("risk", "low"),
+                    "reversible": step.get("reversible", True),
                 }
                 if reasoning:
                     step_trace["reasoning"] = reasoning
@@ -4146,7 +4273,9 @@ class GoalPursuitExecutor(HybridAgentExecutor, RLMAgentLoopExecutor):
                 # ── Evaluate step outcome ─────────────────────────────────
                 if enable_step_evaluation:
                     evaluation = await self._evaluate_step(
-                        step, step_content, config, tool_history=tool_history
+                        step, step_content, config,
+                        tool_history=tool_history,
+                        user_goal=user_goal,
                     )
                 else:
                     has_error_flag = (
@@ -4268,7 +4397,9 @@ class GoalPursuitExecutor(HybridAgentExecutor, RLMAgentLoopExecutor):
                         )
 
                     if alt_content and enable_step_evaluation:
-                        alt_eval = await self._evaluate_step(step, alt_content, config)
+                        alt_eval = await self._evaluate_step(
+                            step, alt_content, config, user_goal=user_goal
+                        )
                     elif alt_content:
                         alt_eval = {
                             "success": True, "reason": "ok",
@@ -4483,6 +4614,22 @@ class GoalPursuitExecutor(HybridAgentExecutor, RLMAgentLoopExecutor):
                     replan_count += 1
                     failure_reason = replan_trigger["failure_reason"]
                     failed_step = replan_trigger["step"]
+
+                    # Record this attempt in cross-replan memory BEFORE calling
+                    # _replan so the replanner can see all prior failed attempts.
+                    _tools_tried = [
+                        t.split("(")[0].lstrip("→ ").strip()
+                        for t in replan_trigger.get("tool_history", [])
+                        if t.startswith("→")
+                    ]
+                    repl_state["_replan_history"].append({
+                        "attempt": replan_count,
+                        "failed_action": failed_step.get("action", ""),
+                        "failed_target": failed_step.get("target", ""),
+                        "failure_reason": failure_reason,
+                        "tools_tried": _tools_tried,
+                    })
+
                     logger.info(
                         f"[GoalPursuit] Replanning "
                         f"(attempt {replan_count}/{max_replan_depth}): "
