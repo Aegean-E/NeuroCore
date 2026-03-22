@@ -34,6 +34,56 @@ def _extract_thinking_steps(flow_result: dict) -> list:
     messages = flow_result.get("messages", [])
     agent_loop_trace = flow_result.get("agent_loop_trace", [])
 
+    # GoalPursuit produces a goal_pursuit_trace instead of the usual message-level trace.
+    # Synthesize thinking steps directly from it so planning/evaluation are visible.
+    gp_trace = flow_result.get("goal_pursuit_trace", [])
+    if gp_trace:
+        plan = flow_result.get("plan", [])
+        completed = flow_result.get("completed_steps", [])
+        total_steps = len(completed) + len(flow_result.get("remaining_steps", []))
+        if plan or completed:
+            all_steps = completed + flow_result.get("remaining_steps", [])
+            step_lines = "\n".join(
+                f"  {i + 1}. {s.get('action', '?')}: {s.get('target', '')}"
+                for i, s in enumerate(all_steps[:8])
+            )
+            steps.append({
+                "type": "tool_call",
+                "name": "Plan",
+                "content": f"{total_steps} steps:\n{step_lines}",
+            })
+        for entry in gp_trace:
+            step_num = entry.get("step", "?")
+            action = entry.get("action", "")
+            target = entry.get("target", "")
+            steps.append({
+                "type": "tool_call",
+                "name": f"Step {step_num}",
+                "content": f"{action}: {target}",
+            })
+            evaluation = entry.get("evaluation", {})
+            if evaluation:
+                steps.append({
+                    "type": "tool_result",
+                    "name": f"Step {step_num} eval",
+                    "content": evaluation.get("reason", "")[:250],
+                    "success": evaluation.get("success", False),
+                })
+            if entry.get("replanned"):
+                steps.append({
+                    "type": "tool_call",
+                    "name": "Replan",
+                    "content": f"New plan: {entry.get('new_steps_count', 0)} steps",
+                })
+            elif entry.get("skipped"):
+                steps.append({
+                    "type": "tool_result",
+                    "name": f"Step {step_num}",
+                    "content": entry.get("skip_reason", "Skipped")[:200],
+                    "success": False,
+                })
+        return steps
+
     # Only emit thinking trace when there was actual agent loop activity
     total_tool_calls = sum(len(t.get("tool_calls", [])) for t in agent_loop_trace)
     has_reflections = any(

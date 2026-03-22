@@ -2713,6 +2713,9 @@ class GoalPursuitExecutor(HybridAgentExecutor):
             return {"success": False, "reason": "Evaluator LLM failed", "extracted_result": ""}
 
         raw = response["choices"][0]["message"].get("content", "").strip()
+        # Strip markdown code fences before JSON extraction
+        raw = re.sub(r'^```(?:json)?\s*', '', raw, flags=re.MULTILINE)
+        raw = re.sub(r'^```\s*$', '', raw, flags=re.MULTILINE)
         raw = re.sub(r'//.*', '', raw)
         raw = re.sub(r'/\*.*?\*/', '', raw, flags=re.DOTALL)
         try:
@@ -2726,9 +2729,11 @@ class GoalPursuitExecutor(HybridAgentExecutor):
                 }
         except (json.JSONDecodeError, ValueError):
             pass
-        positive = {"success", "completed", "achieved", "done", "yes", "true"}
-        success = bool(positive.intersection(raw.lower().split()))
-        return {"success": success, "reason": raw[:200], "extracted_result": ""}
+        return {
+            "success": False,
+            "reason": f"Evaluator response could not be parsed: {raw[:200]}",
+            "extracted_result": "",
+        }
 
     async def _replan(
         self,
@@ -2814,6 +2819,7 @@ class GoalPursuitExecutor(HybridAgentExecutor):
         input_data: dict,
         config: dict,
         large_output_threshold: int,
+        repl_state: dict | None = None,
     ) -> str:
         """Assemble the system prompt for a single step execution."""
         parts = [plan_context]
@@ -2830,6 +2836,15 @@ class GoalPursuitExecutor(HybridAgentExecutor):
             if v:
                 parts.append(f"## Previous Reasoning\n{v}")
         parts.append(self._build_variable_system_note(large_output_threshold))
+        if repl_state and repl_state.get("variables"):
+            var_names = [k for k in repl_state["variables"] if k.startswith("step_")]
+            if var_names:
+                var_list = ", ".join(f'"{v}"' for v in var_names)
+                parts.append(
+                    f"## Available Step Results\n"
+                    f"Previous steps stored their full outputs as variables: {var_list}.\n"
+                    f"Use GetVariable(\"<name>\") to retrieve any of them."
+                )
         parts.append(
             f"## Current Step\n"
             f"Action: {step.get('action', '')}\n"
@@ -2897,6 +2912,8 @@ class GoalPursuitExecutor(HybridAgentExecutor):
         large_output_threshold = int(config.get("large_output_threshold", 3000))
         enable_step_evaluation = bool(config.get("enable_step_evaluation", True))
         enable_synthesis = bool(config.get("enable_synthesis", True))
+        max_step_retries = int(config.get("max_step_retries", 2))
+        step_timeout = float(config.get("step_timeout", 0))
         stream_queue = config.get("_stream_queue")
         model = config.get("model") or settings.get("default_model")
 
@@ -3014,6 +3031,7 @@ class GoalPursuitExecutor(HybridAgentExecutor):
 
             # Step 2: execute steps
             step_idx = 0
+            consecutive_failures = 0
             while step_idx < len(remaining_steps):
                 if replan_count > max_replan_depth:
                     break
@@ -3030,7 +3048,7 @@ class GoalPursuitExecutor(HybridAgentExecutor):
                     completed_steps, remaining_steps, step_idx, step_results
                 )
                 system_prompt = self._build_step_system_prompt(
-                    step, plan_context, input_data, config, large_output_threshold
+                    step, plan_context, input_data, config, large_output_threshold, repl_state
                 )
                 step_messages = [
                     {"role": "system", "content": system_prompt},
@@ -3046,7 +3064,12 @@ class GoalPursuitExecutor(HybridAgentExecutor):
                 logger.info(
                     f"[GoalPursuit] Executing step {step.get('step')}: {step.get('action')}"
                 )
-                final_response, iters, had_tool_error = await self._run_hybrid_loop(
+                await _push_thinking({
+                    "type": "tool_call",
+                    "name": f"Step {step.get('step', step_idx + 1)}",
+                    "content": f"{step.get('action', '')}: {step.get('target', '')}",
+                })
+                _step_coro = self._run_hybrid_loop(
                     llm_messages=step_messages,
                     tools_list=tools_list,
                     tool_library=tool_library,
@@ -3063,6 +3086,20 @@ class GoalPursuitExecutor(HybridAgentExecutor):
                     stream_queue=stream_queue,
                     thinking_steps=thinking_steps,
                 )
+                _step_timed_out = False
+                try:
+                    if step_timeout > 0:
+                        final_response, iters, had_tool_error = await asyncio.wait_for(
+                            _step_coro, timeout=step_timeout
+                        )
+                    else:
+                        final_response, iters, had_tool_error = await _step_coro
+                except asyncio.TimeoutError:
+                    _step_timed_out = True
+                    final_response, iters, had_tool_error = None, 0, True
+                    logger.warning(
+                        f"[GoalPursuit] Step {step.get('step')} timed out after {step_timeout}s"
+                    )
                 total_iterations += iters
                 iteration_count += iters
 
@@ -3074,6 +3111,7 @@ class GoalPursuitExecutor(HybridAgentExecutor):
 
                 step_trace["iterations"] = iters
                 step_trace["had_tool_error"] = had_tool_error
+                step_trace["timed_out"] = _step_timed_out
                 step_trace["content_preview"] = step_content[:200]
 
                 # Evaluate step outcome
@@ -3098,10 +3136,21 @@ class GoalPursuitExecutor(HybridAgentExecutor):
                     f"[GoalPursuit] Step {step.get('step')} "
                     f"success={evaluation['success']}, reason={evaluation['reason'][:80]}"
                 )
+                await _push_thinking({
+                    "type": "tool_result",
+                    "name": f"Step {step.get('step', step_idx + 1)} eval",
+                    "content": evaluation["reason"][:250],
+                    "success": evaluation["success"],
+                })
 
                 if evaluation["success"]:
                     completed_steps.append(step)
                     step_results.append(evaluation)
+                    consecutive_failures = 0
+                    # Store full step output as a named variable so later steps
+                    # (and the synthesizer) can retrieve it via GetVariable.
+                    var_key = f"step_{step.get('step', step_idx + 1)}_result"
+                    repl_state["variables"][var_key] = step_content
                     step_idx += 1
 
                     if episode is not None and sm is not None:
@@ -3117,17 +3166,42 @@ class GoalPursuitExecutor(HybridAgentExecutor):
                         except Exception as e:
                             logger.warning(f"[GoalPursuit] Episode checkpoint failed: {e}")
                 else:
+                    consecutive_failures += 1
+                    failure_reason = evaluation.get("reason", "Unknown failure")
+                    if _step_timed_out:
+                        failure_reason = f"Step timed out after {step_timeout}s"
+
+                    # Skip step if it has failed too many consecutive times,
+                    # preserving the global replan budget for other steps.
+                    if consecutive_failures >= max_step_retries:
+                        step_trace["skipped"] = True
+                        step_trace["skip_reason"] = (
+                            f"Step failed {consecutive_failures} consecutive times; skipping"
+                        )
+                        logger.warning(
+                            f"[GoalPursuit] Step {step.get('step')} skipped after "
+                            f"{consecutive_failures} consecutive failures"
+                        )
+                        consecutive_failures = 0
+                        step_idx += 1
+                        goal_pursuit_trace.append(step_trace)
+                        continue
+
                     if replan_count >= max_replan_depth:
                         step_trace["replan_skipped"] = "max_replan_depth reached"
                         goal_pursuit_trace.append(step_trace)
                         break
 
                     replan_count += 1
-                    failure_reason = evaluation.get("reason", "Unknown failure")
                     logger.info(
                         f"[GoalPursuit] Replanning (attempt {replan_count}/{max_replan_depth}): "
                         f"{failure_reason[:80]}"
                     )
+                    await _push_thinking({
+                        "type": "tool_call",
+                        "name": f"Replan {replan_count}/{max_replan_depth}",
+                        "content": f"Reason: {failure_reason[:200]}",
+                    })
                     self._log_agent_event("goal_pursuit_replan", {
                         "replan_count": replan_count,
                         "failed_step": step.get("step"),
@@ -3148,9 +3222,25 @@ class GoalPursuitExecutor(HybridAgentExecutor):
                     if new_remaining:
                         remaining_steps = new_remaining
                         step_idx = 0
+                        consecutive_failures = 0
                     else:
                         step_trace["replan_empty"] = True
+                        consecutive_failures = 0
                         step_idx += 1
+
+                    # Checkpoint partial progress after replan
+                    if episode is not None and sm is not None:
+                        try:
+                            sm.save_episode_state(
+                                phase=EpisodeState.PHASE_REPLANNING,
+                                replan_count=replan_count,
+                                completed_steps=[s.get("step") for s in completed_steps],
+                                current_step=step_idx,
+                                plan=remaining_steps[step_idx:] if step_idx < len(remaining_steps) else [],
+                                add_checkpoint=False,
+                            )
+                        except Exception as e:
+                            logger.warning(f"[GoalPursuit] Episode checkpoint (replan) failed: {e}")
 
                 goal_pursuit_trace.append(step_trace)
 
@@ -3211,11 +3301,26 @@ class GoalPursuitExecutor(HybridAgentExecutor):
             self._thinking_steps = thinking_steps
             return result
 
+        async def _push_thinking(entry: dict):
+            """Append a thinking event and flush to stream_queue."""
+            thinking_steps.append(entry)
+            if stream_queue:
+                await stream_queue.put({"type": "thinking", "content": list(thinking_steps)})
+
         async def _create_plan_with_trace() -> list:
             plan = await self._create_plan(user_goal, config)
             self._log_agent_event("goal_pursuit_plan_created", {
                 "steps": len(plan),
                 "goal_preview": user_goal[:100],
+            })
+            step_lines = "\n".join(
+                f"  {i + 1}. {s.get('action', '?')}: {s.get('target', '')}"
+                for i, s in enumerate(plan[:8])
+            )
+            await _push_thinking({
+                "type": "tool_call",
+                "name": "Plan",
+                "content": f"Goal: {user_goal[:120]}\n{len(plan)} steps:\n{step_lines}",
             })
             return plan
 
@@ -3223,10 +3328,15 @@ class GoalPursuitExecutor(HybridAgentExecutor):
             lines = []
             for i, step in enumerate(completed):
                 r = results[i] if i < len(results) else {}
-                extracted = r.get("extracted_result", "")[:500]
+                extracted = r.get("extracted_result", "")[:300]
+                var_key = f"step_{step.get('step', i + 1)}_result"
+                hint = (
+                    f' (full output available via GetVariable("{var_key}"))'
+                    if var_key in repl_state["variables"] else ""
+                )
                 lines.append(
                     f"Step {step.get('step')}: {step.get('action')}: {step.get('target')}\n"
-                    f"Result: {extracted}"
+                    f"Result summary: {extracted}{hint}"
                 )
             step_summary = "\n\n".join(lines)
             prompt = config.get("synthesis_prompt", self._DEFAULT_SYNTHESIS_PROMPT)
@@ -3235,21 +3345,30 @@ class GoalPursuitExecutor(HybridAgentExecutor):
                 .replace("{original_request}", user_goal)
                 .replace("{step_summary}", step_summary)
             )
-            model_ = config.get("model") or settings.get("default_model")
-            response = await self._llm_with_retry(
-                messages=[
-                    {"role": "system", "content": prompt},
-                    {"role": "user", "content": f"Provide a final answer for: {user_goal}"},
-                ],
-                model=model_,
+            var_note = self._build_variable_system_note(large_output_threshold)
+            synth_messages = [
+                {"role": "system", "content": f"{prompt}\n\n{var_note}"},
+                {"role": "user", "content": f"Provide a final answer for: {user_goal}"},
+            ]
+            final_response, _, _ = await self._run_hybrid_loop(
+                llm_messages=synth_messages,
+                tools_list=tools_list,
+                tool_library=tool_library,
+                repl_state=repl_state,
+                model=model,
                 temperature=float(config.get("temperature", 0.7)),
                 max_tokens=max_tokens,
-                tools=[],
-                max_retries=int(config.get("max_llm_retries", 3)),
+                max_iterations=5,
+                max_llm_retries=int(config.get("max_llm_retries", 3)),
                 retry_delay=float(config.get("retry_delay", 1.0)),
+                tool_error_strategy=tool_error_strategy,
+                large_output_threshold=large_output_threshold,
+                trace=goal_pursuit_trace,
+                stream_queue=stream_queue,
+                thinking_steps=thinking_steps,
             )
-            if response and "choices" in response:
-                return response["choices"][0]["message"].get("content") or ""
+            if final_response and "choices" in final_response:
+                return final_response["choices"][0]["message"].get("content") or ""
             return ""
 
         async def _fallback_hybrid() -> dict:

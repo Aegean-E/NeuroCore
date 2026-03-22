@@ -83,6 +83,8 @@
         "large_output_threshold": 3000,
         "enable_step_evaluation": true,
         "enable_synthesis": true,
+        "max_step_retries": 2,
+        "step_timeout": 0,
         "include_plan_in_context": true,
         "include_memory_context": true,
         "include_knowledge_context": true,

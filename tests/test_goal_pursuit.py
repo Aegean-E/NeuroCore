@@ -140,13 +140,14 @@ async def test_evaluate_step_llm_failure_returns_failure():
     assert "Evaluator LLM failed" in result["reason"]
 
 
-async def test_evaluate_step_fallback_heuristic():
-    """When JSON parse fails, falls back to keyword heuristic."""
+async def test_evaluate_step_fallback_unparseable_returns_failure():
+    """When JSON parse fails, returns fail-safe False (no keyword guessing)."""
     ex = make_executor()
     ex.llm.chat_completion = AsyncMock(return_value=llm_response("Yes, this was completed successfully"))
     step = {"action": "Search", "target": "x", "goal": "g"}
     result = await ex._evaluate_step(step, "content", config={})
-    assert result["success"] is True  # "success" keyword triggers heuristic
+    assert result["success"] is False
+    assert "could not be parsed" in result["reason"]
 
 
 # ---------------------------------------------------------------------------
@@ -560,3 +561,142 @@ async def test_get_executor_class_unknown():
     from modules.agent_loop.node import get_executor_class
     cls = await get_executor_class("not_a_real_node")
     assert cls is None
+
+
+# ---------------------------------------------------------------------------
+# _evaluate_step — markdown fence stripping
+# ---------------------------------------------------------------------------
+
+async def test_evaluate_step_strips_markdown_fences():
+    """JSON wrapped in ```json ... ``` code fences is correctly parsed."""
+    ex = make_executor()
+    fenced = '```json\n{"success": true, "reason": "all good", "extracted_result": "value"}\n```'
+    ex.llm.chat_completion = AsyncMock(return_value=llm_response(fenced))
+    step = {"action": "Do", "target": "x", "goal": "g"}
+    result = await ex._evaluate_step(step, "content", config={})
+    assert result["success"] is True
+    assert result["reason"] == "all good"
+    assert result["extracted_result"] == "value"
+
+
+# ---------------------------------------------------------------------------
+# receive() — consecutive failures skip step after max_step_retries
+# ---------------------------------------------------------------------------
+
+async def test_receive_step_skipped_after_max_retries():
+    """Step that fails max_step_retries consecutive times is skipped, not infinitely replanned."""
+    ex = make_executor()
+
+    # Plan has 2 steps; step 1 fails twice (max_step_retries=2) and gets skipped.
+    plan_resp = llm_response(plan_json("Failing step", "Working step"))
+    step1_fail = llm_response("Error.")
+    eval1_fail = llm_response(eval_json(False, "failed", ""))
+    step2_resp = llm_response("Done.")
+    eval2_ok = llm_response(eval_json(True, "ok", "Done."))
+
+    ex.llm.chat_completion = AsyncMock(side_effect=[
+        plan_resp,
+        step1_fail, eval1_fail,   # consecutive_failures = 1 → replan
+        llm_response(json.dumps([  # replan: same step 1
+            {"step": 1, "action": "Failing step", "target": "x", "goal": "g"},
+            {"step": 2, "action": "Working step", "target": "y", "goal": "g2"},
+        ])),
+        step1_fail, eval1_fail,   # consecutive_failures = 1 on new plan → replan again? no — we track from 0
+        # Actually: after replan, consecutive_failures=0. So 2nd fail → consecutive_failures=1 again.
+        # We need TWO more fails on the same step without replan in between to hit max_step_retries=2.
+    ])
+
+    # Simpler: use max_step_retries=1 so a single failure triggers a skip
+    ex.llm.chat_completion = AsyncMock(side_effect=[
+        plan_resp,
+        step1_fail, eval1_fail,   # consecutive_failures=1 >= max_step_retries=1 → SKIP step 1
+        step2_resp, eval2_ok,     # step 2 succeeds
+    ])
+
+    with patch.object(ex, "_load_tool_library", return_value={}), \
+         patch.object(ex, "_load_tools", return_value={}):
+        result = await ex.receive(
+            {"messages": MESSAGES},
+            config={"enable_synthesis": False, "max_step_retries": 1},
+        )
+
+    # Step 1 was skipped, step 2 completed
+    assert len(result["completed_steps"]) == 1
+    assert result["completed_steps"][0]["action"] == "Working step"
+    # No replan was consumed — skip doesn't burn replan budget
+    assert result["replan_count"] == 0
+    # Step 1 trace should show it was skipped
+    skipped = [t for t in result["goal_pursuit_trace"] if t.get("skipped")]
+    assert len(skipped) == 1
+
+
+# ---------------------------------------------------------------------------
+# receive() — step result stored in repl_state variables on success
+# ---------------------------------------------------------------------------
+
+async def test_receive_step_result_stored_in_repl_state():
+    """Successful step stores its full content in repl_state['variables']['step_N_result']."""
+    ex = make_executor()
+
+    plan_resp = llm_response(plan_json("Gather info"))
+    step_resp = llm_response("Found 42 results.")
+    eval_resp = llm_response(eval_json(True, "ok", "Found 42 results."))
+
+    ex.llm.chat_completion = AsyncMock(side_effect=[plan_resp, step_resp, eval_resp])
+
+    captured_repl_state = {}
+
+    original_run = ex._run_hybrid_loop
+
+    async def capture_repl(*args, repl_state, **kwargs):
+        result = await original_run(*args, repl_state=repl_state, **kwargs)
+        captured_repl_state.update(repl_state)
+        return result
+
+    with patch.object(ex, "_run_hybrid_loop", side_effect=capture_repl), \
+         patch.object(ex, "_load_tool_library", return_value={}), \
+         patch.object(ex, "_load_tools", return_value={}):
+        result = await ex.receive(
+            {"messages": MESSAGES},
+            config={"enable_synthesis": False},
+        )
+
+    # The step_1_result variable should be stored after success
+    assert "step_1_result" in captured_repl_state.get("variables", {})
+    # And it should contain the step's LLM output
+    assert "42" in captured_repl_state["variables"]["step_1_result"]
+
+
+# ---------------------------------------------------------------------------
+# receive() — per-step timeout treats step as failure
+# ---------------------------------------------------------------------------
+
+async def test_receive_step_timeout_treated_as_failure():
+    """When step_timeout fires, the step is treated as failed (skipped via max_step_retries=1)."""
+    ex = make_executor()
+
+    plan_resp = llm_response(plan_json("Slow step"))
+    eval_fail = llm_response(eval_json(False, "timed out", ""))
+
+    ex.llm.chat_completion = AsyncMock(side_effect=[plan_resp])
+
+    async def slow_hybrid(*args, **kwargs):
+        await asyncio.sleep(10)  # will be cancelled by wait_for
+        return None, 0, False
+
+    with patch.object(ex, "_run_hybrid_loop", side_effect=slow_hybrid), \
+         patch.object(ex, "_load_tool_library", return_value={}), \
+         patch.object(ex, "_load_tools", return_value={}):
+        result = await ex.receive(
+            {"messages": MESSAGES},
+            config={
+                "enable_synthesis": False,
+                "step_timeout": 0.05,   # 50ms — fires immediately
+                "max_step_retries": 1,  # skip after 1 failure
+            },
+        )
+
+    # Step timed out and was skipped; no completed steps
+    assert len(result["completed_steps"]) == 0
+    timed_out_traces = [t for t in result["goal_pursuit_trace"] if t.get("timed_out")]
+    assert len(timed_out_traces) == 1
