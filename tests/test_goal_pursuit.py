@@ -229,11 +229,13 @@ async def test_replan_returns_revised_steps():
     assert new_steps[0]["step"] == 2  # step_offset = len(completed) = 1, so step = 1+1 = 2
 
 
-async def test_replan_llm_failure_returns_empty():
+async def test_replan_llm_failure_returns_none():
+    """_replan must return None (not []) on LLM failure so the caller can
+    distinguish a network error from an intentionally empty plan."""
     ex = make_executor()
     ex.llm.chat_completion = AsyncMock(return_value=None)
     result = await ex._replan("goal", [], [], {}, "reason", config={})
-    assert result == []
+    assert result is None
 
 
 # ---------------------------------------------------------------------------
@@ -765,7 +767,8 @@ def test_topo_sort_linear_no_deps():
         {"step": 2, "action": "B", "depends_on": []},
         {"step": 3, "action": "C", "depends_on": []},
     ]
-    result = GoalPursuitExecutor._topo_sort_steps(steps)
+    result, has_cycle = GoalPursuitExecutor._topo_sort_steps(steps)
+    assert has_cycle is False
     assert [s["step"] for s in result] == [1, 2, 3]
 
 
@@ -776,7 +779,8 @@ def test_topo_sort_respects_dependencies():
         {"step": 2, "action": "B", "depends_on": []},
         {"step": 3, "action": "C", "depends_on": [1]},
     ]
-    result = GoalPursuitExecutor._topo_sort_steps(steps)
+    result, has_cycle = GoalPursuitExecutor._topo_sort_steps(steps)
+    assert has_cycle is False
     step_nums = [s["step"] for s in result]
     assert step_nums.index(1) < step_nums.index(3), "Step 1 must come before step 3"
     assert len(step_nums) == 3
@@ -789,7 +793,8 @@ def test_topo_sort_chain():
         {"step": 1, "action": "A", "depends_on": []},
         {"step": 2, "action": "B", "depends_on": [1]},
     ]
-    result = GoalPursuitExecutor._topo_sort_steps(steps)
+    result, has_cycle = GoalPursuitExecutor._topo_sort_steps(steps)
+    assert has_cycle is False
     assert [s["step"] for s in result] == [1, 2, 3]
 
 
@@ -799,7 +804,8 @@ def test_topo_sort_cycle_returns_original():
         {"step": 1, "action": "A", "depends_on": [2]},
         {"step": 2, "action": "B", "depends_on": [1]},
     ]
-    result = GoalPursuitExecutor._topo_sort_steps(steps)
+    result, has_cycle = GoalPursuitExecutor._topo_sort_steps(steps)
+    assert has_cycle is True
     # Should return original order unchanged (cycle detection)
     assert [s["step"] for s in result] == [1, 2]
 
@@ -810,7 +816,8 @@ def test_topo_sort_ignores_external_deps():
         {"step": 3, "action": "C", "depends_on": [99]},  # 99 not in plan
         {"step": 4, "action": "D", "depends_on": [3]},
     ]
-    result = GoalPursuitExecutor._topo_sort_steps(steps)
+    result, has_cycle = GoalPursuitExecutor._topo_sort_steps(steps)
+    assert has_cycle is False
     assert [s["step"] for s in result] == [3, 4]
 
 
@@ -931,9 +938,8 @@ async def test_ask_user_pauses_execution():
     """When the agent calls AskUser during a step, receive() returns immediately with paused=True."""
     ex = make_executor()
 
-    plan_resp = llm_response(plan_json("Clarify requirements", "Do the work"))
-    # AskUser is handled by _execute_tool override — simulate by making _run_hybrid_loop
-    # set _pending_question on repl_state directly (as the override would do).
+    # Single-step plan so only one step runs and injects one question.
+    plan_resp = llm_response(plan_json("Clarify requirements"))
     step1_resp = llm_response("Pausing to ask.")
 
     ex.llm.chat_completion = AsyncMock(side_effect=[plan_resp, step1_resp])
@@ -3515,8 +3521,10 @@ async def test_assess_task_clarity_returns_structured_result(monkeypatch):
             '"safe_assumptions": ["Assume last 30 days"]}'
         )}}]}
 
+    # Use a goal with ambiguity markers so it bypasses the fast-path and calls the LLM.
+    goal = "Analyze all relevant sales data across multiple regions if applicable to any reporting period."
     with patch.object(ex, "_llm_with_retry", side_effect=fake_llm):
-        result = await ex._assess_task_clarity("Analyze the sales data", {})
+        result = await ex._assess_task_clarity(goal, {})
 
     assert result["is_actionable"] is False
     assert "What time period?" in result["critical_unknowns"]

@@ -2774,6 +2774,11 @@ class GoalPursuitExecutor(HybridAgentExecutor, RLMAgentLoopExecutor):
         "3. For informational steps (research, search, fetch, read): "
         "extracted_result must be a specific fact, number, name, date, or direct "
         "quotation from the tool outputs — not a restatement of the original question.\n"
+        "3b. For action steps (write, create, update, delete, send, configure, execute): "
+        "extracted_result should be the confirmation or status from the tool output "
+        "(e.g., 'file written successfully', 'record created', 'email sent'). "
+        "These steps succeed if the tool confirms the action was performed — do NOT "
+        "require a factual quotation; a confirmation message is sufficient.\n"
         "4. A terse response backed by real tool data is better than a long response "
         "backed by no data.\n\n"
         "Reply with JSON: {{\"success\": true/false, \"reason\": \"brief explanation\", "
@@ -2795,8 +2800,10 @@ class GoalPursuitExecutor(HybridAgentExecutor, RLMAgentLoopExecutor):
         "your revised plan should take a different approach if the same tools/approach failed.\n\n"
         "Return a JSON array: [{\"step\": N, \"action\": \"...\", \"target\": \"...\", "
         "\"goal\": \"what success looks like\", \"depends_on\": []}]\n"
-        "depends_on should list step numbers (from this revised plan) that must finish first. "
-        "Use [] for independent steps.\n\n"
+        "Number your new steps starting from 1 (1, 2, 3 …). "
+        "depends_on must only reference other steps in THIS new plan by their 1-based "
+        "position. Never reference completed steps — they are already done and do not "
+        "need to appear as dependencies. Use [] for independent steps.\n\n"
         "Respond with JSON array only. No prose."
     )
 
@@ -3001,12 +3008,15 @@ class GoalPursuitExecutor(HybridAgentExecutor, RLMAgentLoopExecutor):
             _log.getLogger(__name__).warning(
                 "[GoalPursuit] Dependency cycle detected in plan; using original step order"
             )
-            return steps
-        return result
+            return steps, True
+        return result, False
 
     async def _parse_plan_response(self, content: str, max_steps: int, step_offset: int = 0) -> list:
         """Parse LLM JSON plan response into a list of step dicts."""
         import re
+        # Strip markdown code fences (``` ```json ... ``` ```) that LLMs frequently add
+        content = re.sub(r'^```(?:json)?\s*', '', content, flags=re.MULTILINE)
+        content = re.sub(r'^```\s*$', '', content, flags=re.MULTILINE)
         content = re.sub(r'//.*', '', content)
         content = re.sub(r'/\*.*?\*/', '', content, flags=re.DOTALL)
         content = content.strip()
@@ -3025,18 +3035,39 @@ class GoalPursuitExecutor(HybridAgentExecutor, RLMAgentLoopExecutor):
                         # reversible defaults to True (safe assumption when missing).
                         raw_rev = step.get("reversible", True)
                         reversible = bool(raw_rev) if isinstance(raw_rev, bool) else True
+                        abs_step = step_offset + i + 1
+                        _action = (step.get("action") or step.get("task") or "").strip()
+                        _goal = (
+                            step.get("goal")
+                            or step.get("success_criterion")
+                            or _action
+                        )
+                        if isinstance(_goal, str):
+                            _goal = _goal.strip()
+                        # Skip malformed steps — an empty action generates a useless
+                        # system prompt that fails evaluation every time, burning
+                        # iterations and potentially triggering spurious replanning.
+                        if not _action:
+                            continue
+                        if not _goal:
+                            _goal = _action
                         plan.append({
-                            "step": step_offset + i + 1,
-                            "action": step.get("action", step.get("task", "unknown")),
+                            "step": abs_step,
+                            "action": _action,
                             "target": step.get("target", step.get("query", "")),
-                            "goal": step.get("goal", step.get("success_criterion", step.get("action", ""))),
+                            "goal": _goal,
                             # Apply step_offset so depends_on values reference the
                             # same numbering space as the offset step numbers above.
                             # e.g. if step_offset=3 and LLM wrote depends_on=[1,2],
                             # the actual step numbers are 4 and 5.
+                            # Also strip self-references: an LLM that confuses new-plan
+                            # numbering with completed-step numbering can produce a
+                            # depends_on entry that maps back to the step itself.
                             "depends_on": [
                                 step_offset + int(d) for d in raw_deps
-                                if str(d).lstrip("-").isdigit() and int(d) > 0
+                                if str(d).lstrip("-").isdigit()
+                                and int(d) > 0
+                                and step_offset + int(d) != abs_step
                             ],
                             "risk": risk,
                             "reversible": reversible,
@@ -3044,6 +3075,19 @@ class GoalPursuitExecutor(HybridAgentExecutor, RLMAgentLoopExecutor):
                 return plan
         except (json.JSONDecodeError, ValueError):
             pass
+        # Fallback: LLM added prose before/after the JSON array (e.g. "Here is the plan:
+        # [...]"). Extract the array using a regex so prose preambles don't silently
+        # produce empty plans.
+        match = re.search(r'\[.*\]', content, re.DOTALL)
+        if match:
+            try:
+                parsed = json.loads(match.group(0))
+                if isinstance(parsed, list):
+                    return await self._parse_plan_response(
+                        json.dumps(parsed), max_steps, step_offset
+                    )
+            except (json.JSONDecodeError, ValueError):
+                pass
         return []
 
     async def _create_plan(
@@ -3087,7 +3131,9 @@ class GoalPursuitExecutor(HybridAgentExecutor, RLMAgentLoopExecutor):
             if json_instruction in prompt:
                 prompt = prompt.replace(json_instruction, f"{block}\n\n{json_instruction}")
             else:
-                prompt += f"\n\n{block}"
+                # Custom prompt doesn't contain the JSON constraint — append both
+                # the context block and the constraint so JSON-only output is enforced.
+                prompt += f"\n\n{block}\n\n{json_instruction}"
         model = config.get("model") or settings.get("default_model")
         response = await self._llm_with_retry(
             messages=[
@@ -3341,7 +3387,8 @@ class GoalPursuitExecutor(HybridAgentExecutor, RLMAgentLoopExecutor):
             retry_delay=float(config.get("retry_delay", 1.0)),
         )
         if not response or "choices" not in response:
-            return []
+            logger.warning("[GoalPursuit] Replan LLM call failed; no revised plan generated")
+            return None  # Distinct from [] ("plan is intentionally empty")
         content = response["choices"][0]["message"].get("content", "")
         return await self._parse_plan_response(content, max_steps, step_offset=len(completed_steps))
 
@@ -3598,7 +3645,10 @@ class GoalPursuitExecutor(HybridAgentExecutor, RLMAgentLoopExecutor):
         )
         valid = [s for s in summaries if isinstance(s, str) and s]
         if not valid:
-            return joined[:threshold]
+            # All LLM compression calls failed — return the full unsummarized
+            # string.  Truncating mid-lesson produces incoherent context; better
+            # to let the planner receive more text than a broken fragment.
+            return joined
 
         compressed = "\n\n".join(valid)
         if len(compressed) <= threshold:
@@ -3715,7 +3765,22 @@ class GoalPursuitExecutor(HybridAgentExecutor, RLMAgentLoopExecutor):
 
         On failure, returns {"is_actionable": True, ...} so planning is not
         blocked by a failed clarity check.
+
+        Short, concrete goals (< 120 chars, no ambiguous scope markers) are
+        returned immediately as actionable without an LLM call.
         """
+        _default = {"is_actionable": True, "critical_unknowns": [], "safe_assumptions": []}
+        # Fast-path: skip the LLM round-trip for short, unambiguous goals.
+        _AMBIGUITY_MARKERS = (
+            "any", "some", "all of", "multiple", "various", "depends",
+            "if applicable", "as needed", "when possible", "relevant",
+        )
+        _goal_lower = user_goal.strip().lower()
+        if (
+            len(_goal_lower) < 120
+            and not any(m in _goal_lower for m in _AMBIGUITY_MARKERS)
+        ):
+            return _default
         model = config.get("model") or settings.get("default_model")
         resp = await self._llm_with_retry(
             messages=[{
@@ -3741,7 +3806,6 @@ class GoalPursuitExecutor(HybridAgentExecutor, RLMAgentLoopExecutor):
             max_retries=2,
             retry_delay=1.0,
         )
-        _default = {"is_actionable": True, "critical_unknowns": [], "safe_assumptions": []}
         if not resp or "choices" not in resp:
             return _default
         raw = resp["choices"][0]["message"].get("content", "").strip()
@@ -4280,19 +4344,23 @@ class GoalPursuitExecutor(HybridAgentExecutor, RLMAgentLoopExecutor):
             result["agent_loop_error"] = "No messages provided"
             return result
 
-        # Extract user goal
-        user_goal = ""
-        for msg in reversed(messages):
-            if isinstance(msg, dict) and msg.get("role") == "user":
-                content = msg.get("content", "")
-                user_goal = content if isinstance(content, str) else (
-                    " ".join(
-                        p.get("text", "") for p in content
-                        if isinstance(p, dict) and p.get("type") == "text"
+        # Extract user goal.
+        # On episode resume the latest user message is the answer to the paused
+        # question, not the original goal.  Check for a stored _original_goal
+        # first (written during the first run, persisted in episode variables).
+        user_goal = input_data.get("_repl_variables", {}).get("_original_goal", "")
+        if not user_goal:
+            for msg in reversed(messages):
+                if isinstance(msg, dict) and msg.get("role") == "user":
+                    content = msg.get("content", "")
+                    user_goal = content if isinstance(content, str) else (
+                        " ".join(
+                            p.get("text", "") for p in content
+                            if isinstance(p, dict) and p.get("type") == "text"
+                        )
                     )
-                )
-                if user_goal:
-                    break
+                    if user_goal:
+                        break
 
         if not user_goal:
             result = input_data.copy()
@@ -4357,6 +4425,11 @@ class GoalPursuitExecutor(HybridAgentExecutor, RLMAgentLoopExecutor):
             repl_state["variables"].update(restored_vars)
             logger.info(f"[GoalPursuit] Restored {len(restored_vars)} repl variables from episode")
 
+        # Persist the original goal so resumed episodes don't use the answer
+        # to a paused question as the goal.
+        if "_original_goal" not in repl_state["variables"]:
+            repl_state["variables"]["_original_goal"] = user_goal
+
         goal_pursuit_trace: list = []
         thinking_steps: list = []
         total_iterations = 0
@@ -4385,7 +4458,18 @@ class GoalPursuitExecutor(HybridAgentExecutor, RLMAgentLoopExecutor):
 
             # Apply topological sort so steps with dependencies run after their prerequisites.
             if enable_dependency_graph:
-                remaining_steps = self._topo_sort_steps(remaining_steps)
+                remaining_steps, _cycle = self._topo_sort_steps(remaining_steps)
+                if _cycle:
+                    goal_pursuit_trace.append({
+                        "type": "warning",
+                        "name": "CycleWarning",
+                        "content": "Dependency cycle detected in plan; step order may be suboptimal.",
+                    })
+                    await _push_thinking({
+                        "type": "tool_call",
+                        "name": "CycleWarning",
+                        "content": "Dependency cycle detected — using original step order.",
+                    })
 
             # ── Step 2: execute steps via wave-based parallel scheduler ──────
             # Independent steps (no unsatisfied depends_on) form a "wave" and
@@ -4910,30 +4994,65 @@ class GoalPursuitExecutor(HybridAgentExecutor, RLMAgentLoopExecutor):
                         "content": wave_desc,
                     })
 
+                async def _run_one_step_safe(step, remaining):
+                    """Wraps _run_one_step so unhandled exceptions become structured
+                    failure dicts that trigger the normal replan path instead of
+                    silently disappearing when asyncio.gather collects them."""
+                    try:
+                        return await _run_one_step(step, remaining)
+                    except Exception as _exc:
+                        logger.error(
+                            f"[GoalPursuit] Step {step.get('step')} raised unexpected "
+                            f"exception: {type(_exc).__name__}: {_exc}"
+                        )
+                        return {
+                            "step": step,
+                            "success": False,
+                            "step_content": "",
+                            "evaluation": {
+                                "success": False,
+                                "reason": (
+                                    f"Unexpected exception: "
+                                    f"{type(_exc).__name__}: {str(_exc)[:200]}"
+                                ),
+                                "extracted_result": "",
+                            },
+                            "tool_history": [],
+                            "step_trace": {"step": step.get("step"), "action": step.get("action")},
+                            "ask_user_question": None,
+                            "skipped": False,
+                            "needs_replan": True,
+                            "failure_reason": (
+                                f"Unexpected exception: "
+                                f"{type(_exc).__name__}: {str(_exc)[:200]}"
+                            ),
+                        }
+
                 # Run wave — parallel when multiple independent steps, serial otherwise.
                 if enable_parallel and len(wave) > 1:
                     wave_results = await asyncio.gather(
-                        *[_run_one_step(s, snap_remaining) for s in wave],
-                        return_exceptions=True,
+                        *[_run_one_step_safe(s, snap_remaining) for s in wave],
                     )
                 else:
                     wave_results = []
                     for s in wave:
-                        wave_results.append(await _run_one_step(s, snap_remaining))
+                        wave_results.append(await _run_one_step_safe(s, snap_remaining))
 
                 # ── Process wave results ──────────────────────────────────
-                paused_question: str | None = None
+                paused_questions: list[str] = []
                 replan_trigger: dict | None = None  # first step requiring replan
 
                 for r in wave_results:
                     if isinstance(r, Exception):
+                        # Should not happen since _run_one_step_safe catches all exceptions,
+                        # but guard defensively.
                         logger.error(
-                            f"[GoalPursuit] Step raised exception in wave: {r}"
+                            f"[GoalPursuit] Unexpected exception object in wave_results: {r}"
                         )
                         continue
 
-                    if r.get("ask_user_question") and paused_question is None:
-                        paused_question = r["ask_user_question"]
+                    if r.get("ask_user_question"):
+                        paused_questions.append(r["ask_user_question"])
                         continue
 
                     if r["success"]:
@@ -4952,7 +5071,15 @@ class GoalPursuitExecutor(HybridAgentExecutor, RLMAgentLoopExecutor):
                         replan_trigger = r
 
                 # ── AskUser pause: checkpoint and return ──────────────────
-                if paused_question:
+                if paused_questions:
+                    # Combine all questions from the same wave into one prompt.
+                    paused_question = (
+                        paused_questions[0]
+                        if len(paused_questions) == 1
+                        else "\n\n".join(
+                            f"{i + 1}. {q}" for i, q in enumerate(paused_questions)
+                        )
+                    )
                     if episode is not None and sm is not None:
                         try:
                             sm.save_episode_state(
@@ -5054,9 +5181,42 @@ class GoalPursuitExecutor(HybridAgentExecutor, RLMAgentLoopExecutor):
                         tool_history=replan_trigger["tool_history"],
                         repl_state=repl_state,
                     )
-                    if new_remaining:
+                    if new_remaining is None:
+                        # LLM failure — cannot generate a revised plan.
+                        # Log the error and break to synthesis so completed steps
+                        # are not silently discarded.
+                        logger.warning(
+                            "[GoalPursuit] Replan LLM call failed; "
+                            "proceeding with completed steps so far"
+                        )
+                        goal_pursuit_trace.append({
+                            "type": "error",
+                            "name": "ReplanFailed",
+                            "content": (
+                                "Replan LLM call failed — could not generate a revised plan. "
+                                "Proceeding with results from already-completed steps."
+                            ),
+                        })
+                        await _push_thinking({
+                            "type": "tool_result",
+                            "name": f"Replan {replan_count} failed",
+                            "content": "Replan LLM call failed; synthesising with completed steps.",
+                        })
+                        break
+                    elif new_remaining:
                         if enable_dependency_graph:
-                            new_remaining = self._topo_sort_steps(new_remaining)
+                            new_remaining, _cycle = self._topo_sort_steps(new_remaining)
+                            if _cycle:
+                                goal_pursuit_trace.append({
+                                    "type": "warning",
+                                    "name": "CycleWarning",
+                                    "content": "Dependency cycle detected in replan; step order may be suboptimal.",
+                                })
+                                await _push_thinking({
+                                    "type": "tool_call",
+                                    "name": "CycleWarning",
+                                    "content": "Dependency cycle detected in replan — using original step order.",
+                                })
                         remaining_steps = new_remaining
                     elif not remaining_steps:
                         break
@@ -5111,15 +5271,22 @@ class GoalPursuitExecutor(HybridAgentExecutor, RLMAgentLoopExecutor):
                         f"{replan_count} replans with 0 insights"
                     )
 
-                # ── Mid-run self-assessment (runs once, after first wave) ──
-                # After the first successful wave completes and more steps remain,
-                # ask the agent to evaluate whether the approach is on track.
+                # ── Mid-run self-assessment (runs once, after first clean wave) ──
+                # After the first successful wave completes WITHOUT triggering a
+                # replan AND more steps remain, ask the agent to evaluate whether
+                # the approach is on track.
+                # If a replan occurred this wave, the plan context has changed; reset
+                # the "done" flag so the assessment can fire again for the new plan.
                 # Controlled by enable_mid_run_assessment (default True).
                 _enable_mra = bool(config.get("enable_mid_run_assessment", True))
+                if replan_trigger is not None:
+                    # Plan just changed — allow assessment to fire for the new plan.
+                    repl_state["_mid_run_assessment_done"] = False
                 _first_wave_done = (
                     len(completed_steps) > 0
                     and not repl_state.get("_mid_run_assessment_done", False)
                     and bool(remaining_steps)
+                    and replan_trigger is None  # only after a clean (non-replanning) wave
                 )
                 if _enable_mra and _first_wave_done:
                     try:
@@ -5142,8 +5309,13 @@ class GoalPursuitExecutor(HybridAgentExecutor, RLMAgentLoopExecutor):
                     except Exception as _mra_e:
                         logger.debug(f"[GoalPursuit] Mid-run assessment failed: {_mra_e}")
 
-            # Step 3: synthesize final answer
-            if completed_steps and enable_synthesis and len(completed_steps) > 1:
+            # Step 3: synthesize final answer.
+            # Run synthesis whenever there is at least one completed step and
+            # synthesis is enabled.  The old `> 1` guard silently returned a raw
+            # step output when a multi-step plan had only one surviving step
+            # (all others skipped/failed) — giving the user an unwrapped result
+            # with no framing of what was tried and why others failed.
+            if completed_steps and enable_synthesis:
                 # Pre-compress large step results so synthesizer context stays manageable
                 compressed_count = await self._compress_step_results(repl_state, config)
                 if compressed_count:
@@ -5162,8 +5334,6 @@ class GoalPursuitExecutor(HybridAgentExecutor, RLMAgentLoopExecutor):
                             final_content = t["content_preview"]
                             break
             elif completed_steps:
-                # Single step — compress its result variable if large before reading
-                await self._compress_step_results(repl_state, config)
                 final_content = step_results[-1].get("extracted_result", "") if step_results else ""
                 # Prefer the full stored variable over the truncated extracted_result
                 step_num = completed_steps[-1].get("step", len(completed_steps))
@@ -5235,20 +5405,29 @@ class GoalPursuitExecutor(HybridAgentExecutor, RLMAgentLoopExecutor):
                 except Exception as _gce:
                     logger.warning(f"[GoalPursuit] Auto-complete goal {goal_id} failed: {_gce}")
 
-            # Save a post-run reflection so future goal runs can learn from this one
-            _reflection_task = asyncio.create_task(self._save_run_reflection(
-                goal=user_goal,
-                completed_steps=completed_steps,
-                step_results=step_results,
-                replan_count=replan_count,
-                goal_pursuit_trace=goal_pursuit_trace,
-                succeeded=bool(not remaining_after and final_content),
-            ))
-            _reflection_task.add_done_callback(
-                lambda t: logger.warning(
-                    f"[GoalPursuit] Reflection save failed: {t.exception()}"
-                ) if not t.cancelled() and t.exception() else None
-            )
+            # Save a post-run reflection so future goal runs can learn from this one.
+            # Awaited with a timeout so the lesson is durably written before receive()
+            # returns; if the embedding call takes too long we skip gracefully.
+            _reflection_timeout = float(config.get("reflection_save_timeout", 8.0))
+            try:
+                await asyncio.wait_for(
+                    self._save_run_reflection(
+                        goal=user_goal,
+                        completed_steps=completed_steps,
+                        step_results=step_results,
+                        replan_count=replan_count,
+                        goal_pursuit_trace=goal_pursuit_trace,
+                        succeeded=bool(not remaining_after and final_content),
+                    ),
+                    timeout=_reflection_timeout,
+                )
+            except asyncio.TimeoutError:
+                logger.warning(
+                    f"[GoalPursuit] Reflection save timed out after {_reflection_timeout}s "
+                    "(non-fatal — lesson will be missing from future planning)"
+                )
+            except Exception as _ref_e:
+                logger.warning(f"[GoalPursuit] Reflection save failed: {_ref_e}")
 
             self._log_agent_event("goal_pursuit_end", {
                 "completed_steps": len(completed_steps),
@@ -5338,6 +5517,22 @@ class GoalPursuitExecutor(HybridAgentExecutor, RLMAgentLoopExecutor):
                         + planning_assumptions
                     ),
                 })
+
+            # If the task is not actionable (critical unknowns block progress),
+            # prime the metacognition warning so every step is explicitly aware
+            # of what's missing.  Planning still proceeds — we maximise usefulness
+            # — but the agent should surface the uncertainty in its responses.
+            if not clarity.get("is_actionable", True) and clarity.get("critical_unknowns"):
+                _unknowns_str = "; ".join(clarity["critical_unknowns"][:3])
+                repl_state["_metacognition_warning"] = (
+                    "⚠️ TASK CLARITY: The task planner flagged this goal as under-defined. "
+                    f"Critical unknowns: {_unknowns_str}. "
+                    "You may not have enough information to answer reliably. "
+                    "State what you don't know and make your assumptions explicit in your response."
+                )
+                logger.warning(
+                    f"[GoalPursuit] Task flagged as not actionable: {_unknowns_str[:120]}"
+                )
 
             plan = await self._create_plan(
                 user_goal, config,
