@@ -19,7 +19,8 @@ from typing import Any, Dict, Set, Optional, List
 from contextlib import contextmanager
 import json
 import multiprocessing
-from multiprocessing import Process, Queue
+import tempfile
+from multiprocessing import Process
 import logging
 import tracemalloc
 
@@ -464,11 +465,18 @@ class SafeEnv:
         )
 
 
-def _execute_in_process(code: str, local_vars: Dict[str, Any], result_queue: Queue, 
+def _execute_in_process(code: str, local_vars: Dict[str, Any], result_file: str,
                         allowed_file_dirs: List[str], read_only_files: bool,
                         allowed_domains: Optional[Set[str]], timeout: float,
                         max_output_size: int, max_memory_mb: int):
-    """Execute code in a separate process with restricted environment."""
+    """Execute code in a separate process with restricted environment.
+
+    Results are written to *result_file* as JSON rather than through a
+    multiprocessing.Queue.  This avoids the "cannot pickle '_asyncio.Future'"
+    error that occurs on Windows when Queue pipe-handles get registered with
+    asyncio's ProactorEventLoop (IOCP) before being duplicated for the child.
+    """
+    payload: dict = {'success': False, 'error_type': 'Unknown', 'error_msg': 'Process did not complete'}
     try:
         # Enforce memory limit using resource module (Unix only)
         if HAS_RESOURCE_MODULE and max_memory_mb > 0:
@@ -477,14 +485,14 @@ def _execute_in_process(code: str, local_vars: Dict[str, Any], result_queue: Que
                 resource.setrlimit(resource.RLIMIT_AS, (max_bytes, max_bytes))
             except (ValueError, OSError) as e:
                 logger.warning(f"Failed to set memory limit: {e}")
-        
+
         # Start tracemalloc for memory monitoring (cross-platform)
         if max_memory_mb > 0:
             try:
                 tracemalloc.start()
             except Exception:
                 pass  # Optional on some platforms
-        
+
         # Rebuild sandbox environment in child process
         sandbox = ToolSandbox(
             timeout=timeout,
@@ -496,7 +504,7 @@ def _execute_in_process(code: str, local_vars: Dict[str, Any], result_queue: Que
         )
 
         result = sandbox._execute_internal(code, local_vars)
-        
+
         # Check memory usage after execution
         if max_memory_mb > 0:
             current, peak = tracemalloc.get_traced_memory()
@@ -506,17 +514,26 @@ def _execute_in_process(code: str, local_vars: Dict[str, Any], result_queue: Que
                 raise ResourceLimitError(
                     f"Memory limit exceeded: {peak_mb:.1f}MB used, limit was {max_memory_mb}MB"
                 )
-        
-        result_queue.put({'success': True, 'result': result.get('result')})
+
+        payload = {'success': True, 'result': result.get('result')}
 
     except SecurityError as e:
-        result_queue.put({'success': False, 'error_type': 'SecurityError', 'error_msg': str(e)})
+        payload = {'success': False, 'error_type': 'SecurityError', 'error_msg': str(e)}
     except ResourceLimitError as e:
-        result_queue.put({'success': False, 'error_type': 'ResourceLimitError', 'error_msg': str(e)})
+        payload = {'success': False, 'error_type': 'ResourceLimitError', 'error_msg': str(e)}
     except TimeoutError as e:
-        result_queue.put({'success': False, 'error_type': 'TimeoutError', 'error_msg': str(e)})
+        payload = {'success': False, 'error_type': 'TimeoutError', 'error_msg': str(e)}
     except Exception as e:
-        result_queue.put({'success': False, 'error_type': type(e).__name__, 'error_msg': str(e)})
+        payload = {'success': False, 'error_type': type(e).__name__, 'error_msg': str(e)}
+    finally:
+        # Always write the result — even on error — so the parent can read it.
+        try:
+            with open(result_file, 'w', encoding='utf-8') as _f:
+                json.dump(payload, _f)
+        except Exception as _write_err:
+            # Last-ditch: log to stderr (visible in the parent's stderr capture)
+            import sys as _sys
+            print(f"[sandbox] failed to write result file: {_write_err}", file=_sys.stderr)
 
 
 
@@ -715,36 +732,50 @@ class ToolSandbox:
         # reimporting), a stale local reference would cause PicklingError because
         # pickle resolves the target by module+qualname and the identity check
         # would fail against the freshly-imported version in sys.modules.
-        _target = sys.modules[__name__]._execute_in_process
-        result_queue = Queue()
-        p = Process(
-            target=_target,
-            args=(code, local_vars or {}, result_queue,
-                  self.allowed_file_dirs, self.read_only_files,
-                  self.allowed_domains, self.timeout,
-                  self.max_output_size, self.max_memory_mb)
-        )
-
-        p.start()
-        p.join(timeout=self.timeout)
-        
-        if p.is_alive():
-            # Process is still running after timeout - terminate it
-            logger.warning(f"Tool execution exceeded {self.timeout} second limit, terminating process")
-            p.terminate()
-            p.join()
-            raise TimeoutError(f"Tool execution exceeded {self.timeout} second limit")
-        
-        # Check if process exited with error
-        if p.exitcode != 0:
-            logger.error(f"Tool process exited with code {p.exitcode}")
-            raise Exception(f"Tool execution failed with exit code {p.exitcode}")
-        
-        # Get result from queue
+        #
+        # IPC via temp file (not Queue) — on Windows with ProactorEventLoop,
+        # multiprocessing.Queue registers IOCP handles that cannot be pickled
+        # when asyncio is running, causing "cannot pickle '_asyncio.Future'".
+        # Writing the result to a temp JSON file avoids all handle pickling.
+        import os as _os
+        _fd, result_file = tempfile.mkstemp(suffix='.json')
+        _os.close(_fd)
         try:
-            result = result_queue.get_nowait()
-        except Exception:
-            raise Exception("Tool execution failed to return result")
+            _target = sys.modules[__name__]._execute_in_process
+            p = Process(
+                target=_target,
+                args=(code, local_vars or {}, result_file,
+                      self.allowed_file_dirs, self.read_only_files,
+                      self.allowed_domains, self.timeout,
+                      self.max_output_size, self.max_memory_mb)
+            )
+
+            p.start()
+            p.join(timeout=self.timeout)
+
+            if p.is_alive():
+                # Process is still running after timeout - terminate it
+                logger.warning(f"Tool execution exceeded {self.timeout} second limit, terminating process")
+                p.terminate()
+                p.join()
+                raise TimeoutError(f"Tool execution exceeded {self.timeout} second limit")
+
+            # Check if process exited with error
+            if p.exitcode != 0:
+                logger.error(f"Tool process exited with code {p.exitcode}")
+                raise Exception(f"Tool execution failed with exit code {p.exitcode}")
+
+            # Read result from temp file written by child process
+            try:
+                with open(result_file, 'r', encoding='utf-8') as _f:
+                    result = json.load(_f)
+            except Exception:
+                raise Exception("Tool execution failed to return result")
+        finally:
+            try:
+                _os.unlink(result_file)
+            except Exception:
+                pass
         
         # Check if result contains an error
         if isinstance(result, dict):
