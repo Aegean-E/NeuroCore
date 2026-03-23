@@ -722,48 +722,71 @@ class ToolSandbox:
         self._check_code_safety(code)
         
         # Use multiprocessing for true isolation and timeout enforcement.
-        # 'spawn' is the default start method on Windows and macOS; no need to
-        # call set_start_method() here.  Calling it inside execute() would reset
-        # the multiprocessing context mid-run, breaking concurrent callers (and
-        # pytest's own process infrastructure).
-        # Always look up _execute_in_process from the live module reference so
-        # that multiprocessing.Process can pickle it correctly.  If the module
-        # manager hot-reloads this module (by removing it from sys.modules and
-        # reimporting), a stale local reference would cause PicklingError because
-        # pickle resolves the target by module+qualname and the identity check
-        # would fail against the freshly-imported version in sys.modules.
         #
-        # IPC via temp file (not Queue) — on Windows with ProactorEventLoop,
-        # multiprocessing.Queue registers IOCP handles that cannot be pickled
-        # when asyncio is running, causing "cannot pickle '_asyncio.Future'".
-        # Writing the result to a temp JSON file avoids all handle pickling.
+        # On Windows with ProactorEventLoop (asyncio), calling Process.start()
+        # directly from the event-loop thread causes WinError 6 ("Invalid Handle")
+        # in spawn_main because IOCP registers the spawn pipe handles before the
+        # child can duplicate them.  Running the entire Process lifecycle in a
+        # dedicated threading.Thread moves it off the event-loop thread and avoids
+        # the handle-inheritance conflict entirely.
+        #
+        # IPC uses a temp file instead of multiprocessing.Queue — Queue pipe
+        # handles also get registered with IOCP, causing the earlier symptom:
+        # "cannot pickle '_asyncio.Future' object".
         import os as _os
+
         _fd, result_file = tempfile.mkstemp(suffix='.json')
         _os.close(_fd)
+
+        _thread_exc: list = []
+        _exitcode_holder: list = [None]
+
+        def _spawn_and_join():
+            try:
+                _target = sys.modules[__name__]._execute_in_process
+                p = Process(
+                    target=_target,
+                    args=(code, local_vars or {}, result_file,
+                          self.allowed_file_dirs, self.read_only_files,
+                          self.allowed_domains, self.timeout,
+                          self.max_output_size, self.max_memory_mb)
+                )
+                p.start()
+                p.join(timeout=self.timeout)
+                if p.is_alive():
+                    logger.warning(
+                        f"Tool execution exceeded {self.timeout}s limit, terminating"
+                    )
+                    p.terminate()
+                    p.join()
+                    _thread_exc.append(
+                        TimeoutError(f"Tool execution exceeded {self.timeout} second limit")
+                    )
+                    return
+                _exitcode_holder[0] = p.exitcode
+            except Exception as _e:
+                _thread_exc.append(_e)
+
+        _t = threading.Thread(target=_spawn_and_join, daemon=True)
+        _t.start()
+        # Allow a small buffer beyond the tool timeout for process overhead
+        _t.join(timeout=self.timeout + 10)
+
         try:
-            _target = sys.modules[__name__]._execute_in_process
-            p = Process(
-                target=_target,
-                args=(code, local_vars or {}, result_file,
-                      self.allowed_file_dirs, self.read_only_files,
-                      self.allowed_domains, self.timeout,
-                      self.max_output_size, self.max_memory_mb)
-            )
+            if _t.is_alive():
+                # Thread (and the child process it manages) did not finish in time
+                raise TimeoutError(
+                    f"Tool execution exceeded {self.timeout} second limit"
+                )
 
-            p.start()
-            p.join(timeout=self.timeout)
+            if _thread_exc:
+                raise _thread_exc[0]
 
-            if p.is_alive():
-                # Process is still running after timeout - terminate it
-                logger.warning(f"Tool execution exceeded {self.timeout} second limit, terminating process")
-                p.terminate()
-                p.join()
-                raise TimeoutError(f"Tool execution exceeded {self.timeout} second limit")
-
-            # Check if process exited with error
-            if p.exitcode != 0:
-                logger.error(f"Tool process exited with code {p.exitcode}")
-                raise Exception(f"Tool execution failed with exit code {p.exitcode}")
+            if _exitcode_holder[0] is not None and _exitcode_holder[0] != 0:
+                logger.error(f"Tool process exited with code {_exitcode_holder[0]}")
+                raise Exception(
+                    f"Tool execution failed with exit code {_exitcode_holder[0]}"
+                )
 
             # Read result from temp file written by child process
             try:
