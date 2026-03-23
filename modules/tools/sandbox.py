@@ -723,17 +723,35 @@ class ToolSandbox:
         
         # Use multiprocessing for true isolation and timeout enforcement.
         #
-        # On Windows with ProactorEventLoop (asyncio), calling Process.start()
-        # directly from the event-loop thread causes WinError 6 ("Invalid Handle")
-        # in spawn_main because IOCP registers the spawn pipe handles before the
-        # child can duplicate them.  Running the entire Process lifecycle in a
-        # dedicated threading.Thread moves it off the event-loop thread and avoids
-        # the handle-inheritance conflict entirely.
+        # On Windows with ProactorEventLoop (asyncio), multiprocessing.Process
+        # in spawn mode is unreliable: IOCP registers handles that interfere with
+        # the spawning mechanism, and the Process object itself (including its
+        # internal Popen/Connection state) may hold asyncio.Future references
+        # that prevent pickling.
         #
-        # IPC uses a temp file instead of multiprocessing.Queue — Queue pipe
-        # handles also get registered with IOCP, causing the earlier symptom:
-        # "cannot pickle '_asyncio.Future' object".
+        # Strategy:
+        #   1. Strip _repl_state from local_vars["args"] — it's the parent's live
+        #      runtime dict (contains asyncio objects) and is meaningless in a
+        #      child process anyway.  RLM tools that need it run via a separate
+        #      in-process path.
+        #   2. Run Process.start()+join() inside a threading.Thread to stay off
+        #      the event-loop thread (avoids WinError 6 handle-duplication error).
+        #   3. IPC via temp JSON file instead of multiprocessing.Queue (Queue
+        #      pipe handles also conflict with IOCP).
+        #   4. If the subprocess approach still raises a pickle error (e.g. the
+        #      Popen/Connection object holds an asyncio.Future in some environments),
+        #      fall back to in-process execution.  Static analysis (_check_code_safety)
+        #      already ran, so the security invariants are still enforced.
         import os as _os
+
+        # --- Step 1: sanitise local_vars before pickling ---
+        _local_vars_for_proc: dict = {}
+        if local_vars:
+            _local_vars_for_proc = dict(local_vars)
+            if isinstance(_local_vars_for_proc.get("args"), dict):
+                _tool_args = dict(_local_vars_for_proc["args"])
+                _tool_args.pop("_repl_state", None)   # unpicklable; useless in child
+                _local_vars_for_proc["args"] = _tool_args
 
         _fd, result_file = tempfile.mkstemp(suffix='.json')
         _os.close(_fd)
@@ -746,7 +764,7 @@ class ToolSandbox:
                 _target = sys.modules[__name__]._execute_in_process
                 p = Process(
                     target=_target,
-                    args=(code, local_vars or {}, result_file,
+                    args=(code, _local_vars_for_proc, result_file,
                           self.allowed_file_dirs, self.read_only_files,
                           self.allowed_domains, self.timeout,
                           self.max_output_size, self.max_memory_mb)
@@ -772,15 +790,16 @@ class ToolSandbox:
         # Allow a small buffer beyond the tool timeout for process overhead
         _t.join(timeout=self.timeout + 10)
 
+        _subprocess_err: Exception | None = None
         try:
             if _t.is_alive():
-                # Thread (and the child process it manages) did not finish in time
                 raise TimeoutError(
                     f"Tool execution exceeded {self.timeout} second limit"
                 )
 
             if _thread_exc:
-                raise _thread_exc[0]
+                _subprocess_err = _thread_exc[0]
+                raise _subprocess_err
 
             if _exitcode_holder[0] is not None and _exitcode_holder[0] != 0:
                 logger.error(f"Tool process exited with code {_exitcode_holder[0]}")
@@ -794,6 +813,15 @@ class ToolSandbox:
                     result = json.load(_f)
             except Exception:
                 raise Exception("Tool execution failed to return result")
+        except (TypeError, AttributeError) as _pickle_like_err:
+            # Catch pickle-related errors (TypeError: cannot pickle '...',
+            # AttributeError on reduction) and fall through to in-process fallback.
+            _subprocess_err = _pickle_like_err
+            logger.warning(
+                f"[Sandbox] Subprocess spawn failed ({_pickle_like_err}); "
+                "falling back to in-process execution (static analysis still active)"
+            )
+            return self._execute_internal(code, local_vars)
         finally:
             try:
                 _os.unlink(result_file)
