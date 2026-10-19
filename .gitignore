@@ -24,3 +24,8 @@ modules/telegram/telegram_sessions.json
 htmlcov/
 .pytest_cache/
 /venv/
+# AIKit transient state
+.aikit/*.lock
+.aikit/*.bak
+.aikit/*.tmp_*
+.aikit/*.corrupt_*
