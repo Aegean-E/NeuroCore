@@ -3,11 +3,16 @@ version: '3.8'
 services:
   neurocore:
     build: .
+    # Publish on the host loopback only: the container binds 0.0.0.0 but is not
+    # reachable from other machines unless the user deliberately changes this mapping.
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     volumes:
       - ./data:/app/data
       - ./settings.json:/app/settings.json
     environment:
       - PYTHONUNBUFFERED=1
+      # Bind all interfaces inside the container so the published port works; exposure is
+      # bounded by the loopback publish above.
+      - NEUROCORE_HOST=0.0.0.0
     restart: unless-stopped

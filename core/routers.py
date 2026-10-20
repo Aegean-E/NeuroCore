@@ -11,6 +11,7 @@ from fastapi import APIRouter, Request, Form, Depends, HTTPException, Response, 
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, FileResponse
 from fastapi.templating import Jinja2Templates
 
+from core.archive import ArchiveSecurityError, extract_zip_safely
 from core.settings import SettingsManager, settings
 from core.dependencies import get_settings_manager, get_module_manager, get_llm_bridge, require_debug_mode, get_research_manager
 from core.module_manager import ModuleManager
@@ -2016,22 +2017,13 @@ async def import_marketplace_item_to_neurocore(item_id: str, module_manager: Mod
             return JSONResponse(status_code=400, content={"status": "error", "detail": "Module must be a .zip file"})
         module_name = re.sub(r'[^a-zA-Z0-9_]', '_', item["name"].lower()).strip('_') or item["id"]
         module_target = os.path.join("modules", module_name)
-        with zipfile.ZipFile(file_path) as zf:
-            members = zf.namelist()
-            root_dirs = {m.split('/')[0] for m in members if '/' in m}
-            if len(root_dirs) == 1:
-                root = list(root_dirs)[0] + '/'
-                for member in members:
-                    if member.startswith(root) and len(member) > len(root):
-                        rel = member[len(root):]
-                        tgt = os.path.join(module_target, rel)
-                        os.makedirs(os.path.dirname(tgt), exist_ok=True)
-                        if not member.endswith('/'):
-                            with zf.open(member) as src, open(tgt, 'wb') as dst:  # hygiene: allow zip member binary stream
-                                dst.write(src.read())
-            else:
-                os.makedirs(module_target, exist_ok=True)
-                zf.extractall(module_target)
+        # Untrusted package: a zip-slip, absolute-path or symlink member must never write
+        # outside modules/<module_name>/. See core/archive.py.
+        try:
+            extract_zip_safely(file_path, module_target, strip_root=True)
+        except ArchiveSecurityError as exc:
+            return JSONResponse(status_code=400, content={
+                "status": "error", "detail": f"Unsafe module package: {exc}"})
         result_message = f"Module '{item['name']}' extracted to modules/{module_name}/. Reload modules in Settings to activate."
 
     elif item_type == "tool":
@@ -2415,9 +2407,15 @@ async def get_footer(request: Request, settings_man: SettingsManager = Depends(g
 
 @router.get("/settings/export/config")
 async def export_config(settings_man: SettingsManager = Depends(get_settings_manager)):
-    """Downloads the current settings.json file."""
+    """Downloads the current settings.json file, without plaintext secrets by default.
+
+    Secrets are dropped rather than masked so re-importing the file never overwrites a real key
+    with a placeholder. Set NEUROCORE_EXPORT_SECRETS=1 to include them (e.g. for a full backup).
+    """
+    from core.security import export_includes_secrets, strip_secrets
+    content = settings_man.settings if export_includes_secrets() else strip_secrets(settings_man.settings)
     return JSONResponse(
-        content=settings_man.settings,
+        content=content,
         headers={"Content-Disposition": 'attachment; filename="neurocore_settings.json"'}
     )
 

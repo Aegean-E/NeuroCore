@@ -6,18 +6,34 @@
 ---
 
 ## 📊 Codebase Metrics
-- **Total Python Modules**: `188`
-- **Total Classes**: `278`
-- **Total Top-Level Functions**: `1090`
-- **Total Class Methods**: `1518`
-- **Total Source Lines**: `56195`
+- **Total Python Modules**: `196`
+- **Total Classes**: `280`
+- **Total Top-Level Functions**: `1156`
+- **Total Class Methods**: `1520`
+- **Total Source Lines**: `56971`
 
 ---
 
 ## 📦 Modules & Exported Symbols
 
+### [`core/archive.py`](core/archive.py)
+> *Safe ZIP extraction for attacker-controlled marketplace packages.*
+
+**Size**: `83` lines (`3772` bytes)
+
+**Classes:**
+- `class ArchiveSecurityError` - *Raised when a ZIP member would escape the destination directory.*
+
+**Functions:**
+- `def _is_symlink(info)` - *Whether the member records a symbolic link in its Unix mode bits.*
+- `def _safe_member_path(dest_dir, member)` - *The absolute write path for `member`, or raise when it escapes `dest_dir`.*
+- `def _common_root(infos)` - *The single shared top-level directory of the archive as ``dir/``, or ``''``.*
+- `def extract_zip_safely(archive_path, dest_dir, strip_root)` - *Extract `archive_path` into `dest_dir`, refusing escaping or symlink members.*
+
+---
+
 ### [`core/debug.py`](core/debug.py)
-**Size**: `90` lines (`3003` bytes)
+**Size**: `94` lines (`3179` bytes)
 
 **Classes:**
 - `class DebugLogger` - *Debug logger for flow execution.*
@@ -459,7 +475,7 @@
 ---
 
 ### [`core/routers.py`](core/routers.py)
-**Size**: `3262` lines (`142935` bytes)
+**Size**: `3260` lines (`142932` bytes)
 
 **Functions:**
 - `def format_reasoning_content(content)` - *Extracts the actual content from a raw LLM response dictionary string.*
@@ -538,7 +554,7 @@
 - `async def get_system_time(request)`
 - `async def get_settings_modules_nav(request, module_manager)`
 - `async def get_footer(request, settings_man)`
-- `async def export_config(settings_man)` - *Downloads the current settings.json file.*
+- `async def export_config(settings_man)` - *Downloads the current settings.json file, without plaintext secrets by default.*
 - `async def import_config(request, file, settings_man)` - *Imports settings from a JSON file.*
 - `async def export_flows()` - *Downloads the current ai_flows.json file.*
 - `async def import_flows(request, file)` - *Imports flows from a JSON file.*
@@ -636,6 +652,36 @@
 
 **Classes:**
 - `class StudyDesign` - *Represents a research study design.*
+
+---
+
+### [`core/security.py`](core/security.py)
+> *Control-plane security policy for NeuroCore.*
+
+**Size**: `215` lines (`8795` bytes)
+
+**Classes:**
+- `class ControlPlaneGuard` - *CSRF origin check plus an opt-in API token for non-loopback clients.*
+  - Method `async def .dispatch(request, call_next)`
+
+**Functions:**
+- `def _env_flag(name)` - *True when the named environment variable holds an affirmative value.*
+- `def _env_list(name)` - *The comma-separated, non-empty, lower-cased entries of an environment variable.*
+- `def bind_host()` - *The interface the server binds to; loopback unless NEUROCORE_HOST opts in.*
+- `def bind_port()` - *The TCP port the server binds to; 8000 when NEUROCORE_PORT is missing or invalid.*
+- `def reload_enabled()` - *Auto-reload is off unless NEUROCORE_RELOAD explicitly turns it on.*
+- `def allowed_hosts()` - *Loopback hosts plus the test host, plus any NEUROCORE_ALLOWED_HOSTS opt-in.*
+- `def export_includes_secrets()` - *Secrets stay out of the config export unless NEUROCORE_EXPORT_SECRETS opts in.*
+- `def _is_sensitive_key(key)` - *Whether a mapping key names a secret (its value must be masked or dropped).*
+- `def redact_secrets(values)` - *Return `values` with every sensitive entry replaced by REDACTED, recursively.*
+- `def strip_secrets(values)` - *Return `values` with every sensitive key removed, recursively.*
+- `def api_token()` - *The optional control-plane API token; empty keeps the local no-token workflow.*
+- `def trusted_origins()` - *Extra origins accepted for state-changing requests (NEUROCORE_TRUSTED_ORIGINS).*
+- `def _is_loopback_host(host)` - *Whether `host` names this machine (loopback or the test client).*
+- `def _origin_allowed(origin, request)` - *Whether a browser `Origin` header may make a state-changing request to `request`.*
+- `def _client_is_loopback(request)` - *Whether the connecting peer is this machine (so the API token is not required).*
+- `def _token_matches(request, expected)` - *Constant-time check of the X-API-Token header or an Authorization: Bearer token.*
+- `def install_security_middleware(app)` - *Attach the trusted-host guard, the CSRF check and the optional API token guard.*
 
 ---
 
@@ -767,7 +813,7 @@
 ---
 
 ### [`main.py`](main.py)
-**Size**: `184` lines (`7825` bytes)
+**Size**: `190` lines (`8231` bytes)
 
 **Functions:**
 - `async def verify_debug_key(x_debug_key)` - *Verify debug API key for protected debug endpoints.*
@@ -1413,7 +1459,7 @@
 ---
 
 ### [`modules/memory/router.py`](modules/memory/router.py)
-**Size**: `288` lines (`14445` bytes)
+**Size**: `289` lines (`14520` bytes)
 
 **Functions:**
 - `async def get_stats(request)`
@@ -1443,7 +1489,7 @@
 ---
 
 ### [`modules/memory_browser/router.py`](modules/memory_browser/router.py)
-**Size**: `119` lines (`5217` bytes)
+**Size**: `120` lines (`5242` bytes)
 
 **Functions:**
 - `def format_timestamp(ts)`
@@ -2017,7 +2063,7 @@
 ### [`modules/tools/sandbox.py`](modules/tools/sandbox.py)
 > *Tool Execution Sandbox for NeuroCore*
 
-**Size**: `875` lines (`35626` bytes)
+**Size**: `906` lines (`37752` bytes)
 
 **Classes:**
 - `class SecurityError` - *Raised when sandbox security policy is violated.*
@@ -2025,6 +2071,7 @@
 - `class TimeoutError` - *Raised when tool execution exceeds time limit.*
 - `class RestrictedImport` - *Import hook that blocks dangerous modules and only allows safe ones.*
   - Method `.__init__(allowed_modules, mock_modules, passthrough_modules)`
+  - Method `._is_passthrough(name)` - *Whether `name` is exactly, or a submodule of, an allowlisted first-party module.*
   - Method `.__call__(name, globals, locals, fromlist, level)`
 - `class SafeOpen` - *Restricted file open that only allows access to specific directories.*
   - Method `.__init__(allowed_dirs, read_only)`
@@ -2272,6 +2319,24 @@
 **Functions:**
 - `async def test_get_executor_class()`
 - `async def test_comment_executor_stops_propagation()`
+
+---
+
+### [`tests/test_archive_safety.py`](tests/test_archive_safety.py)
+> *Regression tests for M2: ZIP extraction must never escape its destination (zip-slip).*
+
+**Size**: `104` lines (`3902` bytes)
+
+**Functions:**
+- `def _write_zip(path, members)`
+- `def _write_symlink_zip(path)`
+- `def test_rejects_zip_slip(tmp_path)`
+- `def test_rejects_absolute_member(tmp_path)`
+- `def test_rejects_symlink_member(tmp_path)`
+- `def test_extracts_flat_archive(tmp_path)`
+- `def test_strips_single_root_directory(tmp_path)`
+- `async def test_import_route_refuses_zip_slip(tmp_path, monkeypatch)`
+- `async def test_import_route_extracts_safe_module(tmp_path, monkeypatch)`
 
 ---
 
@@ -3937,6 +4002,25 @@
 
 ---
 
+### [`tests/test_sandbox_escape.py`](tests/test_sandbox_escape.py)
+> *Regression tests for M3: sandbox escape paths.*
+
+**Size**: `75` lines (`2509` bytes)
+
+**Functions:**
+- `def test_bare_modules_package_is_not_passthrough()`
+- `def test_sandbox_module_cannot_be_imported()`
+- `def test_allowlisted_first_party_module_imports()`
+- `def test_calendar_passthrough_still_works_in_sandbox()`
+- `def test_importing_sandbox_at_runtime_is_refused()`
+- `def test_dunder_class_attribute_is_blocked_statically()`
+- `def test_dunder_traversal_is_blocked_at_runtime()`
+- `def test_getattr_dunder_is_blocked()`
+- `def test_subscript_dunder_is_blocked()`
+- `def test_double_underscore_name_attribute_still_allowed()` - *``__name__`` is not an escape; tools rely on it (e.g. type(x).__name__).*
+
+---
+
 ### [`tests/test_sandbox_security.py`](tests/test_sandbox_security.py)
 > *Tests for sandbox security - attempting known bypass techniques.*
 
@@ -3957,6 +4041,56 @@
   - Method `.test_safe_code_executes()` - *Test that safe code executes correctly.*
   - Method `.test_safe_math_executes()` - *Test that safe math operations work.*
   - Method `.test_safe_json_executes()` - *Test that safe JSON operations work.*
+
+---
+
+### [`tests/test_secret_redaction.py`](tests/test_secret_redaction.py)
+> *Regression tests for M4: secrets must never reach an export or a log in plaintext.*
+
+**Size**: `61` lines (`2340` bytes)
+
+**Functions:**
+- `def test_redact_secrets_masks_flat_and_nested()`
+- `def test_redact_secrets_keeps_empty_values()`
+- `def test_strip_secrets_drops_sensitive_keys()`
+- `async def test_export_config_strips_secrets_by_default(monkeypatch)`
+- `async def test_export_config_includes_secrets_when_opted_in(monkeypatch)`
+- `def test_debug_logger_redacts_secrets(caplog)`
+
+---
+
+### [`tests/test_security_binding.py`](tests/test_security_binding.py)
+> *Regression tests for the M1 control-plane binding policy and trusted-host guard.*
+
+**Size**: `76` lines (`2693` bytes)
+
+**Functions:**
+- `def _guarded_client()`
+- `def test_bind_defaults_to_loopback(monkeypatch)`
+- `def test_bind_host_opt_in(monkeypatch)`
+- `def test_bind_port_default_and_invalid(monkeypatch)`
+- `def test_reload_is_off_by_default(monkeypatch)`
+- `def test_allowed_hosts_are_loopback_by_default(monkeypatch)`
+- `def test_trusted_host_guard_rejects_unknown_host(monkeypatch)`
+- `def test_trusted_host_guard_accepts_opt_in_host(monkeypatch)`
+- `def test_main_app_carries_the_host_guard()` - *The real application must be constructed with the guard installed.*
+
+---
+
+### [`tests/test_security_middleware.py`](tests/test_security_middleware.py)
+> *Regression tests for M6: auth (opt-in API token) and CSRF (cross-origin write) enforcement.*
+
+**Size**: `74` lines (`2703` bytes)
+
+**Functions:**
+- `def _guarded_client()`
+- `def test_csrf_blocks_cross_origin_write(monkeypatch)`
+- `def test_csrf_allows_same_origin_write(monkeypatch)`
+- `def test_csrf_allows_trusted_origin(monkeypatch)`
+- `def test_get_is_not_csrf_checked(monkeypatch)`
+- `def test_api_token_required_for_non_loopback_when_set(monkeypatch)`
+- `def test_api_token_not_required_when_unset(monkeypatch)`
+- `def test_loopback_client_is_exempt_from_token()`
 
 ---
 
@@ -4345,5 +4479,17 @@
 - `def test_module_list_fragment(client)` - *Tests if the module list fragment loads correctly.*
 - `def test_llm_status_fragment(client)` - *Tests if the LLM status fragment loads correctly.*
 - `def test_chat_page_loading(client)` - *Tests if the /chat route correctly prepares the dashboard for chat.*
+
+---
+
+### [`tests/test_xss_escaping.py`](tests/test_xss_escaping.py)
+> *Regression tests for M5: stored content must be escaped, not rendered as HTML.*
+
+**Size**: `47` lines (`1730` bytes)
+
+**Functions:**
+- `def test_jinja_environment_autoescapes()`
+- `async def test_memory_stats_type_is_html_escaped(monkeypatch)`
+- `def test_marketplace_templates_escape_stored_content()`
 
 ---

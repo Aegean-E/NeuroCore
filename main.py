@@ -29,6 +29,7 @@ from core.observability import (
     instrument_tools,
 )
 from core.routers import router as core_router
+from core.security import bind_host, bind_port, install_security_middleware, reload_enabled
 from core.settings import settings
 
 
@@ -156,6 +157,9 @@ os.makedirs(static_dir, exist_ok=True)
 app.mount("/static", StaticFiles(directory=static_dir), name="static")
 app.include_router(core_router)
 
+# Trusted-host guard: only loopback hosts are accepted unless NEUROCORE_ALLOWED_HOSTS opts in.
+install_security_middleware(app)
+
 # Debug Endpoint to manually fire all active flows
 @app.post("/debug/fire-flow", dependencies=[Depends(verify_debug_key)])
 async def debug_fire_flow():
@@ -177,8 +181,10 @@ async def debug_fire_flow():
 # --- Server Startup ---
 if __name__ == "__main__":
     import uvicorn
+    # Loopback by default and no auto-reload unless explicitly opted in; a remote bind or the
+    # reloader must never be a silent default (see core/security.py).
     # Exclude all .json files from the reloader. This prevents the server from
     # restarting when state files (settings, flows, sessions, module configs)
     # are updated by the application itself, which fixes the module reordering issue.
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True, reload_excludes=["*.json", "data/*.json", "data/execution_trace.jsonl", "data/*.sqlite3*", "modules/*/*.json"], loop="asyncio")
+    uvicorn.run("main:app", host=bind_host(), port=bind_port(), reload=reload_enabled(), reload_excludes=["*.json", "data/*.json", "data/execution_trace.jsonl", "data/*.sqlite3*", "modules/*/*.json"], loop="asyncio")
 

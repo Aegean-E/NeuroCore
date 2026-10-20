@@ -139,6 +139,27 @@ python -m pytest --cov=.
 
 ---
 
+## 🔒 Security Defaults
+
+NeuroCore is a control plane with no authentication, so it stays local by default. Remote
+access, the auto-reloader and secret-bearing exports are each an explicit opt-in:
+
+| Environment variable | Default | Effect when set |
+|---|---|---|
+| `NEUROCORE_HOST` | `127.0.0.1` | Bind another interface (Docker uses `0.0.0.0` inside the container) |
+| `NEUROCORE_PORT` | `8000` | Bind another port |
+| `NEUROCORE_RELOAD` | off | Enable uvicorn auto-reload |
+| `NEUROCORE_ALLOWED_HOSTS` | loopback only | Accept extra `Host` names |
+| `NEUROCORE_API_TOKEN` | unset | Require a token from non-loopback clients |
+| `NEUROCORE_EXPORT_SECRETS` | off | Include secrets in the config export |
+
+State-changing requests are rejected when their `Origin` is cross-origin (CSRF). Marketplace
+packages are extracted through a path-confined helper, tool code runs in a sandbox whose
+first-party imports are allowlisted, and secrets are stripped from config exports and masked in
+debug logs.
+
+---
+
 ## 📄 License
 
 NeuroCore is licensed under the [GNU Affero General Public License v3](LICENSE).

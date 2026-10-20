@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Request, Form
 from fastapi.responses import HTMLResponse, Response, JSONResponse
 from fastapi.templating import Jinja2Templates
+from html import escape as html_escape
 import json
 import time
 import asyncio
@@ -20,13 +21,13 @@ async def get_stats(request: Request):
         loop = asyncio.get_running_loop()
         stats = await loop.run_in_executor(memory_store.executor, memory_store.get_memory_stats)
     except Exception as e:
-        return f"<div class='text-red-400 text-sm p-4 border border-red-500/50 rounded-lg bg-red-900/20'>Error loading stats: {str(e)}</div>"
+        return f"<div class='text-red-400 text-sm p-4 border border-red-500/50 rounded-lg bg-red-900/20'>Error loading stats: {html_escape(str(e))}</div>"
     
     # Build type breakdown HTML
     type_html = ""
     types_dict = stats.get('types', {})
     for t_name, count in types_dict.items():
-        type_html += f'<span class="px-2 py-0.5 bg-slate-700 text-slate-300 rounded text-[10px] font-mono">{t_name}: {count}</span> '
+        type_html += f'<span class="px-2 py-0.5 bg-slate-700 text-slate-300 rounded text-[10px] font-mono">{html_escape(str(t_name))}: {int(count)}</span> '
 
     html = f"""
     <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4 mb-6">

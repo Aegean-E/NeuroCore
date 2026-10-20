@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Request, Query
 from fastapi.responses import HTMLResponse, JSONResponse, Response
 from fastapi.templating import Jinja2Templates
+import html
 import json
 import logging
 from modules.memory.backend import memory_store
@@ -68,7 +69,7 @@ async def list_memories(
     except Exception as e:
         import traceback
         traceback.print_exc()
-        return HTMLResponse(content=f"<div class='p-4 text-red-400 italic'>Error loading memories: {str(e)}</div>", status_code=500)
+        return HTMLResponse(content=f"<div class='p-4 text-red-400 italic'>Error loading memories: {html.escape(str(e))}</div>", status_code=500)
 
 @router.delete("/delete/{memory_id}")
 async def delete_memory(request: Request, memory_id: int):

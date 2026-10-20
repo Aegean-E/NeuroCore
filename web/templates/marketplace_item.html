@@ -321,6 +321,12 @@
     </div>
 
     <script>
+    // Escape stored, other-user content before it is placed into innerHTML (stored XSS guard).
+    function escapeHtml(value) {
+        return String(value == null ? '' : value)
+            .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+    }
     // ── Vote ──────────────────────────────────────────────────────────
     function castVote(itemId, direction) {
         fetch('/marketplace/vote/' + itemId + '/' + direction, { method: 'POST' })
@@ -507,7 +513,7 @@
             el.type = 'button';
             el.dataset.mentionIdx = i;
             el.className = `w-full text-left px-3 py-2 flex items-center space-x-2 text-xs transition-colors ${i === 0 ? 'bg-slate-700/60' : 'bg-transparent'} hover:bg-slate-700/60`;
-            el.innerHTML = `<span class="font-mono text-blue-400 flex-shrink-0">@${m.handle}</span>${m.username ? `<span class="text-slate-500 truncate">${m.username}</span>` : ''}`;
+            el.innerHTML = `<span class="font-mono text-blue-400 flex-shrink-0">@${escapeHtml(m.handle)}</span>${m.username ? `<span class="text-slate-500 truncate">${escapeHtml(m.username)}</span>` : ''}`;
             el.onmousedown = (e) => { e.preventDefault(); pickMention(m.handle); };
             dd.appendChild(el);
         });
@@ -561,10 +567,10 @@
                 div.className = 'bg-slate-900/60 border border-slate-800/60 rounded-xl px-3 py-2.5';
                 div.dataset.commentId = c.id;
                 const nameHtml = c.author_username
-                    ? `<span class="text-[10px] font-bold text-blue-400 leading-tight">${c.author_username}</span><span class="text-[9px] font-mono text-slate-500 leading-tight">${c.author_handle}</span>`
-                    : `<span class="text-[9px] font-mono text-slate-500 leading-tight">${c.author_handle}</span>`;
+                    ? `<span class="text-[10px] font-bold text-blue-400 leading-tight">${escapeHtml(c.author_username)}</span><span class="text-[9px] font-mono text-slate-500 leading-tight">${escapeHtml(c.author_handle)}</span>`
+                    : `<span class="text-[9px] font-mono text-slate-500 leading-tight">${escapeHtml(c.author_handle)}</span>`;
                 div.innerHTML = `<div class="flex items-center justify-between mb-1">
-                    <a href="/marketplace/uploader/${c.author_handle}" class="flex flex-col hover:text-blue-300 transition-colors truncate max-w-[140px]">${nameHtml}</a>
+                    <a href="/marketplace/uploader/${encodeURIComponent(c.author_handle)}" class="flex flex-col hover:text-blue-300 transition-colors truncate max-w-[140px]">${nameHtml}</a>
                     <div class="flex items-center space-x-1 flex-shrink-0 ml-1">
                         <span class="text-[10px] text-slate-600">${c.timestamp}</span>
                         <button onclick="deleteComment('${c.id}', this)" class="text-slate-700 hover:text-red-400 transition-colors ml-1" title="Delete">
@@ -572,7 +578,7 @@
                         </button>
                     </div>
                 </div>
-                <p class="text-xs text-slate-300 leading-relaxed">${c.text}</p>`;
+                <p class="text-xs text-slate-300 leading-relaxed">${escapeHtml(c.text)}</p>`;
                 const list = document.getElementById('comments-list');
                 const empty = list.querySelector('p.text-slate-600');
                 if (empty) empty.remove();

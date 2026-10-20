@@ -81,10 +81,19 @@ SAFE_MODULES: Set[str] = {
     'youtube_transcript_api',
 }
 
-# Internal NeuroCore namespaces whose imports are passed through to the real
-# Python importer unchanged.  These are first-party trusted modules that some
-# library tools need (e.g. modules.calendar.events.event_manager).
-PASSTHROUGH_PREFIXES: Set[str] = {'modules'}
+# First-party modules whose imports pass through to the real Python importer unchanged.
+# This is an explicit allowlist, not a namespace prefix: a bare ``modules`` prefix let sandboxed
+# code import ``modules.tools.sandbox`` and reach the real ``os``/``sys`` globals of this very
+# module, which is a direct escape.
+PASSTHROUGH_MODULES: Set[str] = {'modules.calendar.events'}
+
+# Attributes that reach the real interpreter object graph. Traversing them escapes the sandbox
+# (e.g. ``().__class__.__mro__[1].__subclasses__()`` finds the real ``os`` module).
+DANGEROUS_ATTRIBUTES: Set[str] = {
+    '__class__', '__bases__', '__base__', '__mro__', '__subclasses__',
+    '__globals__', '__code__', '__closure__', '__builtins__', '__loader__',
+    '__spec__', '__reduce__', '__reduce_ex__', '__getattribute__', '__subclasshook__',
+}
 
 
 class SecurityError(Exception):
@@ -118,9 +127,16 @@ class RestrictedImport:
         self.allowed = allowed_modules or SAFE_MODULES
         self.blocked = DANGEROUS_MODULES
         self.mock_modules: Dict[str, Any] = mock_modules or {}
-        # Namespaces whose imports pass through to the real importer unchanged
-        # (used for trusted first-party code like NeuroCore's own ``modules.*``).
-        self.passthrough: Set[str] = passthrough_modules or PASSTHROUGH_PREFIXES
+        # First-party modules whose imports pass through to the real importer unchanged.
+        self.passthrough: Set[str] = passthrough_modules or PASSTHROUGH_MODULES
+
+    def _is_passthrough(self, name: str) -> bool:
+        """Whether `name` is exactly, or a submodule of, an allowlisted first-party module.
+
+        A bare parent name (e.g. ``modules``) is deliberately *not* a match: importing the
+        package alone would expose every already-loaded submodule as an attribute.
+        """
+        return any(name == allowed or name.startswith(allowed + '.') for allowed in self.passthrough)
 
     def __call__(self, name: str, globals=None, locals=None, fromlist=(), level=0):
         base_module = name.split('.')[0]
@@ -133,8 +149,8 @@ class RestrictedImport:
         if base_module in self.blocked:
             raise SecurityError(f"Import of module '{name}' is not allowed in sandboxed environment")
 
-        # Pass through trusted internal namespaces (e.g. modules.calendar.events)
-        if base_module in self.passthrough:
+        # Pass through trusted first-party modules (e.g. modules.calendar.events)
+        if self._is_passthrough(name):
             return _real_import(name, globals, locals, fromlist, level)
 
         # Check if full name or any prefix is in allowed list
@@ -655,6 +671,15 @@ class ToolSandbox:
             tree = ast.parse(code)
             dangerous_funcs = {'exec', 'eval', 'compile', 'breakpoint', 'open', '__import__'}
             for node in ast.walk(tree):
+                # Dunder traversal (attribute, subscript key or getattr string) reaches the real
+                # interpreter objects and escapes the sandbox.
+                if isinstance(node, ast.Attribute) and node.attr in DANGEROUS_ATTRIBUTES:
+                    raise SecurityError(f"Dangerous attribute access detected: .{node.attr}")
+                if isinstance(node, ast.Subscript) and isinstance(node.slice, ast.Constant) \
+                        and isinstance(node.slice.value, str) \
+                        and node.slice.value in DANGEROUS_ATTRIBUTES:
+                    raise SecurityError(
+                        f"Dangerous subscript access detected: [{node.slice.value!r}]")
                 if isinstance(node, ast.Call):
                     # Check direct function calls like exec()
                     if isinstance(node.func, ast.Name) and node.func.id in dangerous_funcs:
@@ -662,6 +687,12 @@ class ToolSandbox:
                         if node.func.id == 'open' and self.allowed_file_dirs:
                             continue
                         raise SecurityError(f"Dangerous call detected: {node.func.id}()")
+                    # getattr(x, "__globals__") reaches the same object graph by a string name.
+                    if isinstance(node.func, ast.Name) and node.func.id in ('getattr', 'setattr') \
+                            and len(node.args) >= 2 and isinstance(node.args[1], ast.Constant) \
+                            and node.args[1].value in DANGEROUS_ATTRIBUTES:
+                        raise SecurityError(
+                            f"Dangerous {node.func.id} access detected: {node.args[1].value!r}")
                     # Check getattr(builtins, "exec")() style calls
                     if isinstance(node.func, ast.Attribute):
                         if node.func.attr in dangerous_funcs:

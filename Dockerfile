@@ -22,5 +22,9 @@ RUN mkdir -p data
 # Expose port
 EXPOSE 8000
 
+# Bind all interfaces inside the container so a published port works. Remote exposure is
+# bounded by the host publish mapping (loopback-only in docker-compose.yml).
+ENV NEUROCORE_HOST=0.0.0.0
+
 # Run the application
 CMD ["python", "main.py"]

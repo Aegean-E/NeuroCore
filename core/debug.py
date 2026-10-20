@@ -4,6 +4,8 @@ import json
 import time
 import logging
 
+from core.security import redact_secrets
+
 logger = logging.getLogger(__name__)
 
 # Default max logs - can be overridden via settings
@@ -39,6 +41,8 @@ class DebugLogger:
         self.logs = deque(maxlen=self.max_logs)
     
     def log(self, flow_id, node_id, node_name, event_type, details):
+        # Never store or print a plaintext secret: mask sensitive keys at the log boundary.
+        details = redact_secrets(details)
         entry = {
             "timestamp": datetime.now().strftime("%H:%M:%S.%f")[:-3],
             "timestamp_raw": time.time(),
