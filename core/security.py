@@ -79,7 +79,13 @@ def reload_enabled() -> bool:
 
 
 def allowed_hosts() -> list:
-    """Loopback hosts plus the test host, plus any NEUROCORE_ALLOWED_HOSTS opt-in."""
+    """Loopback hosts plus the test host, plus any NEUROCORE_ALLOWED_HOSTS opt-in.
+
+    Behind a reverse proxy (e.g. nginx → 127.0.0.1:8000), the proxy IP is seen as
+    ``request.client.host``. To allow the proxy, either set ``NEUROCORE_API_TOKEN``
+    (recommended) or add the proxy host to ``NEUROCORE_ALLOWED_HOSTS`` and
+    ``NEUROCORE_TRUSTED_ORIGINS``.
+    """
     hosts = list(LOOPBACK_HOSTS) + [TEST_HOST]
     for host in _env_list("NEUROCORE_ALLOWED_HOSTS"):
         if host not in hosts:
@@ -88,7 +94,11 @@ def allowed_hosts() -> list:
 
 
 def export_includes_secrets() -> bool:
-    """Secrets stay out of the config export unless NEUROCORE_EXPORT_SECRETS opts in."""
+    """Secrets stay out of the config export unless NEUROCORE_EXPORT_SECRETS opts in.
+
+    A full backup that can be restored 1:1 requires ``NEUROCORE_EXPORT_SECRETS=1``.
+    The default strips secrets so a re-import never overwrites a real key with a placeholder.
+    """
     return _env_flag("NEUROCORE_EXPORT_SECRETS")
 
 

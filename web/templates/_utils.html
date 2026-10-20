@@ -1,0 +1,9 @@
+// Escape stored, other-user content before it is placed into innerHTML (stored XSS guard).
+function escapeHtml(value) {
+    return String(value == null ? '' : value)
+        .replace(/&/g, '&')
+        .replace(/</g, '<')
+        .replace(/>/g, '>')
+        .replace(/"/g, '"')
+        .replace(/'/g, ''');
+}

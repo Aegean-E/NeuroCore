@@ -6,6 +6,7 @@
     <title>{{ item.name }} — Marketplace</title>
     <script src="https://cdn.tailwindcss.com"></script> <!-- hygiene: allow cdn asset -->
     <script src="https://unpkg.com/htmx.org@2.0.2"></script> <!-- hygiene: allow cdn asset -->
+    {% include '_utils.html' %}
     <style>
         .custom-scrollbar::-webkit-scrollbar { width: 4px; }
         .custom-scrollbar::-webkit-scrollbar-thumb { background: #4a5568; border-radius: 2px; }
@@ -318,15 +319,9 @@
                         class="bg-red-600 hover:bg-red-500 text-white px-4 py-2 rounded-lg text-sm font-bold transition-all">Delete</button>
             </div>
         </div>
-    </div>
+</div>
 
     <script>
-    // Escape stored, other-user content before it is placed into innerHTML (stored XSS guard).
-    function escapeHtml(value) {
-        return String(value == null ? '' : value)
-            .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-            .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
-    }
     // ── Vote ──────────────────────────────────────────────────────────
     function castVote(itemId, direction) {
         fetch('/marketplace/vote/' + itemId + '/' + direction, { method: 'POST' })

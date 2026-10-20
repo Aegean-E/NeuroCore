@@ -85,6 +85,9 @@ SAFE_MODULES: Set[str] = {
 # This is an explicit allowlist, not a namespace prefix: a bare ``modules`` prefix let sandboxed
 # code import ``modules.tools.sandbox`` and reach the real ``os``/``sys`` globals of this very
 # module, which is a direct escape.
+#
+# Only ``modules.calendar.events`` is allowed by default; the test suite exercises this path.
+# If untrusted user code needs other first-party modules, add them here explicitly.
 PASSTHROUGH_MODULES: Set[str] = {'modules.calendar.events'}
 
 # Attributes that reach the real interpreter object graph. Traversing them escapes the sandbox

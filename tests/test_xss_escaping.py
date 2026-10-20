@@ -40,8 +40,9 @@ def test_marketplace_templates_escape_stored_content():
     base = Path(__file__).resolve().parent.parent / "web" / "templates"
     item = (base / "marketplace_item.html").read_text(encoding="utf-8")
     listing = (base / "marketplace.html").read_text(encoding="utf-8")
-    assert "function escapeHtml(" in item
+    # Templates now include the shared escapeHtml utility from _utils.html
+    assert "{% include '_utils.html' %}" in item
+    assert "{% include '_utils.html' %}" in listing
     assert "escapeHtml(c.text)" in item
     assert "escapeHtml(m.username)" in item
-    assert "function escapeHtml(" in listing
     assert "escapeHtml(n.text)" in listing
