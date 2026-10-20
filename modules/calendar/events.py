@@ -1,11 +1,16 @@
 import json
+import logging
 import os
-import uuid
-import threading
 import tempfile
+import threading
+import uuid
 from datetime import datetime
 
-EVENTS_FILE = "calendar_events.json"
+from core.paths import project_path
+
+logger = logging.getLogger(__name__)
+
+EVENTS_FILE = project_path("calendar_events.json")
 
 class EventManager:
     def __init__(self, storage_file=EVENTS_FILE):
@@ -17,7 +22,7 @@ class EventManager:
         """Ensure the storage file exists. Check and create inside lock to avoid race condition."""
         with self.lock:
             if not os.path.exists(self.storage_file):
-                with open(self.storage_file, "w") as f:
+                with open(self.storage_file, "w", encoding="utf-8") as f:
                     json.dump([], f)
 
     def _with_lock(self, fn):
@@ -36,7 +41,7 @@ class EventManager:
     def _load_events_unsafe(self):
         """Load events without acquiring lock (caller must hold lock)."""
         try:
-            with open(self.storage_file, "r") as f:
+            with open(self.storage_file, "r", encoding="utf-8") as f:
                 return json.load(f)
         except (json.JSONDecodeError, OSError):
             return []
@@ -52,7 +57,7 @@ class EventManager:
     def _load_events(self):
         try:
             with self.lock:
-                with open(self.storage_file, "r") as f:
+                with open(self.storage_file, "r", encoding="utf-8") as f:
                     return json.load(f)
         except (json.JSONDecodeError, OSError):
             return []

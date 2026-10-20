@@ -1,11 +1,13 @@
-import os
+import asyncio
 import json
 import logging
-import asyncio
+import os
 import uuid
 from datetime import datetime, timedelta, timezone
 
-DATA_FILE = "data/reasoning_book.json"
+from core.paths import project_path
+
+DATA_FILE = project_path("data", "reasoning_book.json")
 MAX_THOUGHTS = 100
 MAX_DAYS_OLD = 7  # Prune thoughts older than 7 days
 
@@ -21,7 +23,7 @@ class ReasoningBookService:
     def _load(self):
         if os.path.exists(self.data_file):
             try:
-                with open(self.data_file, "r") as f:
+                with open(self.data_file, "r", encoding="utf-8") as f:
                     self.thoughts = json.load(f)
             except (json.JSONDecodeError, OSError) as e:
                 # JSONDecodeError: Corrupted JSON file
@@ -32,7 +34,7 @@ class ReasoningBookService:
     def _save(self):
         os.makedirs(os.path.dirname(self.data_file) or ".", exist_ok=True)
         try:
-            with open(self.data_file, "w") as f:
+            with open(self.data_file, "w", encoding="utf-8") as f:
                 json.dump(self.thoughts, f)
         except (OSError, TypeError) as e:
             # OSError: File write permissions or I/O issues

@@ -27,7 +27,7 @@ async def _load_tools_cached():
             mtime = os.path.getmtime(_tools_path)
             async with _tools_lock:
                 if mtime > _tools_cache["mtime"]:
-                    with open(_tools_path, "r") as f:
+                    with open(_tools_path, "r", encoding="utf-8") as f:
                         _tools_cache["data"] = json.load(f)
                     _tools_cache["mtime"] = mtime
             return _tools_cache["data"]

@@ -28,7 +28,7 @@ class ConfigLoader:
             if os.path.exists(cls._path):
                 mtime = os.path.getmtime(cls._path)
                 if mtime > cls._cache["mtime"]:
-                    with open(cls._path, "r") as f:
+                    with open(cls._path, "r", encoding="utf-8") as f:
                         cls._cache["data"] = json.load(f).get("config", {})
                     cls._cache["mtime"] = mtime
         except (json.JSONDecodeError, OSError, KeyError) as e:
@@ -272,8 +272,8 @@ class MemorySaveExecutor:
                 subject = "Assistant"
                 if not config_source:
                     source = "reasoning"
-            except (IndexError, KeyError, TypeError):
-                pass
+            except (IndexError, KeyError, TypeError) as _exc:
+                logger.debug("ignored exception: %s", _exc)
 
         # 3. Check for message history (e.g., from Chat Input) -> User Memory
         elif "messages" in input_data:
@@ -348,8 +348,8 @@ class MemorySaveExecutor:
                             consolidation_task.cancel()
                             try:
                                 await consolidation_task
-                            except asyncio.CancelledError:
-                                pass
+                            except asyncio.CancelledError as _exc:
+                                logger.debug("ignored exception: %s", _exc)
             except Exception as e:
                 logger.warning(f"Auto-consolidation check failed: {e}")
 

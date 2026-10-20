@@ -19,7 +19,7 @@ class ToolDispatcherExecutor:
     
     def _load_tools(self):
         if os.path.exists(TOOLS_FILE):
-            with open(TOOLS_FILE, "r") as f:
+            with open(TOOLS_FILE, "r", encoding="utf-8") as f:
                 try:
                     return json.load(f)
                 except (json.JSONDecodeError, OSError) as e:

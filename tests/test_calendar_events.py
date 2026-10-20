@@ -106,7 +106,7 @@ def test_get_upcoming_sorted_by_start_time(event_manager):
 def test_get_upcoming_limit_respected(event_manager):
     """get_upcoming() should respect the limit parameter."""
     for i in range(5):
-        event_manager.add_event(f"Event {i}", f"2026-07-{10 + i:02d} 10:00")
+        event_manager.add_event(f"Event {i}", f"2099-07-{10 + i:02d} 10:00")
 
     upcoming = event_manager.get_upcoming(limit=3)
     assert len(upcoming) == 3

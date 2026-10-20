@@ -1,9 +1,13 @@
 """Test that load_error is never persisted to module.json"""
+
+import logging
 import json
 import os
 import tempfile
 from unittest.mock import MagicMock, patch
 from fastapi import FastAPI
+
+logger = logging.getLogger(__name__)
 
 # Clean up any previous test runs
 test_module_dir = "modules/_test_module"
@@ -13,11 +17,11 @@ if os.path.exists(test_module_dir):
 
 # Create a test module
 os.makedirs(test_module_dir, exist_ok=True)
-with open(f"{test_module_dir}/module.json", "w") as f:
+with open(f"{test_module_dir}/module.json", "w", encoding="utf-8") as f:
     json.dump({"id": "_test_module", "name": "Test", "enabled": False}, f)
 
 # Create a router
-with open(f"{test_module_dir}/router.py", "w") as f:
+with open(f"{test_module_dir}/router.py", "w", encoding="utf-8") as f:
     f.write("from fastapi import APIRouter\nrouter = APIRouter()\n")
 
 # Now test the ModuleManager
@@ -39,7 +43,7 @@ assert 'load_error' not in module_before, "FAIL: load_error should not be in mod
 mm._toggle_module("_test_module", False)
 
 # Read the actual file
-with open(f"{test_module_dir}/module.json", "r") as f:
+with open(f"{test_module_dir}/module.json", "r", encoding="utf-8") as f:
     saved = json.load(f)
 
 print(f"Module.json after toggle: {saved}")

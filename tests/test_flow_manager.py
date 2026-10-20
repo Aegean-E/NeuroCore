@@ -1,8 +1,11 @@
+import logging
 import os
 import json
 import time
 import pytest
 from core.flow_manager import FlowManager, MAX_VERSIONS_PER_FLOW
+
+logger = logging.getLogger(__name__)
 
 TEST_FLOWS_FILE = "test_flows.json"
 TEST_VERSIONS_FILE = "test_flows_versions.json"
@@ -42,7 +45,7 @@ def test_save_and_get_flow(flow_manager):
     assert retrieved_flow["nodes"][0]["id"] == "n1"
 
     # Verify it was written to disk
-    with open(TEST_FLOWS_FILE, "r") as f:
+    with open(TEST_FLOWS_FILE, "r", encoding="utf-8") as f:
         disk_data = json.load(f)
     assert flow_id in disk_data
 
@@ -183,7 +186,7 @@ class TestFlowVersioning:
         flow_id = flow["id"]
         flow_manager.save_flow("Disk v2", [], [], flow_id=flow_id)
         assert os.path.exists(TEST_VERSIONS_FILE)
-        with open(TEST_VERSIONS_FILE) as f:
+        with open(TEST_VERSIONS_FILE, encoding="utf-8") as f:
             data = json.load(f)
         assert flow_id in data
         assert len(data[flow_id]) == 1

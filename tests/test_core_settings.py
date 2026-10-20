@@ -1,12 +1,16 @@
 """
 Tests for core/settings.py — SettingsManager
 """
+
+import logging
 import pytest
 import json
 import os
 import tempfile
 from unittest.mock import patch, MagicMock
 from core.settings import SettingsManager, DEFAULT_SETTINGS
+
+logger = logging.getLogger(__name__)
 
 
 class TestSettingsManager:
@@ -26,7 +30,7 @@ class TestSettingsManager:
         with tempfile.TemporaryDirectory() as tmpdir:
             settings_file = os.path.join(tmpdir, "settings.json")
             # Create file with partial settings
-            with open(settings_file, "w") as f:
+            with open(settings_file, "w", encoding="utf-8") as f:
                 json.dump({"llm_api_url": "http://custom:8080/v1"}, f)
             
             sm = SettingsManager(settings_file)
@@ -41,7 +45,7 @@ class TestSettingsManager:
         """Invalid JSON should fall back to defaults."""
         with tempfile.TemporaryDirectory() as tmpdir:
             settings_file = os.path.join(tmpdir, "settings.json")
-            with open(settings_file, "w") as f:
+            with open(settings_file, "w", encoding="utf-8") as f:
                 f.write("invalid json{{{")
             
             sm = SettingsManager(settings_file)
@@ -59,7 +63,7 @@ class TestSettingsManager:
             assert sm.settings["llm_api_url"] == "http://new:9000/v1"
             
             # Verify file was updated
-            with open(settings_file, "r") as f:
+            with open(settings_file, "r", encoding="utf-8") as f:
                 saved = json.load(f)
             assert saved["llm_api_url"] == "http://new:9000/v1"
 

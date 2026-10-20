@@ -1,3 +1,4 @@
+import logging
 import pytest
 import threading
 import os
@@ -5,6 +6,8 @@ import json
 from unittest.mock import patch
 from core.settings import SettingsManager
 from core.flow_runner import FlowRunner
+
+logger = logging.getLogger(__name__)
 
 TEST_SETTINGS_FILE = "test_settings_concurrency.json"
 
@@ -41,7 +44,7 @@ def test_settings_concurrency(settings_manager):
     assert settings_manager.get("embedding_model") == "val3"
     
     # Verify file integrity
-    with open(TEST_SETTINGS_FILE, "r") as f:
+    with open(TEST_SETTINGS_FILE, "r", encoding="utf-8") as f:
         data = json.load(f)
         assert data["llm_api_key"] == "val1"
 

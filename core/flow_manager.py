@@ -1,15 +1,17 @@
-import json
-import os
-import uuid
 import copy
-from datetime import datetime
-import threading
-from core.settings import settings
+import json
 import logging
+import os
+import threading
+import uuid
+from datetime import datetime
+
+from core.paths import project_path
+from core.settings import settings
 
 logger = logging.getLogger(__name__)
 
-FLOWS_FILE = "ai_flows.json"
+FLOWS_FILE = project_path("ai_flows.json")
 
 # Validation constants
 REQUIRED_FLOW_KEYS = {"id", "nodes", "connections"}
@@ -41,7 +43,7 @@ class FlowManager:
             self._save_flows_to_disk_no_lock_required(default_flows)
             return default_flows
         
-        with open(self.storage_file, "r") as f:
+        with open(self.storage_file, "r", encoding="utf-8") as f:
             try:
                 flows = json.load(f)
                 if not flows:
@@ -220,13 +222,13 @@ class FlowManager:
         Args:
             flows: The flows dictionary to save to disk.
         """
-        with open(self.storage_file, "w") as f:
+        with open(self.storage_file, "w", encoding="utf-8") as f:
             json.dump(flows, f, indent=4)
 
     def _save_flows_to_disk(self, flows):
         """Save flows to disk. Acquires lock before writing."""
         with self.lock:
-            with open(self.storage_file, "w") as f:
+            with open(self.storage_file, "w", encoding="utf-8") as f:
                 json.dump(flows, f, indent=4)
 
     def _save_flows(self):
@@ -241,7 +243,7 @@ class FlowManager:
         if not os.path.exists(self.versions_file):
             return {}
         try:
-            with open(self.versions_file, "r") as f:
+            with open(self.versions_file, "r", encoding="utf-8") as f:
                 data = json.load(f)
             return data if isinstance(data, dict) else {}
         except (json.JSONDecodeError, OSError):
@@ -250,7 +252,7 @@ class FlowManager:
     def _save_versions_to_disk(self):
         """Persist the versions dict to disk (must be called while holding self.lock)."""
         try:
-            with open(self.versions_file, "w") as f:
+            with open(self.versions_file, "w", encoding="utf-8") as f:
                 json.dump(self.versions, f, indent=2)
         except OSError as e:
             logger.error(f"Failed to save flow versions: {e}")

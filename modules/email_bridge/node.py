@@ -18,7 +18,7 @@ class _ConfigLoader:
     @staticmethod
     def get_config() -> dict:
         try:
-            with open(MODULE_JSON, "r") as f:
+            with open(MODULE_JSON, "r", encoding="utf-8") as f:
                 return json.load(f).get("config", {})
         except (json.JSONDecodeError, OSError, KeyError) as e:
             logger.warning(f"email_bridge node: failed to load config: {e}")

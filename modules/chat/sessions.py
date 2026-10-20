@@ -3,13 +3,15 @@ import copy
 import json
 import logging
 import os
+import threading
 import uuid
 from datetime import datetime
-import threading
+
+from core.paths import project_path
 
 logger = logging.getLogger(__name__)
 
-SESSIONS_FILE = "chat_sessions.json"
+SESSIONS_FILE = project_path("chat_sessions.json")
 
 
 def _estimate_tokens(messages: list) -> int:
@@ -40,7 +42,7 @@ class SessionManager:
 
     def _load_sessions(self):
         if os.path.exists(self.storage_file):
-            with open(self.storage_file, "r") as f:
+            with open(self.storage_file, "r", encoding="utf-8") as f:
                 try:
                     return json.load(f)
                 except json.JSONDecodeError:
@@ -51,7 +53,7 @@ class SessionManager:
         """Save sessions to disk using atomic temp-file-and-rename pattern."""
         temp_path = self.storage_file + ".tmp"
         try:
-            with open(temp_path, "w") as f:
+            with open(temp_path, "w", encoding="utf-8") as f:
                 json.dump(self.sessions, f, indent=4)
             # Atomic replace on all platforms
             os.replace(temp_path, self.storage_file)

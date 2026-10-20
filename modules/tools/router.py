@@ -1,3 +1,4 @@
+import logging
 import os
 import json
 import asyncio
@@ -6,6 +7,8 @@ from fastapi import APIRouter, Request, Form, UploadFile, File, Query
 from fastapi.responses import HTMLResponse, Response, JSONResponse
 from fastapi.templating import Jinja2Templates
 from core.settings import settings
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 templates = Jinja2Templates(directory="web/templates")
@@ -55,7 +58,7 @@ def load_tools():
     lock = filelock.FileLock(TOOLS_LOCK_FILE)
     with lock:
         if os.path.exists(TOOLS_FILE):
-            with open(TOOLS_FILE, "r") as f:
+            with open(TOOLS_FILE, "r", encoding="utf-8") as f:
                 try: return json.load(f)
                 except (json.JSONDecodeError, OSError): return {}
         return {}
@@ -64,7 +67,7 @@ def save_tools(tools):
     """Save tools to JSON file with file locking for thread safety."""
     lock = filelock.FileLock(TOOLS_LOCK_FILE)
     with lock:
-        with open(TOOLS_FILE, "w") as f:
+        with open(TOOLS_FILE, "w", encoding="utf-8") as f:
             json.dump(tools, f, indent=4)
 
 async def load_tools_async():
@@ -148,7 +151,7 @@ async def save_tool(
         }
         
         # Save Python logic to standalone file
-        with open(os.path.join(LIBRARY_DIR, f"{name}.py"), "w") as f:
+        with open(os.path.join(LIBRARY_DIR, f"{name}.py"), "w", encoding="utf-8") as f:
             f.write(code)
 
         save_tools(tools)
@@ -194,7 +197,7 @@ async def edit_tool(name: str):
     code = ""
     code_path = os.path.join(LIBRARY_DIR, f"{name}.py")
     if os.path.exists(code_path):
-        with open(code_path, "r") as f:
+        with open(code_path, "r", encoding="utf-8") as f:
             code = f.read()
             
     return {
@@ -265,7 +268,7 @@ async def export_tools(name: str = Query(None)):
         # Read code
         code_path = os.path.join(LIBRARY_DIR, f"{name}.py")
         if os.path.exists(code_path):
-            with open(code_path, "r") as f:
+            with open(code_path, "r", encoding="utf-8") as f:
                 tool_export["code"] = f.read()
         else:
             tool_export["code"] = ""
@@ -314,10 +317,12 @@ async def save_tool_config(request: Request, name: str):
             smtp_password = form_data.get("smtp_password", "")
             
             # Update process environment
-            os.environ["SMTP_SERVER"] = smtp_server
-            os.environ["SMTP_PORT"] = smtp_port
-            os.environ["SMTP_EMAIL"] = smtp_email
-            os.environ["SMTP_PASSWORD"] = smtp_password
+            os.environ.update({
+                "SMTP_SERVER": smtp_server,
+                "SMTP_PORT": smtp_port,
+                "SMTP_EMAIL": smtp_email,
+                "SMTP_PASSWORD": smtp_password,
+            })
             
             # Atomic rewrite of .env.local to prevent duplicate entries
             env_path = ".env.local"
@@ -325,7 +330,7 @@ async def save_tool_config(request: Request, name: str):
             
             # Read existing environment variables
             if os.path.exists(env_path):
-                with open(env_path, "r") as f:
+                with open(env_path, "r", encoding="utf-8") as f:
                     for line in f:
                         line = line.strip()
                         if line and '=' in line:
@@ -339,7 +344,7 @@ async def save_tool_config(request: Request, name: str):
             env_vars['SMTP_PASSWORD'] = smtp_password
             
             # Write all environment variables atomically
-            with open(env_path, "w") as f:
+            with open(env_path, "w", encoding="utf-8") as f:
                 for key, val in env_vars.items():
                     f.write(f"{key}={val}\n")
             
@@ -387,7 +392,7 @@ async def import_tools(request: Request, file: UploadFile = File(...)):
                 
                 # Save code
                 code = tool_data.get("code", "")
-                with open(os.path.join(LIBRARY_DIR, f"{name}.py"), "w") as f:
+                with open(os.path.join(LIBRARY_DIR, f"{name}.py"), "w", encoding="utf-8") as f:
                     f.write(code)
 
         elif filename.endswith(".py"):
@@ -413,7 +418,7 @@ async def import_tools(request: Request, file: UploadFile = File(...)):
                     "enabled": True
                 }
             
-            with open(os.path.join(LIBRARY_DIR, f"{name}.py"), "w") as f:
+            with open(os.path.join(LIBRARY_DIR, f"{name}.py"), "w", encoding="utf-8") as f:
                 f.write(code)
         else:
             return Response(status_code=400, headers={"HX-Trigger": json.dumps({"showMessage": {"level": "error", "message": "Unsupported file type. Please upload .json or .py"}})})

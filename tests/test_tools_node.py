@@ -26,7 +26,7 @@ def make_tool_call(name: str, args: str = '{"expression": "2+2"}', call_id: str 
 def make_executor(tools: dict = None) -> ToolDispatcherExecutor:
     """Create executor with _load_tools patched."""
     executor = ToolDispatcherExecutor()
-    executor._load_tools = MagicMock(return_value=tools or {})
+    setattr(executor, "_load_tools", MagicMock(return_value=tools or {}))
     return executor
 
 

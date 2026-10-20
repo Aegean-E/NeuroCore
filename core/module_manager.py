@@ -1,17 +1,20 @@
-import os
-import json
 import importlib
+import json
+import logging
+import os
 import sys
 import threading
+
 from fastapi import FastAPI
 from starlette.routing import Mount
-import logging
 
 from core.flow_runner import FlowRunner
+from core.paths import project_path
 from core.settings import settings
+
 logger = logging.getLogger(__name__)
 
-MODULES_DIR = "modules"
+MODULES_DIR = project_path("modules")
 
 # Issue 10/9: Module allowlist for hot-loading
 # Note: This constant is kept for backwards compatibility but is now 
@@ -48,7 +51,7 @@ class ModuleManager:
                     continue
                 meta_path = os.path.join(module_path, "module.json")
                 if os.path.exists(meta_path):
-                    with open(meta_path, "r") as f:
+                    with open(meta_path, "r", encoding="utf-8") as f:
                         try:
                             meta = json.load(f)
                             meta['id'] = name
@@ -88,6 +91,16 @@ class ModuleManager:
                 # Check regular routes by tags
                 if hasattr(route, "tags") and module_id in route.tags:
                     return True
+                # FastAPI defers include_router() expansion into an _IncludedRouter
+                # wrapper, so the module's tags and prefix live in include_context
+                # until the first request.
+                context = getattr(route, "include_context", None)
+                if context is not None:
+                    if module_id in (getattr(context, "tags", None) or []):
+                        return True
+                    prefix = getattr(context, "prefix", "") or ""
+                    if prefix == module_prefix or prefix.startswith(module_prefix + "/"):
+                        return True
                 return False
             
             if any(is_module_loaded(r) for r in self.app.router.routes):
@@ -148,6 +161,15 @@ class ModuleManager:
                 # But NOT /toolbar, /toolbox, etc.
                 if route.path == module_prefix or route.path.startswith(module_prefix + "/"):
                     return False
+            # FastAPI's deferred include wrapper carries the module identity in
+            # include_context rather than on an expanded APIRoute.
+            context = getattr(route, "include_context", None)
+            if context is not None:
+                if module_id in (getattr(context, "tags", None) or []):
+                    return False
+                prefix = getattr(context, "prefix", "") or ""
+                if prefix == module_prefix or prefix.startswith(module_prefix + "/"):
+                    return False
             return True
         
         self.app.router.routes = [route for route in self.app.router.routes if should_keep_route(route)]
@@ -185,7 +207,7 @@ class ModuleManager:
             meta_to_save = {k: v for k, v in self.modules[module_id].items() if k != 'load_error'}
             
             meta_path = os.path.join(self.modules_dir, module_id, "module.json")
-            with open(meta_path, "w") as f:
+            with open(meta_path, "w", encoding="utf-8") as f:
                 json.dump(meta_to_save, f, indent=4)
                 
             # Clear the FlowRunner cache to ensure no stale executor classes are used
@@ -225,7 +247,7 @@ class ModuleManager:
             if os.path.exists(meta_path):
                 # Don't include load_error in saved metadata
                 meta_to_save = {k: v for k, v in id_to_meta[module_id].items() if k != 'load_error'}
-                with open(meta_path, "w") as f:
+                with open(meta_path, "w", encoding="utf-8") as f:
                     json.dump(meta_to_save, f, indent=4)
         
         # Log warning if operation took too long (potential lock contention)
@@ -255,6 +277,6 @@ class ModuleManager:
             }
             
             meta_path = os.path.join(self.modules_dir, module_id, "module.json")
-            with open(meta_path, "w") as f:
+            with open(meta_path, "w", encoding="utf-8") as f:
                 json.dump(meta_to_save, f, indent=4)
             return self.modules[module_id]

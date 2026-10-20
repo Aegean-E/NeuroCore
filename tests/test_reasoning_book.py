@@ -1,9 +1,12 @@
+import logging
 import pytest
 import os
 import json
 import tempfile
 from datetime import datetime
 from unittest.mock import patch, MagicMock
+
+logger = logging.getLogger(__name__)
 
 
 @pytest.fixture
@@ -115,7 +118,7 @@ async def test_thought_persistence(reasoning_service, temp_reasoning_file):
     await reasoning_service.log_thought("Persistent thought")
     
     # Read the file directly
-    with open(temp_reasoning_file, 'r') as f:
+    with open(temp_reasoning_file, 'r', encoding="utf-8") as f:
         data = json.load(f)
     
     assert len(data) == 1

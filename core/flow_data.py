@@ -458,15 +458,15 @@ def get_tool_count(data: FlowData, default: int = 0) -> int:
     if result is not None:
         try:
             return int(result)
-        except (ValueError, TypeError):
-            pass
+        except (ValueError, TypeError) as _exc:
+            logger.debug("ignored exception: %s", _exc)
     # Fall back to FlowData name
     result = data.get("_tool_count")
     if result is not None:
         try:
             return int(result)
-        except (ValueError, TypeError):
-            pass
+        except (ValueError, TypeError) as _exc:
+            logger.debug("ignored exception: %s", _exc)
     return default
 
 
@@ -1112,7 +1112,7 @@ def to_flow_data(data: Dict[str, Any]) -> FlowData:
     Returns:
         FlowData (same dict at runtime)
     """
-    return data  # type: ignore
+    return data  # type: ignore[return-value]
 
 
 def ensure_flow_data(data: Any) -> FlowData:
@@ -1133,7 +1133,7 @@ def ensure_flow_data(data: Any) -> FlowData:
     if not isinstance(data, dict):
         logger.warning(f"FlowData: Expected dict, got {type(data).__name__}, returning empty")
         return {}
-    return data  # type: ignore
+    return data  # type: ignore[return-value]
 
 
 def merge_flow_data(*dicts: FlowData) -> FlowData:

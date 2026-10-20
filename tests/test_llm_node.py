@@ -8,11 +8,11 @@ import core.llm as llm_module
 @pytest.fixture(autouse=True)
 def reset_shared_client():
     """Reset the shared client before each test to avoid event loop issues."""
-    llm_module._shared_client = None
-    llm_module._client_lock = None
+    setattr(llm_module, "_shared_client", None)
+    setattr(llm_module, "_client_lock", None)
     yield
-    llm_module._shared_client = None
-    llm_module._client_lock = None
+    setattr(llm_module, "_shared_client", None)
+    setattr(llm_module, "_client_lock", None)
 
 
 @pytest.fixture

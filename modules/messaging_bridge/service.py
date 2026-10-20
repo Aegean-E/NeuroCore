@@ -7,6 +7,7 @@ routed through the active NeuroCore flow, with `_input_source = "messaging"` and
 the service itself after the flow) knows where to send the reply.
 """
 import asyncio
+from abc import ABC, abstractmethod
 import base64
 import json
 import logging
@@ -30,7 +31,7 @@ SESSIONS_FILE = os.path.join(os.path.dirname(__file__), "sessions.json")
 
 def _load_config() -> dict:
     try:
-        with open(MODULE_JSON, "r") as f:
+        with open(MODULE_JSON, "r", encoding="utf-8") as f:
             return json.load(f).get("config", {})
     except (json.JSONDecodeError, OSError, KeyError) as e:
         logger.warning(f"Failed to load messaging_bridge config: {e}")
@@ -39,7 +40,7 @@ def _load_config() -> dict:
 
 def _is_enabled() -> bool:
     try:
-        with open(MODULE_JSON, "r") as f:
+        with open(MODULE_JSON, "r", encoding="utf-8") as f:
             return json.load(f).get("enabled", False)
     except (json.JSONDecodeError, OSError, KeyError):
         return False
@@ -59,7 +60,7 @@ class _SessionStore:
     def _load(self) -> dict:
         if os.path.exists(SESSIONS_FILE):
             try:
-                with open(SESSIONS_FILE, "r") as f:
+                with open(SESSIONS_FILE, "r", encoding="utf-8") as f:
                     return json.load(f)
             except (json.JSONDecodeError, OSError):
                 return {}
@@ -68,7 +69,7 @@ class _SessionStore:
     def _save(self) -> None:
         temp = SESSIONS_FILE + ".tmp"
         try:
-            with open(temp, "w") as f:
+            with open(temp, "w", encoding="utf-8") as f:
                 json.dump(self._map, f)
             os.replace(temp, SESSIONS_FILE)
         except (OSError, IOError) as e:
@@ -76,8 +77,8 @@ class _SessionStore:
             if os.path.exists(temp):
                 try:
                     os.remove(temp)
-                except OSError:
-                    pass
+                except OSError as _exc:
+                    logger.debug("ignored exception: %s", _exc)
 
     def get(self, key: str):
         with self._lock:
@@ -136,7 +137,7 @@ async def _run_flow(initial_data: dict) -> str:
 # Per-platform handler bases
 # ---------------------------------------------------------------------------
 
-class _PlatformBase:
+class _PlatformBase(ABC):
     """Common message-processing logic shared by all platform handlers."""
 
     platform_name: str = ""  # "telegram" | "discord" | "signal"
@@ -165,6 +166,7 @@ class _PlatformBase:
         except Exception as e:
             logger.error(f"[{self.platform_name}] Error processing message: {e}")
 
+    @abstractmethod
     async def process_message(self, msg: dict) -> None:
         raise NotImplementedError
 
@@ -248,8 +250,8 @@ class _TelegramHandler(_PlatformBase):
                             b64_data = base64.b64encode(img_file.read()).decode("utf-8")
                         try:
                             os.remove(local_path)
-                        except OSError:
-                            pass
+                        except OSError as _exc:
+                            logger.debug("ignored exception: %s", _exc)
                         user_content = []
                         if caption:
                             user_content.append({"type": "text", "text": caption})

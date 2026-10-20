@@ -41,6 +41,7 @@ def patch_settings_url(monkeypatch):
     monkeypatch.setitem(global_settings.settings, "embedding_api_url", "http://localhost:1234/v1")
     monkeypatch.setitem(global_settings.settings, "default_model", "test-model")
     monkeypatch.setitem(global_settings.settings, "active_ai_flow", "test-flow")
+    monkeypatch.setitem(global_settings.settings, "active_ai_flows", ["test-flow"])
 
     def mock_save(new_settings):
         global_settings.settings.update(new_settings)
@@ -52,7 +53,7 @@ def patch_settings_url(monkeypatch):
 async def test_multimodal_image_upload(client, mock_chat_sessions):
     session = mock_chat_sessions.create_session("Image Test")
 
-    def _append_message(sid, role, content):
+    def _append_message(sid, role, content, **kwargs):
         if sid == session["id"]:
             session["history"].append({"role": role, "content": content})
             return True
@@ -60,7 +61,8 @@ async def test_multimodal_image_upload(client, mock_chat_sessions):
 
     app.dependency_overrides[get_llm_bridge] = lambda: LLMBridge(base_url="http://localhost:1234/v1")
 
-    with patch.object(chat_router_module.session_manager, "get_session", side_effect=lambda sid: session if sid == session["id"] else None), \
+    with patch("core.flow_manager.flow_manager.get_flow", return_value={"id": "test-flow", "nodes": [], "connections": []}), \
+         patch.object(chat_router_module.session_manager, "get_session", side_effect=lambda sid: session if sid == session["id"] else None), \
          patch.object(chat_router_module.session_manager, "add_message", side_effect=_append_message), \
          patch.object(chat_router_module, "FlowRunner") as mock_runner, \
          patch("asyncio.create_task", side_effect=lambda coro: asyncio.ensure_future(coro)), \
@@ -94,7 +96,7 @@ async def test_auto_rename_trigger(client, mock_chat_sessions):
         {"role": "user", "content": "3"},
     ]
 
-    def _append_message(sid, role, content):
+    def _append_message(sid, role, content, **kwargs):
         if sid == session["id"]:
             session["history"].append({"role": role, "content": content})
             return True

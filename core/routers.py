@@ -37,10 +37,10 @@ def format_reasoning_content(content):
                     message = data["choices"][0].get("message", {})
                     if "content" in message:
                         return message["content"]
-        except (ValueError, SyntaxError, KeyError, IndexError):
+        except (ValueError, SyntaxError, KeyError, IndexError) as _exc:
             # ValueError/SyntaxError: ast.literal_eval failed to parse
             # KeyError/IndexError: Missing expected keys in parsed structure
-            pass
+            logger.debug("ignored exception: %s", _exc)
     return content
 
 
@@ -57,16 +57,16 @@ def get_hardware_id():
     # Return persisted ID so hardware changes never alter it
     if os.path.exists(id_file):
         try:
-            with open(id_file, "r") as f:
+            with open(id_file, "r", encoding="utf-8") as f:
                 persisted = f.read().strip()
             if persisted and len(persisted) >= 16:
                 return persisted
-        except Exception:
-            pass
+        except Exception as _exc:  # hygiene: allow persisted id fallback
+            logger.debug("ignored exception: %s", _exc)
 
     def get_cmd(cmd):
-        try: return subprocess.check_output(cmd, shell=True, stderr=subprocess.DEVNULL).decode().strip()
-        except Exception: return ""
+        try: return subprocess.check_output(cmd, shell=True, stderr=subprocess.DEVNULL, timeout=5.0).decode().strip()  # hygiene: allow wmic hardware probe
+        except Exception: return ""  # hygiene: allow probe error fallback
 
     try:
         cpu_id = get_cmd("wmic cpu get ProcessorId")
@@ -95,10 +95,10 @@ def get_hardware_id():
     # Persist so future calls never recompute
     try:
         os.makedirs("data", exist_ok=True)
-        with open(id_file, "w") as f:
+        with open(id_file, "w", encoding="utf-8") as f:
             f.write(hardware_id)
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug("ignored exception: %s", _exc)
 
     return hardware_id
 
@@ -114,23 +114,23 @@ def get_decoder() -> bytes:
     key_file = os.path.join("data", "decoder.key")
     if os.path.exists(key_file):
         try:
-            with open(key_file, "r") as f:
+            with open(key_file, "r", encoding="utf-8") as f:
                 hex_key = f.read().strip()
             if len(hex_key) == 64:
                 return bytes.fromhex(hex_key)
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug("ignored exception: %s", _exc)
     # Generate new random key
     key = secrets.token_bytes(32)
     try:
         os.makedirs("data", exist_ok=True)
         # Write atomically: temp file + rename
         tmp = key_file + ".tmp"
-        with open(tmp, "w") as f:
+        with open(tmp, "w", encoding="utf-8") as f:
             f.write(key.hex())
         os.replace(tmp, key_file)
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug("ignored exception: %s", _exc)
     return key
 
 
@@ -296,8 +296,8 @@ def _is_legacy_owner(item: dict) -> bool:
         pub = hashlib.sha256(f"neurocore-marketplace-v1:{hw}".encode()).hexdigest()[:20].upper()
         if uid == pub:
             return True
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug("ignored exception: %s", _exc)
     return False
 
 
@@ -378,7 +378,7 @@ async def get_dashboard_stats(request: Request):
     sessions_path = base_dir / "chat_sessions.json"
     if sessions_path.exists():
         try:
-            with open(sessions_path, 'r') as f:
+            with open(sessions_path, 'r', encoding="utf-8") as f:
                 sessions = json.load(f)
             sessions_count = len(sessions)
         except (json.JSONDecodeError, OSError, KeyError) as e:
@@ -481,7 +481,7 @@ async def get_recent_sessions(request: Request):
         return '<p class="text-slate-500 text-sm italic">No sessions yet</p>'
     
     try:
-        with open(sessions_path, 'r') as f:
+        with open(sessions_path, 'r', encoding="utf-8") as f:
             sessions = json.load(f)
         
         sorted_sessions = sorted(sessions.values(), key=lambda x: x.get('updated_at', ''), reverse=True)
@@ -639,8 +639,8 @@ async def save_module_config(request: Request, module_id: str, module_manager: M
             if "max_steps" in form_data:
                 try:
                     new_config['max_steps'] = int(form_data["max_steps"])
-                except ValueError:
-                    pass
+                except ValueError as _exc:
+                    logger.debug("ignored exception: %s", _exc)
             
             # Update enabled setting
             new_config['enabled'] = form_data.get("enabled") == "true"
@@ -662,39 +662,39 @@ async def save_module_config(request: Request, module_id: str, module_manager: M
             if "max_iterations" in form_data:
                 try:
                     new_config['max_iterations'] = int(form_data["max_iterations"])
-                except ValueError:
-                    pass
+                except ValueError as _exc:
+                    logger.debug("ignored exception: %s", _exc)
             
             if "max_tokens" in form_data:
                 try:
                     new_config['max_tokens'] = int(form_data["max_tokens"])
-                except ValueError:
-                    pass
+                except ValueError as _exc:
+                    logger.debug("ignored exception: %s", _exc)
             
             if "temperature" in form_data:
                 try:
                     new_config['temperature'] = float(form_data["temperature"])
-                except ValueError:
-                    pass
+                except ValueError as _exc:
+                    logger.debug("ignored exception: %s", _exc)
             
             # Update retry & timeout settings
             if "max_llm_retries" in form_data:
                 try:
                     new_config['max_llm_retries'] = int(form_data["max_llm_retries"])
-                except ValueError:
-                    pass
+                except ValueError as _exc:
+                    logger.debug("ignored exception: %s", _exc)
             
             if "retry_delay" in form_data:
                 try:
                     new_config['retry_delay'] = float(form_data["retry_delay"])
-                except ValueError:
-                    pass
+                except ValueError as _exc:
+                    logger.debug("ignored exception: %s", _exc)
             
             if "timeout" in form_data:
                 try:
                     new_config['timeout'] = int(form_data["timeout"])
-                except ValueError:
-                    pass
+                except ValueError as _exc:
+                    logger.debug("ignored exception: %s", _exc)
             
             # Update context inclusion settings (checkboxes)
             new_config['include_plan_in_context'] = form_data.get("include_plan_in_context") == "true"
@@ -710,14 +710,14 @@ async def save_module_config(request: Request, module_id: str, module_manager: M
             if "compact_threshold" in form_data:
                 try:
                     new_config['compact_threshold'] = int(form_data["compact_threshold"])
-                except ValueError:
-                    pass
+                except ValueError as _exc:
+                    logger.debug("ignored exception: %s", _exc)
 
             if "compact_keep_last" in form_data:
                 try:
                     new_config['compact_keep_last'] = int(form_data["compact_keep_last"])
-                except ValueError:
-                    pass
+                except ValueError as _exc:
+                    logger.debug("ignored exception: %s", _exc)
 
         elif module_id == "email_bridge":
             current_module = module_manager.modules.get(module_id)
@@ -733,7 +733,7 @@ async def save_module_config(request: Request, module_id: str, module_manager: M
             for int_key in ('imap_port', 'smtp_port', 'poll_interval'):
                 if int_key in form_data:
                     try: new_config[int_key] = int(form_data[int_key])
-                    except ValueError: pass
+                    except ValueError as _exc: logger.debug("ignored exception: %s", _exc)
             # Booleans: only update for the section that was submitted
             if section in ('imap', ''):
                 new_config['imap_use_ssl'] = form_data.get('imap_use_ssl') == 'true'
@@ -1010,10 +1010,10 @@ async def run_flow_node(flow_id: str, node_id: str, request: Request, background
     try:
         if "application/json" in request.headers.get("content-type", ""):
             flow_override = await request.json()
-    except (json.JSONDecodeError, KeyError, TypeError):
+    except (json.JSONDecodeError, KeyError, TypeError) as _exc:
         # JSONDecodeError: Invalid JSON in request body
         # KeyError/TypeError: Unexpected JSON structure
-        pass
+        logger.debug("ignored exception: %s", _exc)
 
 
     async def _run():
@@ -1052,7 +1052,7 @@ async def get_marketplace(request: Request, settings_man: SettingsManager = Depe
          try:
              with open(tools_path, "r", encoding="utf-8") as f:
                  tools = json.load(f)
-         except Exception: pass
+         except Exception as _exc: logger.debug("ignored exception: %s", _exc)
 
     skills = {}
     skills_path = os.path.join("modules", "skills", "data", "skills_metadata.json")
@@ -1060,7 +1060,7 @@ async def get_marketplace(request: Request, settings_man: SettingsManager = Depe
          try:
              with open(skills_path, "r", encoding="utf-8") as f:
                  skills = json.load(f)
-         except Exception: pass
+         except Exception as _exc: logger.debug("ignored exception: %s", _exc)
 
     # 2. Community Catalog
     catalog = []
@@ -1069,7 +1069,7 @@ async def get_marketplace(request: Request, settings_man: SettingsManager = Depe
          try:
              with open(catalog_path, "r", encoding="utf-8") as f:
                  catalog = json.load(f)
-         except Exception: pass
+         except Exception as _exc: logger.debug("ignored exception: %s", _exc)
 
     # Load local download history for "new version" badges
     dl_history_path = os.path.join("data", "download_history.json")
@@ -1078,8 +1078,8 @@ async def get_marketplace(request: Request, settings_man: SettingsManager = Depe
         if os.path.exists(dl_history_path):
             with open(dl_history_path, "r", encoding="utf-8") as f:
                 dl_history = json.load(f)
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug("ignored exception: %s", _exc)
 
     # Filter blocked uploaders
     blocklist = _load_blocklist()
@@ -1131,8 +1131,8 @@ async def get_marketplace(request: Request, settings_man: SettingsManager = Depe
             with open(flows_path, "r", encoding="utf-8") as f:
                 flows_raw = json.load(f)
             flows_data = flows_raw if isinstance(flows_raw, dict) else {}
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug("ignored exception: %s", _exc)
 
     return templates.TemplateResponse(request, "marketplace.html", {
         "request": request,
@@ -1203,7 +1203,7 @@ async def upload_marketplace_item(
          try:
              with open(catalog_path, "r", encoding="utf-8") as f:
                  catalog = json.load(f)
-         except Exception: pass
+         except Exception as _exc: logger.debug("ignored exception: %s", _exc)
              
     entry = {
         "id": item_id,
@@ -1284,8 +1284,8 @@ async def download_marketplace_item(item_id: str):
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(catalog_mutable, f, indent=4)
         os.replace(tmp, catalog_path)
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug("ignored exception: %s", _exc)
 
     # Record which version this user downloaded
     dl_history_path = os.path.join("data", "download_history.json")
@@ -1299,8 +1299,8 @@ async def download_marketplace_item(item_id: str):
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(dl_history, f, indent=2)
         os.replace(tmp, dl_history_path)
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug("ignored exception: %s", _exc)
 
     return FileResponse(file_path, filename=item["filename"])
 
@@ -1338,8 +1338,8 @@ async def marketplace_item_detail(request: Request, item_id: str, module_manager
         if os.path.exists(dl_history_path):
             with open(dl_history_path, "r", encoding="utf-8") as f:
                 dl_history = json.load(f)
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug("ignored exception: %s", _exc)
     downloaded_version = dl_history.get(item_id)
     item_version = item.get("version", 1)
     new_version_available = (
@@ -1370,9 +1370,9 @@ async def marketplace_item_detail(request: Request, item_id: str, module_manager
                 if first_file:
                     initial_file = first_file
                     try:
-                        with zf.open(first_file) as fh:
+                        with zf.open(first_file) as fh:  # hygiene: allow zip member binary stream
                             initial_content = fh.read(256 * 1024).decode("utf-8", errors="replace")
-                    except Exception:
+                    except Exception:  # hygiene: allow fallback for unreadable zip member
                         initial_content = ""
         except Exception as e:
             initial_content = f"Could not open zip: {e}"
@@ -1433,7 +1433,7 @@ async def marketplace_item_file(item_id: str, path: str = ""):
             raise HTTPException(status_code=400, detail="path required for zip items")
         try:
             with zipfile.ZipFile(file_path, "r") as zf:
-                with zf.open(path) as fh:
+                with zf.open(path) as fh:  # hygiene: allow zip member binary stream
                     content = fh.read(256 * 1024).decode("utf-8", errors="replace")
             return JSONResponse(content={"status": "success", "content": content, "path": path})
         except KeyError:
@@ -1506,8 +1506,8 @@ async def update_marketplace_item(
         try:
             if os.path.exists(old_path):
                 shutil.copy2(old_path, os.path.join(upload_dir, archive_name))
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug("ignored exception: %s", _exc)
         content = await file.read()
         with open(old_path, "wb") as f_out:
             f_out.write(content)
@@ -1676,8 +1676,8 @@ async def marketplace_uploader_profile(
         try:
             with open(catalog_path, "r", encoding="utf-8") as f:
                 catalog = json.load(f)
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug("ignored exception: %s", _exc)
 
     their_items = [i for i in catalog if i.get("uploader_handle") == handle]
 
@@ -1703,8 +1703,8 @@ async def marketplace_uploader_profile(
         try:
             with open(dl_path, "r", encoding="utf-8") as f:
                 dl_history = json.load(f)
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug("ignored exception: %s", _exc)
 
     # Get uploader's display username:
     # - For own handle: use local profile file (authoritative), even in preview mode
@@ -1934,8 +1934,8 @@ async def import_marketplace_item_to_neurocore(item_id: str, module_manager: Mod
             if os.path.exists(skills_meta_path):
                 with open(skills_meta_path, "r", encoding="utf-8") as f:
                     skills_meta = json.load(f)
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug("ignored exception: %s", _exc)
         skills_meta[skill_id] = {
             "name": item["name"],
             "description": item.get("description", ""),
@@ -1965,7 +1965,8 @@ async def import_marketplace_item_to_neurocore(item_id: str, module_manager: Mod
                         try:
                             flow_data = json.loads(zf.read(name).decode("utf-8"))
                             break
-                        except Exception:
+                        except Exception as _exc:
+                            logger.debug("Skipping unreadable flow in zip: %s", _exc)
                             continue
 
         if not flow_data or not isinstance(flow_data, dict):
@@ -1977,8 +1978,8 @@ async def import_marketplace_item_to_neurocore(item_id: str, module_manager: Mod
             if os.path.exists(flows_path):
                 with open(flows_path, "r", encoding="utf-8") as f:
                     flows = json.load(f)
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug("ignored exception: %s", _exc)
 
         import uuid as _uuid
         if all(isinstance(v, dict) and "nodes" in v for v in flow_data.values()):
@@ -2026,7 +2027,7 @@ async def import_marketplace_item_to_neurocore(item_id: str, module_manager: Mod
                         tgt = os.path.join(module_target, rel)
                         os.makedirs(os.path.dirname(tgt), exist_ok=True)
                         if not member.endswith('/'):
-                            with zf.open(member) as src, open(tgt, 'wb') as dst:
+                            with zf.open(member) as src, open(tgt, 'wb') as dst:  # hygiene: allow zip member binary stream
                                 dst.write(src.read())
             else:
                 os.makedirs(module_target, exist_ok=True)
@@ -2045,10 +2046,13 @@ async def import_marketplace_item_to_neurocore(item_id: str, module_manager: Mod
 
         _lock = _filelock.FileLock(lock_file)
         with _lock:
-            try:
-                existing = json.loads(open(tools_json).read()) if os.path.exists(tools_json) else {}
-            except Exception:
-                existing = {}
+            existing = {}
+            if os.path.exists(tools_json):
+                try:
+                    with open(tools_json, "r", encoding="utf-8") as f:
+                        existing = json.loads(f.read())
+                except Exception:
+                    existing = {}
 
             if ext == ".json":
                 tool_data = json.loads(raw.decode("utf-8"))
@@ -2115,8 +2119,8 @@ async def import_marketplace_item_to_neurocore(item_id: str, module_manager: Mod
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(cat_m, f, indent=4)
         os.replace(tmp, catalog_path)
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug("ignored exception: %s", _exc)
 
     dl_history_path = os.path.join("data", "download_history.json")
     try:
@@ -2129,8 +2133,8 @@ async def import_marketplace_item_to_neurocore(item_id: str, module_manager: Mod
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(dl, f, indent=2)
         os.replace(tmp, dl_history_path)
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug("ignored exception: %s", _exc)
 
     return JSONResponse(content={"status": "success", "message": result_message})
 
@@ -2225,7 +2229,7 @@ async def import_decoder_key(key: str = Form(...)):
     try:
         os.makedirs("data", exist_ok=True)
         tmp = key_file + ".tmp"
-        with open(tmp, "w") as f:
+        with open(tmp, "w", encoding="utf-8") as f:
             f.write(key.lower())
         os.replace(tmp, key_file)
     except Exception as e:
@@ -2377,14 +2381,14 @@ async def get_settings(request: Request, settings_man: SettingsManager = Depends
                           instructions = f_content.read()
                           skill_data["instructions"] = instructions
                           skill_data["content_hash"] = hashlib.md5(instructions.encode("utf-8")).hexdigest()
-         except Exception: pass
+         except Exception as _exc: logger.debug("ignored exception: %s", _exc)
          
     catalog = []
     catalog_path = os.path.join("data", "marketplace", "catalog.json")
     if os.path.exists(catalog_path):
          try:
               with open(catalog_path, "r", encoding="utf-8") as f: catalog = json.load(f)
-         except Exception: pass
+         except Exception as _exc: logger.debug("ignored exception: %s", _exc)
 
     return templates.TemplateResponse(request, "settings.html", {
         "settings": settings_man.settings, "modules": module_manager.get_all_modules(),
@@ -2491,20 +2495,20 @@ async def save_settings_route(request: Request, settings_man: SettingsManager = 
         if field in form_data:
             try:
                 updates[field] = float(form_data[field])
-            except (ValueError, TypeError):
-                pass
+            except (ValueError, TypeError) as _exc:
+                logger.debug("ignored exception: %s", _exc)
             
     if "request_timeout" in form_data:
         try:
             updates["request_timeout"] = float(form_data["request_timeout"])
-        except (ValueError, TypeError):
-            pass
+        except (ValueError, TypeError) as _exc:
+            logger.debug("ignored exception: %s", _exc)
             
     if "max_node_loops" in form_data:
         try:
             updates["max_node_loops"] = int(form_data["max_node_loops"])
-        except (ValueError, TypeError):
-            pass
+        except (ValueError, TypeError) as _exc:
+            logger.debug("ignored exception: %s", _exc)
             
     # Handle debug_mode checkbox (only if the form intended to submit it)
     if "save_debug_mode" in form_data:
@@ -2633,7 +2637,7 @@ async def get_default_config(module_id: str, module_manager: ModuleManager = Dep
         raise HTTPException(status_code=404, detail="Module configuration file not found")
     
     try:
-        with open(module_json_path, 'r') as f:
+        with open(module_json_path, 'r', encoding="utf-8") as f:
             module_data = json.load(f)
     except (json.JSONDecodeError, OSError):
         raise HTTPException(status_code=500, detail="Failed to read module configuration")

@@ -20,6 +20,8 @@ templates = Jinja2Templates(directory="web/templates")
 
 # Global dict to store active streaming queues for chat sessions
 active_streams = {}
+# Last background failure per session, so a late reader still sees the reason
+last_stream_errors = {}
 
 
 def _extract_thinking_steps(flow_result: dict) -> list:
@@ -96,7 +98,7 @@ def _extract_thinking_steps(flow_result: dict) -> list:
     ) > 1  # more than just the final answer
 
     if not (total_tool_calls or has_reflections or has_intermediate_assistant):
-        return []  # Simple single-turn — no thinking to show
+        return []  # Simple single-turn â€” no thinking to show
 
     # Identify the final assistant message (last non-empty assistant turn)
     final_assistant_idx = None
@@ -234,10 +236,10 @@ async def compact_session_route(
     response = await chat_gui(request, session_id=session_id)
 
     if compacted:
-        msg = f"Session compacted — was ~{tokens_before:,} tokens"
+        msg = f"Session compacted â€” was ~{tokens_before:,} tokens"
         response.headers["HX-Trigger"] = json.dumps({"showMessage": {"level": "success", "message": msg}})
     else:
-        response.headers["HX-Trigger"] = json.dumps({"showMessage": {"level": "info", "message": "Nothing to compact — session is short enough"}})
+        response.headers["HX-Trigger"] = json.dumps({"showMessage": {"level": "info", "message": "Nothing to compact â€” session is short enough"}})
 
     return response
 
@@ -312,7 +314,7 @@ async def send_message(
     session_manager.add_message(session_id, "user", user_content)
     active_session = session_manager.get_session(session_id)
 
-    # Get module config early — used for both auto-compact and auto-rename below
+    # Get module config early â€” used for both auto-compact and auto-rename below
     module_manager = request.app.state.module_manager
     chat_module = module_manager.modules.get("chat")
     config = chat_module.get("config", {}) if chat_module else {}
@@ -363,8 +365,8 @@ async def send_message(
                 if goal_id:
                     try:
                         initial_data["goal_id"] = int(goal_id)
-                    except (ValueError, TypeError):
-                        pass
+                    except (ValueError, TypeError) as _exc:
+                        logger.debug("ignored exception: %s", _exc)
                 flow_result = await runner.run(initial_data, stream_queue=queue)
                 logger.info(f"[Chat] flow_result: {flow_result}")
                 
@@ -446,7 +448,8 @@ async def send_message(
                         logger.warning(f"Auto-rename failed: {err}")
                 
             except Exception as e:
-                logger.error(f"Stream generation error: {e}")
+                logger.exception(f"Stream generation error: {e}")
+                last_stream_errors[session_id] = str(e)
                 await queue.put({"type": "error", "content": str(e)})
             finally:
                 await queue.put(None)
@@ -476,6 +479,27 @@ async def stream_chat(session_id: str):
     
     async def event_generator():
         if not queue:
+            # The flow can finish before the browser opens the stream. Surface the
+            # failure reason or the persisted assistant reply instead of a missing stream.
+            failure = last_stream_errors.pop(session_id, None)
+            if failure:
+                payload = json.dumps({"error": failure})
+                yield f"event: error\ndata: {payload}\n\n"
+                yield "event: done\ndata: {}\n\n"
+                return
+            from modules.chat.sessions import session_manager
+            session = session_manager.get_session(session_id)
+            last_reply = None
+            if session:
+                for message in reversed(session.get("history", [])):
+                    if message.get("role") == "assistant" and isinstance(message.get("content"), str):
+                        last_reply = message["content"]
+                        break
+            if last_reply:
+                payload = json.dumps({"text": last_reply})
+                yield f"event: replace\ndata: {payload}\n\n"
+                yield "event: done\ndata: {}\n\n"
+                return
             yield "event: error\ndata: No active stream\n\n"
             return
             

@@ -1,14 +1,19 @@
-import os
-import logging
-import sqlite3
-import time
 import hashlib
 import json
+import logging
+import os
+import sqlite3
 import threading
-from typing import List, Dict, Optional, Tuple
-import numpy as np
+import time
 from contextlib import contextmanager
+from typing import Dict, List, Optional, Tuple
+
+import numpy as np
+
+from core.paths import project_path
 from core.settings import settings
+
+logger = logging.getLogger(__name__)
 
 try:
     import faiss
@@ -16,10 +21,10 @@ try:
 except ImportError:
     logging.warning("⚠️ FAISS not installed. Install with: pip install faiss-cpu")
     FAISS_AVAILABLE = False
+    faiss = None
 
 # Import LLMBridge for query expansion
 from core.llm import LLMBridge
-
 
 # =============================================================================
 # Query Expansion and Re-ranking Mixin
@@ -282,7 +287,7 @@ class FaissDocumentStore(QueryExpansionMixin):
     - FAISS for vector embeddings (fast similarity search)
     """
 
-    def __init__(self, db_path: str = "data/knowledge_base.sqlite3", embed_fn=None):
+    def __init__(self, db_path: str = project_path("data", "knowledge_base.sqlite3"), embed_fn=None):
         os.makedirs(os.path.dirname(db_path) or ".", exist_ok=True)
         self.db_path = db_path
         self.embed_fn = embed_fn
@@ -361,14 +366,14 @@ class FaissDocumentStore(QueryExpansionMixin):
             # Migration: Add embedding column if it doesn't exist
             try:
                 con.execute("ALTER TABLE chunks ADD COLUMN embedding TEXT")
-            except sqlite3.OperationalError:
-                pass
+            except sqlite3.OperationalError as _exc:
+                logger.debug("ignored exception: %s", _exc)
 
             # Migration: Add chunk_hash column for incremental re-indexing
             try:
                 con.execute("ALTER TABLE chunks ADD COLUMN chunk_hash TEXT")
-            except sqlite3.OperationalError:
-                pass
+            except sqlite3.OperationalError as _exc:
+                logger.debug("ignored exception: %s", _exc)
             con.execute("CREATE INDEX IF NOT EXISTS idx_chunk_hash ON chunks(chunk_hash)")
 
             # 1. Enable FTS5 Virtual Table for Keyword Search
@@ -395,9 +400,9 @@ class FaissDocumentStore(QueryExpansionMixin):
 
     def _load_faiss_index(self):
         """Load or create FAISS index"""
-        # Guard: If FAISS is not available, create empty index and return
+        # Guard: If FAISS is not available, set None and return
         if not FAISS_AVAILABLE:
-            self._create_empty_index()
+            self.faiss_index = None
             return
             
         index_path = self.db_path.replace(".sqlite3", ".faiss")
@@ -420,8 +425,8 @@ class FaissDocumentStore(QueryExpansionMixin):
                 logging.info("🔧 Deleting corrupted index and creating a fresh one...")
                 try:
                     os.remove(index_path)
-                except OSError:
-                    pass  # Ignore errors when removing corrupted index file
+                except OSError as _exc:
+                    logger.debug("ignored exception: %s", _exc)  # Ignore errors when removing corrupted index file
                 self._create_empty_index()
         else:
             self._create_empty_index()
@@ -452,8 +457,8 @@ class FaissDocumentStore(QueryExpansionMixin):
                 if sample_chunk and sample_chunk[0]:
                     emb = json.loads(sample_chunk[0])
                     return len(emb)
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug("ignored exception: %s", _exc)
         
         # Default fallback
         return 768 
@@ -615,8 +620,8 @@ class FaissDocumentStore(QueryExpansionMixin):
                     if emb_json:
                         try:
                             emb = np.array(json.loads(emb_json), dtype='float32')
-                        except Exception:
-                            pass
+                        except Exception as _exc:
+                            logger.debug("ignored exception: %s", _exc)
 
                     if emb is not None:
                         batch_embeddings.append(emb)

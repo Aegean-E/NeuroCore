@@ -37,7 +37,7 @@ SESSIONS_FILE = os.path.join(os.path.dirname(__file__), "sessions.json")
 
 def _load_config() -> dict:
     try:
-        with open(MODULE_JSON, "r") as f:
+        with open(MODULE_JSON, "r", encoding="utf-8") as f:
             return json.load(f).get("config", {})
     except (json.JSONDecodeError, OSError, KeyError) as e:
         logger.warning(f"EmailService: failed to load config: {e}")
@@ -46,7 +46,7 @@ def _load_config() -> dict:
 
 def _is_enabled() -> bool:
     try:
-        with open(MODULE_JSON, "r") as f:
+        with open(MODULE_JSON, "r", encoding="utf-8") as f:
             return json.load(f).get("enabled", False)
     except (json.JSONDecodeError, OSError, KeyError):
         return False
@@ -66,7 +66,7 @@ class _SessionStore:
     def _load(self) -> dict:
         if os.path.exists(SESSIONS_FILE):
             try:
-                with open(SESSIONS_FILE, "r") as f:
+                with open(SESSIONS_FILE, "r", encoding="utf-8") as f:
                     return json.load(f)
             except (json.JSONDecodeError, OSError):
                 return {}
@@ -75,7 +75,7 @@ class _SessionStore:
     def _save(self) -> None:
         temp = SESSIONS_FILE + ".tmp"
         try:
-            with open(temp, "w") as f:
+            with open(temp, "w", encoding="utf-8") as f:
                 json.dump(self._map, f)
             os.replace(temp, SESSIONS_FILE)
         except (OSError, IOError) as e:
@@ -83,8 +83,8 @@ class _SessionStore:
             if os.path.exists(temp):
                 try:
                     os.remove(temp)
-                except OSError:
-                    pass
+                except OSError as _exc:
+                    logger.debug("ignored exception: %s", _exc)
 
     def get(self, key: str):
         with self._lock:

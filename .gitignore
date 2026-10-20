@@ -18,6 +18,10 @@ calendar_events.json
 chat_sessions.json
 settings.json
 modules/telegram/telegram_sessions.json
+modules/messaging_bridge/sessions.json
+test_*.json
+test_*.sqlite3
+test_*.faiss
 
 # Coverage / test artifacts
 .coverage

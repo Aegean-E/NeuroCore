@@ -6,13 +6,22 @@ ensuring test isolation and preventing cross-test contamination.
 """
 
 import json
+import logging
 import os
 import shutil
 import sys
 import tempfile
 from pathlib import Path
-from typing import Dict, Any, Optional, List
+from typing import Any, Dict, List, Optional
+
 import pytest
+
+# Tests use project-relative paths throughout. Anchor collection to the project folder so
+# running pytest from a parent directory cannot create state files beside the parent.
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+os.chdir(PROJECT_ROOT)
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Preserve the real faiss module reference BEFORE any test file is collected.
@@ -52,14 +61,14 @@ def reset_shared_async_state():
     import core.llm as llm_module
     from core.flow_runner import FlowRunner
 
-    llm_module._shared_client = None
-    llm_module._client_lock = None
-    FlowRunner._cache_lock = None
+    setattr(llm_module, "_shared_client", None)
+    setattr(llm_module, "_client_lock", None)
+    setattr(FlowRunner, "_cache_lock", None)
 
     yield
 
-    llm_module._shared_client = None
-    llm_module._client_lock = None
+    setattr(llm_module, "_shared_client", None)
+    setattr(llm_module, "_client_lock", None)
 
 
 @pytest.fixture(autouse=True)
@@ -80,8 +89,8 @@ def disable_debug_mode_for_tests():
     reload entirely.  We also clear the executor class cache so the next
     test starts with a clean slate (no stale class from a previous reload).
     """
-    from core.settings import settings
     from core.flow_runner import FlowRunner
+    from core.settings import settings
 
     original_debug = settings.settings.get('debug_mode', False)
     settings.settings['debug_mode'] = False
@@ -250,7 +259,7 @@ def protect_module_files():
     for filepath in PROTECTED_MODULE_FILES:
         if os.path.exists(filepath):
             # Read original content
-            with open(filepath, 'r') as f:
+            with open(filepath, 'r', encoding="utf-8") as f:
                 original_content = f.read()
             _backup_manager._backups[filepath] = original_content
             backed_up_files.append(filepath)
@@ -262,7 +271,7 @@ def protect_module_files():
         if filepath in _backup_manager._backups:
             original_content = _backup_manager._backups[filepath]
             # Restore the original content
-            with open(filepath, 'w') as f:
+            with open(filepath, 'w', encoding="utf-8") as f:
                 f.write(original_content)
     
     # Clear the backups for this test
@@ -315,14 +324,14 @@ def backup_specific_file():
     def _backup(filepath: str):
         """Back up a specific file."""
         if os.path.exists(filepath):
-            with open(filepath, 'r') as f:
+            with open(filepath, 'r', encoding="utf-8") as f:
                 backed_files.append((filepath, f.read()))
     
     yield _backup
     
     # Restore all backed files
     for filepath, content in backed_files:
-        with open(filepath, 'w') as f:
+        with open(filepath, 'w', encoding="utf-8") as f:
             f.write(content)
 
 
@@ -383,7 +392,7 @@ def module_json_backup():
         def backup(self, filepath: str) -> bool:
             """Back up a module.json file."""
             if os.path.exists(filepath):
-                with open(filepath, 'r') as f:
+                with open(filepath, 'r', encoding="utf-8") as f:
                     self._backups[filepath] = f.read()
                 return True
             return False
@@ -391,13 +400,13 @@ def module_json_backup():
         def restore(self, filepath: str):
             """Restore a specific file from backup."""
             if filepath in self._backups:
-                with open(filepath, 'w') as f:
+                with open(filepath, 'w', encoding="utf-8") as f:
                     f.write(self._backups[filepath])
         
         def restore_all(self):
             """Restore all backed up files."""
             for filepath, content in self._backups.items():
-                with open(filepath, 'w') as f:
+                with open(filepath, 'w', encoding="utf-8") as f:
                     f.write(content)
             self._backups.clear()
     

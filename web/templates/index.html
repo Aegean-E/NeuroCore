@@ -5,13 +5,13 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>NeuroCore - Modular LLM GUI</title>
     <!-- Tailwind CSS (CDN for minimal setup, PurgeCSS will make it tiny in production) -->
-    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.tailwindcss.com"></script> <!-- hygiene: allow cdn asset -->
     <!-- HTMX (Fast and less memory than React/Vue/Svelte) -->
-    <script src="https://unpkg.com/htmx.org@2.0.2"></script>
+    <script src="https://unpkg.com/htmx.org@2.0.2"></script> <!-- hygiene: allow cdn asset -->
     <!-- Sortable.js for drag-and-drop -->
-    <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.2/Sortable.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.2/Sortable.min.js"></script> <!-- hygiene: allow cdn asset -->
     <!-- Marked.js for Markdown rendering -->
-    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script> <!-- hygiene: allow cdn asset -->
     <style>
         .custom-scrollbar::-webkit-scrollbar { width: 4px; }
         .custom-scrollbar::-webkit-scrollbar-thumb { background: #4a5568; border-radius: 2px; }

@@ -1,16 +1,19 @@
+import atexit
+import concurrent.futures
+import hashlib
+import json
+import logging
 import os
 import sqlite3
-import time
-import json
 import threading
-import hashlib
-import logging
-import atexit
-from typing import List, Dict, Optional, Tuple, Any
+import time
 from contextlib import contextmanager
-import numpy as np
 from datetime import datetime
-import concurrent.futures
+from typing import Any, Dict, List, Optional, Tuple
+
+import numpy as np
+
+from core.paths import project_path
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +29,7 @@ class MemoryStore:
     Simplified MemoryStore for NeuroCore.
     """
 
-    def __init__(self, db_path: str = "data/memory.sqlite3"):
+    def __init__(self, db_path: str = project_path("data", "memory.sqlite3")):
         os.makedirs(os.path.dirname(db_path) or ".", exist_ok=True)
         self.db_path = db_path
         self.write_lock = threading.Lock()
@@ -104,19 +107,19 @@ class MemoryStore:
         
         # Migration logic
         try: con.execute("ALTER TABLE memories ADD COLUMN subject TEXT DEFAULT 'User'")
-        except sqlite3.OperationalError: pass
+        except sqlite3.OperationalError as _exc: logger.debug("ignored exception: %s", _exc)
         try: con.execute("ALTER TABLE memories ADD COLUMN parent_id INTEGER DEFAULT NULL")
-        except sqlite3.OperationalError: pass
+        except sqlite3.OperationalError as _exc: logger.debug("ignored exception: %s", _exc)
         try: con.execute("ALTER TABLE memories ADD COLUMN source TEXT DEFAULT 'chat'")
-        except sqlite3.OperationalError: pass
+        except sqlite3.OperationalError as _exc: logger.debug("ignored exception: %s", _exc)
         try: con.execute("ALTER TABLE memories ADD COLUMN verified INTEGER DEFAULT 0")
-        except sqlite3.OperationalError: pass
+        except sqlite3.OperationalError as _exc: logger.debug("ignored exception: %s", _exc)
         try: con.execute("ALTER TABLE memories ADD COLUMN expires_at INTEGER DEFAULT NULL")
-        except sqlite3.OperationalError: pass
+        except sqlite3.OperationalError as _exc: logger.debug("ignored exception: %s", _exc)
         try: con.execute("ALTER TABLE memories ADD COLUMN access_count INTEGER DEFAULT 0")
-        except sqlite3.OperationalError: pass
+        except sqlite3.OperationalError as _exc: logger.debug("ignored exception: %s", _exc)
         try: con.execute("ALTER TABLE memories ADD COLUMN importance_boost INTEGER DEFAULT 0")
-        except sqlite3.OperationalError: pass
+        except sqlite3.OperationalError as _exc: logger.debug("ignored exception: %s", _exc)
 
         con.execute("""
             CREATE TABLE IF NOT EXISTS meta_memories (
@@ -598,8 +601,8 @@ class MemoryStore:
                 con.execute("DELETE FROM memories")
                 try:
                     con.execute("DELETE FROM sqlite_sequence WHERE name='memories'")
-                except sqlite3.OperationalError:
-                    pass  # sqlite_sequence absent when autoincrement has never fired
+                except sqlite3.OperationalError as _exc:
+                    logger.debug("ignored exception: %s", _exc)  # sqlite_sequence absent when autoincrement has never fired
             
             if FAISS_AVAILABLE and self.faiss_index:
                 with self.faiss_lock:

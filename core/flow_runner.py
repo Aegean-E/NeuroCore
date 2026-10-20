@@ -987,8 +987,8 @@ class FlowRunner:
                                 current_step=out.get("current_step", 0),
                                 completed_steps=out.get("completed_steps", []),
                             )
-                        except Exception:
-                            pass
+                        except Exception as _exc:
+                            logger.debug("ignored exception: %s", _exc)
                     if isinstance(out, dict) and total_usage.get("total_tokens", 0) > 0:
                         out["usage"] = total_usage
                     return out
@@ -1001,8 +1001,8 @@ class FlowRunner:
                         episode_id,
                         phase=EpisodeState.PHASE_COMPLETED,
                     )
-                except Exception:
-                    pass
+                except Exception as _exc:
+                    logger.debug("ignored exception: %s", _exc)
             
             if total_usage.get("total_tokens", 0) > 0:
                 return {"usage": total_usage}

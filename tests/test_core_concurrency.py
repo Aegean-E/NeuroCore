@@ -4,11 +4,15 @@ Tests for concurrency and deadlock scenarios.
 These tests verify that the application handles concurrent access correctly
 without deadlocks.
 """
+
+import logging
 import asyncio
 import threading
 import time
 import pytest
 from concurrent.futures import ThreadPoolExecutor, as_completed
+
+logger = logging.getLogger(__name__)
 
 
 class TestFlowManagerConcurrency:
@@ -46,8 +50,8 @@ class TestFlowManagerConcurrency:
                         nodes=[],
                         connections=[]
                     )
-                except Exception:
-                    pass  # May fail validation, that's OK
+                except Exception as _exc:
+                    logger.debug("ignored exception: %s", _exc)  # May fail validation, that's OK
                 time.sleep(0.001)
             return True
         
@@ -55,8 +59,8 @@ class TestFlowManagerConcurrency:
             for _ in range(10):
                 try:
                     flows = manager.list_flows()
-                except Exception:
-                    pass
+                except Exception as _exc:
+                    logger.debug("ignored exception: %s", _exc)
                 time.sleep(0.001)
             return True
         
@@ -262,8 +266,8 @@ class TestStressConcurrency:
         async def worker():
             try:
                 await FlowRunner._get_executor_class('chat', 'chat_input')
-            except Exception:
-                pass  # May fail if module not available
+            except Exception as _exc:
+                logger.debug("ignored exception: %s", _exc)  # May fail if module not available
         
         # Run many concurrent operations
         tasks = [worker() for _ in range(50)]

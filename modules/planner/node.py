@@ -1,3 +1,4 @@
+import logging
 import json
 import re
 from collections import deque
@@ -21,6 +22,8 @@ from core.flow_data import (
     ensure_flow_data,
 )
 from core.session_manager import get_session_manager, EpisodeState
+
+logger = logging.getLogger(__name__)
 
 
 class PlannerExecutor:
@@ -308,8 +311,8 @@ class PlannerExecutor:
                             data["current_step"] = existing.current_step
                         if existing.completed_steps:
                             data["completed_steps"] = existing.completed_steps
-            except Exception:
-                pass  # Don't fail if episode loading fails
+            except Exception as _exc:
+                logger.debug("ignored exception: %s", _exc)  # Don't fail if episode loading fails
         
         # Check for auto_track mode - if enabled and plan already exists, run tracker progression
         if config.get("auto_track", False):
@@ -415,8 +418,8 @@ class PlannerExecutor:
                                         "target": step.get("target", step.get("query", step.get("details", ""))),
                                         "depends_on": step.get("depends_on")
                                     })
-                except (json.JSONDecodeError, IndexError):
-                    pass
+                except (json.JSONDecodeError, IndexError) as _exc:
+                    logger.debug("ignored exception: %s", _exc)
             
             result = input_data.copy()
             result["plan"] = plan
@@ -479,8 +482,8 @@ class PlannerExecutor:
                             completed_steps=[],
                         )
                         result["episode_id"] = new_episode.episode_id
-                    except Exception:
-                        pass  # Don't fail if episode saving fails
+                    except Exception as _exc:
+                        logger.debug("ignored exception: %s", _exc)  # Don't fail if episode saving fails
             
             return result
             

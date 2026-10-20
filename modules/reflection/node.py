@@ -1,8 +1,11 @@
+import logging
 import json
 import re
 import asyncio
 from core.llm import LLMBridge
 from core.settings import settings
+
+logger = logging.getLogger(__name__)
 
 
 class ReflectionExecutor:
@@ -145,8 +148,8 @@ class ReflectionExecutor:
                 if reasoning_service := self._get_reasoning_service():
                     entry = f"Reflection: Max retries ({max_reflection_retries}) exceeded, forcing completion"
                     asyncio.create_task(reasoning_service.log_thought(entry, source="Reflection"))
-            except Exception:
-                pass  # Fail silently in tests/prod
+            except Exception as _exc:
+                logger.debug("ignored exception: %s", _exc)  # Fail silently in tests/prod
 
             
             return result
@@ -166,8 +169,8 @@ class ReflectionExecutor:
                 if reasoning_service := self._get_reasoning_service():
                     entry = "Reflection: No content to evaluate, defaulting to satisfied"
                     asyncio.create_task(reasoning_service.log_thought(entry, source="Reflection"))
-            except Exception:
-                pass  # Fail silently
+            except Exception as _exc:
+                logger.debug("ignored exception: %s", _exc)  # Fail silently
             
             return result
 
@@ -231,8 +234,8 @@ class ReflectionExecutor:
                             "reason": str(parsed.get("reason", "")),
                             "needs_improvement": parsed.get("needs_improvement")
                         }
-                except (json.JSONDecodeError, IndexError):
-                    pass
+                except (json.JSONDecodeError, IndexError) as _exc:
+                    logger.debug("ignored exception: %s", _exc)
 
             result = input_data.copy()
             result["reflection"] = reflection_result
@@ -243,8 +246,8 @@ class ReflectionExecutor:
                 if reasoning_service := self._get_reasoning_service():
                     entry = f"Reflection on step: satisfied={reflection_result['satisfied']}. {reflection_result['reason']}"
                     asyncio.create_task(reasoning_service.log_thought(entry, source="Reflection"))
-            except Exception:
-                pass  # Fail silently
+            except Exception as _exc:
+                logger.debug("ignored exception: %s", _exc)  # Fail silently
 
             # When not satisfied and improvement hint is available, inject a
             # feedback message so the agent_loop can act on it on retry.
@@ -271,8 +274,8 @@ class ReflectionExecutor:
                 if reasoning_service := self._get_reasoning_service():
                     entry = f"Reflection error: {str(e)}"
                     asyncio.create_task(reasoning_service.log_thought(entry, source="Reflection"))
-            except Exception:
-                pass  # Fail silently
+            except Exception as _exc:
+                logger.debug("ignored exception: %s", _exc)  # Fail silently
             
             return result
 

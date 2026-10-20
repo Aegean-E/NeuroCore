@@ -189,7 +189,7 @@ class TestSessionManagerEpisodes:
         episode_id = episode.episode_id
         
         # Clear memory
-        session_manager._episode = None
+        setattr(session_manager, "_episode", None)
         
         # Load by ID
         loaded = session_manager.load_episode_by_id(episode_id)

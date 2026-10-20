@@ -71,8 +71,8 @@ class AgentBaseExecutor:
             if tool_calls:
                 try:
                     total += self._estimate_tokens(json.dumps(tool_calls))
-                except (TypeError, ValueError):
-                    pass
+                except (TypeError, ValueError) as _exc:
+                    logger.debug("ignored exception: %s", _exc)
         return total
 
     def _truncate_messages(
@@ -210,7 +210,7 @@ class AgentBaseExecutor:
             if os.path.exists(TOOLS_FILE):
                 mtime = os.path.getmtime(TOOLS_FILE)
                 if mtime > self.__class__._tools_cache["mtime"]:
-                    with open(TOOLS_FILE, "r") as f:
+                    with open(TOOLS_FILE, "r", encoding="utf-8") as f:
                         self.__class__._tools_cache["data"] = json.load(f)
                     self.__class__._tools_cache["mtime"] = mtime
                 return self.__class__._tools_cache["data"]
@@ -298,8 +298,8 @@ class AgentBaseExecutor:
         if self._session_manager:
             try:
                 self._session_manager.log_tool_call(func_name, args)
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.debug("ignored exception: %s", _exc)
         return start_time
 
     def _log_tool_result(
@@ -321,8 +321,8 @@ class AgentBaseExecutor:
                     duration_ms=duration_ms,
                     error=error,
                 )
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.debug("ignored exception: %s", _exc)
 
     def _log_llm_call(self, model: str) -> float:
         """Log an LLM call to the session trace and return start_time."""
@@ -330,8 +330,8 @@ class AgentBaseExecutor:
         if self._session_manager:
             try:
                 self._session_manager.log_llm_call(model, tokens=None)
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.debug("ignored exception: %s", _exc)
         return start_time
 
     def _log_llm_result(self, model: str, start_time: float, response: dict) -> None:
@@ -345,24 +345,24 @@ class AgentBaseExecutor:
                 self._session_manager.log_llm_call(
                     model, tokens=tokens, latency_ms=latency_ms
                 )
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.debug("ignored exception: %s", _exc)
 
     def _log_agent_event(self, event_type: str, data: dict = None) -> None:
         """Log a general agent lifecycle event to the session trace."""
         if self._session_manager:
             try:
                 self._session_manager.log_agent_event(event_type, data)
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.debug("ignored exception: %s", _exc)
 
     def _log_rlm_event(self, event_type: str, data: dict = None) -> None:
         """Log an RLM-specific event to the session trace."""
         if self._session_manager:
             try:
                 self._session_manager.log_rlm_event(event_type, data)
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.debug("ignored exception: %s", _exc)
 
     def _log_replan_event(self, result: dict) -> None:
         """Log a replan event when replan_needed is True, or agent_end on success."""
@@ -529,8 +529,8 @@ class AgentLoopExecutor(AgentBaseExecutor):
                         code_path = os.path.join(LIBRARY_DIR, filename)
                         try:
                             current_files[tool_name] = os.path.getmtime(code_path)
-                        except OSError:
-                            pass
+                        except OSError as _exc:
+                            logger.debug("ignored exception: %s", _exc)
 
                 cache_data = self.__class__._library_cache.get("data", {})
                 cache_mtimes = self.__class__._library_cache.get("file_mtimes", {})
@@ -1239,8 +1239,8 @@ class RLMAgentLoopExecutor(AgentBaseExecutor):
                         code_path = os.path.join(lib_dir, filename)
                         try:
                             current_files[tool_name] = os.path.getmtime(code_path)
-                        except OSError:
-                            pass
+                        except OSError as _exc:
+                            logger.debug("ignored exception: %s", _exc)
 
             cache_mtimes = self.__class__._library_cache.get("file_mtimes", {})
             needs_reload = (
@@ -1947,8 +1947,8 @@ class HybridAgentExecutor(AgentBaseExecutor):
                         code_path = os.path.join(lib_dir, filename)
                         try:
                             current_files[tool_name] = os.path.getmtime(code_path)
-                        except OSError:
-                            pass
+                        except OSError as _exc:
+                            logger.debug("ignored exception: %s", _exc)
 
             cache_mtimes = self.__class__._library_cache.get("file_mtimes", {})
             needs_reload = (
@@ -3073,8 +3073,8 @@ class GoalPursuitExecutor(HybridAgentExecutor, RLMAgentLoopExecutor):
                             "reversible": reversible,
                         })
                 return plan
-        except (json.JSONDecodeError, ValueError):
-            pass
+        except (json.JSONDecodeError, ValueError) as _exc:
+            logger.debug("ignored exception: %s", _exc)
         # Fallback: LLM added prose before/after the JSON array (e.g. "Here is the plan:
         # [...]"). Extract the array using a regex so prose preambles don't silently
         # produce empty plans.
@@ -3086,8 +3086,8 @@ class GoalPursuitExecutor(HybridAgentExecutor, RLMAgentLoopExecutor):
                     return await self._parse_plan_response(
                         json.dumps(parsed), max_steps, step_offset
                     )
-            except (json.JSONDecodeError, ValueError):
-                pass
+            except (json.JSONDecodeError, ValueError) as _exc:
+                logger.debug("ignored exception: %s", _exc)
         return []
 
     async def _create_plan(
@@ -3291,8 +3291,8 @@ class GoalPursuitExecutor(HybridAgentExecutor, RLMAgentLoopExecutor):
                     "reason": str(parsed.get("reason", "")),
                     "extracted_result": str(parsed.get("extracted_result", "")),
                 }
-        except (json.JSONDecodeError, ValueError):
-            pass
+        except (json.JSONDecodeError, ValueError) as _exc:
+            logger.debug("ignored exception: %s", _exc)
         return {
             "success": False,
             "reason": f"Evaluator response could not be parsed: {raw[:200]}",
@@ -3819,8 +3819,8 @@ class GoalPursuitExecutor(HybridAgentExecutor, RLMAgentLoopExecutor):
                     "critical_unknowns": [str(u) for u in parsed.get("critical_unknowns", [])],
                     "safe_assumptions": [str(a) for a in parsed.get("safe_assumptions", [])],
                 }
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug("ignored exception: %s", _exc)
         return _default
 
     async def _mid_run_assessment(

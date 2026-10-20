@@ -1,7 +1,10 @@
+import logging
 import json
 import os
 from datetime import datetime
 from .events import event_manager, EVENTS_FILE
+
+logger = logging.getLogger(__name__)
 
 class CalendarWatcherExecutor:
     async def receive(self, input_data: dict, config: dict = None) -> dict:
@@ -13,7 +16,7 @@ class CalendarWatcherExecutor:
             return None
             
         try:
-            with open(EVENTS_FILE, "r") as f:
+            with open(EVENTS_FILE, "r", encoding="utf-8") as f:
                 events = json.load(f)
         except (json.JSONDecodeError, OSError):
             return None

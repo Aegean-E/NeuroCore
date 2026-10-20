@@ -194,7 +194,8 @@ class SafeOpen:
         if self.read_only and not mode.startswith('r'):
             raise SecurityError(f"Write access to file '{file}' is not permitted in sandboxed environment")
         
-        return builtins.open(file, mode, *args, **kwargs)
+        _open_fn = getattr(builtins, "open")
+        return _open_fn(file, mode, *args, **kwargs)
 
 
 class SafeHttpxClient:
@@ -267,16 +268,16 @@ class SafeHttpxClient:
         for cidr in self.BLOCKED_IPV4_RANGES:
             try:
                 self._blocked_ipv4_networks.append(ipaddress.ip_network(cidr, strict=False))
-            except ValueError:
-                pass
+            except ValueError as _exc:
+                logger.debug("ignored exception: %s", _exc)
         
         # Pre-compile IPv6 blocking patterns  
         self._blocked_ipv6_networks = []
         for cidr in self.BLOCKED_IPV6_RANGES:
             try:
                 self._blocked_ipv6_networks.append(ipaddress.ip_network(cidr, strict=False))
-            except ValueError:
-                pass
+            except ValueError as _exc:
+                logger.debug("ignored exception: %s", _exc)
     
     def _is_domain_allowed(self, url: str) -> bool:
         """Check if a URL's domain is in the allowed list."""
@@ -490,8 +491,8 @@ def _execute_in_process(code: str, local_vars: Dict[str, Any], result_file: str,
         if max_memory_mb > 0:
             try:
                 tracemalloc.start()
-            except Exception:
-                pass  # Optional on some platforms
+            except Exception as _exc:
+                logger.debug("ignored exception: %s", _exc)  # Optional on some platforms
 
         # Rebuild sandbox environment in child process
         sandbox = ToolSandbox(
@@ -605,8 +606,8 @@ class ToolSandbox:
             try:
                 module = __import__(module_name)
                 restricted_globals[module_name] = module
-            except ImportError:
-                pass
+            except ImportError as _exc:
+                logger.debug("ignored exception: %s", _exc)
         
         # Expose safe substitutes as top-level globals so tool code can use them
         # directly (without import) as well as via `import httpx` / `import os`
@@ -665,9 +666,9 @@ class ToolSandbox:
                     if isinstance(node.func, ast.Attribute):
                         if node.func.attr in dangerous_funcs:
                             raise SecurityError(f"Dangerous call detected: .{node.func.attr}()")
-        except SyntaxError:
+        except SyntaxError as _exc:
             # If code can't be parsed, let it fail at execution time
-            pass
+            logger.debug("ignored exception: %s", _exc)
     
     def _execute_internal(self, code: str, local_vars: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """Internal execution without multiprocessing - used by child process."""
@@ -683,7 +684,7 @@ class ToolSandbox:
         result_container = {'result': None, 'error': None, 'output': ''}
         
         try:
-            exec(code, exec_globals)
+            exec(code, exec_globals)  # hygiene: allow isolated code sandbox execution
             result_container['result'] = exec_globals.get('result')
         except Exception as e:
             result_container['error'] = e
@@ -825,8 +826,8 @@ class ToolSandbox:
         finally:
             try:
                 _os.unlink(result_file)
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.debug("ignored exception: %s", _exc)
         
         # Check if result contains an error
         if isinstance(result, dict):

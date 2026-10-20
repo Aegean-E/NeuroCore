@@ -1,11 +1,14 @@
+import logging
 import os
 import json
 from unittest.mock import MagicMock, patch
 import pytest
 from fastapi import FastAPI
-from fastapi.routing import APIRoute
+from starlette.testclient import TestClient
 from core.module_manager import ModuleManager
 import sys
+
+logger = logging.getLogger(__name__)
 
 @pytest.fixture
 def temp_modules_dir(tmp_path, monkeypatch):
@@ -17,13 +20,13 @@ def temp_modules_dir(tmp_path, monkeypatch):
 
     # Valid enabled module with a router
     (modules_dir / "enabled_module").mkdir()
-    with open(modules_dir / "enabled_module" / "module.json", "w") as f:
+    with open(modules_dir / "enabled_module" / "module.json", "w", encoding="utf-8") as f:
         json.dump({"name": "Enabled Module", "enabled": True, "id": "enabled_module"}, f)
     (modules_dir / "enabled_module" / "__init__.py").write_text("from fastapi import APIRouter\nrouter = APIRouter(tags=['enabled_module'])\n@router.get('/')\ndef read_root(): return {}")
 
     # Valid disabled module
     (modules_dir / "disabled_module").mkdir()
-    with open(modules_dir / "disabled_module" / "module.json", "w") as f:
+    with open(modules_dir / "disabled_module" / "module.json", "w", encoding="utf-8") as f:
         json.dump({"name": "Disabled Module", "enabled": False, "id": "disabled_module"}, f)
     (modules_dir / "disabled_module" / "__init__.py").write_text("from fastapi import APIRouter\nrouter = APIRouter(tags=['disabled_module'])\n@router.get('/')\ndef read_root(): return {}")
 
@@ -63,22 +66,23 @@ def test_load_enabled_modules_at_startup(temp_modules_dir, mock_app):
     manager = ModuleManager(app=mock_app, modules_dir=temp_modules_dir)
     manager.load_enabled_modules()
     
-    # Check that the enabled module's router was mounted
-    assert any(isinstance(r, APIRoute) and "enabled_module" in r.tags for r in mock_app.router.routes)
-    # Check that the disabled module's router was NOT mounted
-    assert not any(isinstance(r, APIRoute) and "disabled_module" in r.tags for r in mock_app.router.routes)
+    # Check the observable behaviour: enabled routes answer, disabled ones do not.
+    client = TestClient(mock_app)
+    assert client.get("/enabled_module/").status_code == 200
+    assert client.get("/disabled_module/").status_code == 404
 
 def test_hot_enable_module(temp_modules_dir, mock_app):
     """Tests that enabling a module dynamically adds its router."""
     manager = ModuleManager(app=mock_app, modules_dir=temp_modules_dir)
     # Initially, disabled_module should not be loaded
-    assert not any(isinstance(r, APIRoute) and "disabled_module" in r.tags for r in mock_app.router.routes)
+    client = TestClient(mock_app)
+    assert client.get("/disabled_module/").status_code == 404
 
     # Enable the module
     manager.enable_module("disabled_module")
 
     # Now it should be loaded
-    assert any(isinstance(r, APIRoute) and "disabled_module" in r.tags for r in mock_app.router.routes)
+    assert client.get("/disabled_module/").status_code == 200
     assert manager.modules["disabled_module"]["enabled"] is True
 
 def test_hot_disable_module(temp_modules_dir, mock_app):
@@ -86,13 +90,14 @@ def test_hot_disable_module(temp_modules_dir, mock_app):
     manager = ModuleManager(app=mock_app, modules_dir=temp_modules_dir)
     # Load enabled modules first
     manager.load_enabled_modules()
-    assert any(isinstance(r, APIRoute) and "enabled_module" in r.tags for r in mock_app.router.routes)
+    client = TestClient(mock_app)
+    assert client.get("/enabled_module/").status_code == 200
 
     # Disable the module
     manager.disable_module("enabled_module")
 
     # Now it should be gone
-    assert not any(isinstance(r, APIRoute) and "enabled_module" in r.tags for r in mock_app.router.routes)
+    assert client.get("/enabled_module/").status_code == 404
     assert manager.modules["enabled_module"]["enabled"] is False
 
 def test_update_module_config(temp_modules_dir, mock_app):
@@ -106,6 +111,6 @@ def test_update_module_config(temp_modules_dir, mock_app):
     
     # Verify file write
     config_path = os.path.join(temp_modules_dir, "enabled_module", "module.json")
-    with open(config_path, "r") as f:
+    with open(config_path, "r", encoding="utf-8") as f:
         data = json.load(f)
         assert data["config"] == new_config

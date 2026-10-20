@@ -9,6 +9,7 @@ Thread-safe SQLite-backed manager for research entities:
 """
 
 import json
+import logging
 import os
 import sqlite3
 import threading
@@ -16,7 +17,11 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
-DB_PATH = "data/research.sqlite3"
+from core.paths import project_path
+
+logger = logging.getLogger(__name__)
+
+DB_PATH = project_path("data", "research.sqlite3")
 
 
 def _now() -> str:
@@ -183,8 +188,8 @@ class ResearchManager:
             if isinstance(val, str) and val.startswith(("[", "{")):
                 try:
                     d[key] = json.loads(val)
-                except (json.JSONDecodeError, ValueError):
-                    pass
+                except (json.JSONDecodeError, ValueError) as _exc:
+                    logger.debug("ignored exception: %s", _exc)
         return d
 
     # ------------------------------------------------------------------
@@ -866,7 +871,8 @@ class ResearchManager:
 
     def export_csv(self, intervention_id: str) -> str:
         """Return a CSV string of all metric logs for an intervention."""
-        import csv, io
+        import csv
+        import io
         logs = self.get_metric_logs(intervention_id)
         events = self.get_events(intervention_id)
         buf = io.StringIO()

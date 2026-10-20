@@ -64,38 +64,35 @@ class DocumentProcessor:
             OCR_AVAILABLE = False
 
         try:
-            doc = fitz.open(file_path)
+            with fitz.open(file_path) as doc:  # hygiene: allow pdf library document open
+                page_count = len(doc)
+                pages = []
+                
+                for page_num in range(page_count):
+                    try:
+                        page = doc[page_num]
+                        text = page.get_text("text")
+
+                        # OCR FALLBACK
+                        if not text.strip() and OCR_AVAILABLE:
+                            self.log.warning(f"Page {page_num + 1} seems empty. Attempting OCR...")
+                            try:
+                                pix = page.get_pixmap()
+                                img_data = pix.tobytes("png")
+                                with Image.open(io.BytesIO(img_data)) as image:  # hygiene: allow pil image open
+                                    text = pytesseract.image_to_string(image)
+                            except Exception as e:
+                                self.log.error(f"OCR failed for page {page_num + 1}: {e}")
+
+                        pages.append({
+                            'page_number': page_num + 1,
+                            'text': self.clean_text(text)
+                        })
+                    except Exception as e:
+                        self.log.warning(f"Skipping page {page_num + 1} due to error: {e}")
+                        continue
         except Exception as e:
             raise ValueError(f"Could not open PDF: {e}")
-
-        page_count = len(doc)
-        pages = []
-        
-        for page_num in range(page_count):
-            try:
-                page = doc[page_num]
-                text = page.get_text("text")
-                
-                # OCR FALLBACK
-                if not text.strip() and OCR_AVAILABLE:
-                    self.log.warning(f"Page {page_num + 1} seems empty. Attempting OCR...")
-                    try:
-                        pix = page.get_pixmap()
-                        img_data = pix.tobytes("png")
-                        image = Image.open(io.BytesIO(img_data))
-                        text = pytesseract.image_to_string(image)
-                    except Exception as e:
-                        self.log.error(f"OCR failed for page {page_num + 1}: {e}")
-
-                pages.append({
-                    'page_number': page_num + 1,
-                    'text': self.clean_text(text)
-                })
-            except Exception as e:
-                self.log.warning(f"Skipping page {page_num + 1} due to error: {e}")
-                continue
-
-        doc.close()
         
         if not pages:
             raise ValueError("No text extracted from PDF.")

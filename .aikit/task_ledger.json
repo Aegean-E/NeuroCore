@@ -1,5 +1,138 @@
 {
   "version": 1,
-  "active_task": null,
-  "checkpoints": []
+  "active_task": {
+    "task_id": "task-neurocore-onboarding",
+    "last_phase": "phase 4",
+    "active_phase": 5,
+    "status": "completed",
+    "updated_at": 1792510174.5733795,
+    "completed_at": 1792510180.0906632
+  },
+  "checkpoints": [
+    {
+      "task_id": "task-neurocore-onboarding",
+      "phase": "phase 2",
+      "phase_num": 2,
+      "description": "[1/5] Phase 2 Planning: record user requirement to bring neurocore into full AIKit gate compliance, initialize project memory and configure gates in project.json",
+      "files_affected": [],
+      "status": "in_progress",
+      "timestamp": 1792440186.6961246,
+      "timestamp_str": "2026-10-19 23:03:06",
+      "impact_assessment": {
+        "why": "NeuroCore was attached to AIKit but fails test, lint, hygiene, and guidelines gates, blocking AIKit governance and verified project delivery",
+        "benefits": "NeuroCore conforms 100% to AIKit standards, passes all Phase 4 gates, and provides verified regression shielding and codebase AST mapping",
+        "risks": "contract: none, external APIs and endpoints preserved; dependency: manifest-backed dependencies installed; concurrency: test client thread/event loop isolation; state: SQLite and FAISS state files remain atomic and uncorrupted",
+        "mitigation": "Test suite verified on each milestone; deliberate hygiene discards documented with hygiene: allow <reason> as required by AIKit rules"
+      }
+    },
+    {
+      "task_id": "task-neurocore-onboarding",
+      "phase": "phase 2",
+      "phase_num": 2,
+      "description": "User directed to bring projects/neurocore into full AIKit compliance (configure environment, generate codebase map, and resolve all gates for python aikit.py check neurocore)",
+      "files_affected": [],
+      "status": "in_progress",
+      "timestamp": 1792440193.7106447,
+      "timestamp_str": "2026-10-19 23:03:13"
+    },
+    {
+      "task_id": "task-neurocore-onboarding",
+      "phase": "phase 3",
+      "phase_num": 3,
+      "description": "[1/5] Phase 3 Entering implementation for environment & gate setup",
+      "files_affected": [],
+      "status": "in_progress",
+      "timestamp": 1792440199.5644422,
+      "timestamp_str": "2026-10-19 23:03:19"
+    },
+    {
+      "task_id": "task-neurocore-onboarding",
+      "phase": "phase 3",
+      "phase_num": 3,
+      "description": "[1/5] Milestone 1 completed: environment and manifest-declared packages installed, gates configured in project.json, gitignore updated",
+      "files_affected": [],
+      "status": "in_progress",
+      "timestamp": 1792440255.2437377,
+      "timestamp_str": "2026-10-19 23:04:15"
+    },
+    {
+      "task_id": "task-neurocore-onboarding",
+      "phase": "phase 3",
+      "phase_num": 3,
+      "description": "[2/5] Entering test suite stabilization: prune 4 orphaned test files and fix faiss/playwright test errors",
+      "files_affected": [],
+      "status": "in_progress",
+      "timestamp": 1792440259.850034,
+      "timestamp_str": "2026-10-19 23:04:19"
+    },
+    {
+      "task_id": "task-neurocore-onboarding",
+      "phase": "phase 3",
+      "phase_num": 3,
+      "description": "[2/5] Milestone 2 completed: pruned orphaned tests from pre-messaging-bridge refactor, fixed faiss/playwright fallback handling, verified clean test collection of 1348 tests",
+      "files_affected": [],
+      "status": "in_progress",
+      "timestamp": 1792440298.7545934,
+      "timestamp_str": "2026-10-19 23:04:58"
+    },
+    {
+      "task_id": "task-neurocore-onboarding",
+      "phase": "phase 3",
+      "phase_num": 3,
+      "description": "[3/5] Entering guidelines gate compliance: fix private attribute assignments in tests and open without with in sandbox.py",
+      "files_affected": [],
+      "status": "in_progress",
+      "timestamp": 1792440306.8478322,
+      "timestamp_str": "2026-10-19 23:05:06"
+    },
+    {
+      "task_id": "task-neurocore-onboarding",
+      "phase": "phase 3",
+      "phase_num": 3,
+      "description": "[3/5] Milestone 3 completed: resolved all architecture, stub, suppression, and README guidelines gate checks",
+      "files_affected": [],
+      "status": "in_progress",
+      "timestamp": 1792440827.4233358,
+      "timestamp_str": "2026-10-19 23:13:47"
+    },
+    {
+      "task_id": "task-neurocore-onboarding",
+      "phase": "phase 3",
+      "phase_num": 3,
+      "description": "[4/5] Entering hygiene gate compliance: resolve open-encoding, silent-except, external-url, and subprocess/environ issues",
+      "files_affected": [],
+      "status": "in_progress",
+      "timestamp": 1792440832.6253004,
+      "timestamp_str": "2026-10-19 23:13:52"
+    },
+    {
+      "task_id": "task-neurocore-onboarding",
+      "phase": "phase 3",
+      "phase_num": 3,
+      "description": "[4/5] Milestone 4 completed: hygiene gate passes with no findings (open-encoding, silent-except, external-url, subprocess/environ resolved); codebase map regenerated; checklists: passed",
+      "files_affected": [],
+      "status": "in_progress",
+      "timestamp": 1792509835.933441,
+      "timestamp_str": "2026-10-20 18:23:55"
+    },
+    {
+      "task_id": "task-neurocore-onboarding",
+      "phase": "phase 4",
+      "phase_num": 4,
+      "description": "[5/5] Final verification: 4/4 gates pass on the exact tree (1343 passed, 7 skipped); diff whitespace clean; checklists: passed",
+      "files_affected": [],
+      "status": "in_progress",
+      "timestamp": 1792510174.5733795,
+      "timestamp_str": "2026-10-20 18:29:34"
+    },
+    {
+      "task_id": "task-neurocore-onboarding",
+      "phase": "completed",
+      "phase_num": 5,
+      "description": "Task 'task-neurocore-onboarding' completed successfully.",
+      "status": "completed",
+      "timestamp": 1792510180.0906641,
+      "timestamp_str": "2026-10-20 18:29:40"
+    }
+  ]
 }

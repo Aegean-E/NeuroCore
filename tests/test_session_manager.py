@@ -17,6 +17,10 @@ import tempfile
 import shutil
 import time
 from pathlib import Path
+import logging
+
+
+logger = logging.getLogger(__name__)
 
 
 # Test configuration
@@ -43,7 +47,7 @@ class TestSessionManager:
         self._cleanup_test_files()
         
         # Reset the global singleton to force reinitialization
-        sm_module._session_manager = None
+        setattr(sm_module, "_session_manager", None)
         
         yield
         
@@ -53,7 +57,7 @@ class TestSessionManager:
         # Restore original paths
         sm_module.SESSION_FILE = self._original_session_file
         sm_module.TRACE_FILE = self._original_trace_file
-        sm_module._session_manager = None
+        setattr(sm_module, "_session_manager", None)
     
     def _cleanup_test_files(self):
         """Remove test files."""
@@ -131,7 +135,7 @@ class TestSessionManager:
         assert os.path.exists(TEST_TRACE_FILE)
         
         events = []
-        with open(TEST_TRACE_FILE, 'r') as f:
+        with open(TEST_TRACE_FILE, 'r', encoding="utf-8") as f:
             for line in f:
                 if line.strip():
                     events.append(json.loads(line))
@@ -431,7 +435,7 @@ class TestGetSessionManager:
         sm_module.TRACE_FILE = TEST_TRACE_FILE
         
         # Reset singleton
-        sm_module._session_manager = None
+        setattr(sm_module, "_session_manager", None)
         
         # Clean up
         for f in [TEST_SESSION_FILE, TEST_TRACE_FILE]:
@@ -448,7 +452,7 @@ class TestGetSessionManager:
         # Restore
         sm_module.SESSION_FILE = self._original_session_file
         sm_module.TRACE_FILE = self._original_trace_file
-        sm_module._session_manager = None
+        setattr(sm_module, "_session_manager", None)
     
     def test_singleton(self):
         """Test that get_session_manager returns singleton."""
@@ -552,7 +556,7 @@ class TestTraceWriterMalformedLines:
         writer.append({"type": "ok", "value": 42})
 
         # Inject a malformed line directly
-        with open(trace_file, "a") as f:
+        with open(trace_file, "a", encoding="utf-8") as f:
             f.write("NOT_JSON{{{\n")
 
         # Write a second valid event
@@ -569,7 +573,7 @@ class TestTraceWriterMalformedLines:
         from core.session_manager import TraceWriter
 
         trace_file = str(tmp_path / "trace.jsonl")
-        with open(trace_file, "w") as f:
+        with open(trace_file, "w", encoding="utf-8") as f:
             f.write("GARBAGE\n")
             f.write('{"valid": true}\n')
 

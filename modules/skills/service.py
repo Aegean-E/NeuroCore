@@ -2,11 +2,14 @@
 Service layer for Skills module - business logic for skill management.
 """
 
+import logging
 import json
 import re
 import httpx
 from typing import List, Dict, Any, Optional
 from .backend import SkillBackend
+
+logger = logging.getLogger(__name__)
 
 
 class SkillService:
@@ -257,12 +260,12 @@ class SkillService:
                         metadata["category"] = frontmatter["category"]
                     if "tags" in frontmatter and isinstance(frontmatter["tags"], list):
                         metadata["tags"] = frontmatter["tags"]
-            except ImportError:
+            except ImportError as _exc:
                 # yaml not available, fall back to regex
-                pass
-            except Exception:
+                logger.debug("ignored exception: %s", _exc)
+            except Exception as _exc:
                 # YAML parse error, fall back to regex
-                pass
+                logger.debug("ignored exception: %s", _exc)
         
         # Fall back to regex extraction for non-YAML formats
         if not frontmatter_match:

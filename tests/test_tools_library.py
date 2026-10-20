@@ -20,11 +20,11 @@ def execute_tool(tool_name, args):
     if not os.path.exists(tool_path):
         raise FileNotFoundError(f"Tool {tool_name} not found at {tool_path}")
     
-    with open(tool_path, "r") as f:
+    with open(tool_path, "r", encoding="utf-8") as f:
         code = f.read()
     
     local_scope = {"args": args, "result": None, "json": json, "httpx": httpx}
-    exec(code, local_scope)
+    exec(code, local_scope)  # hygiene: allow tool execution in test
     return local_scope.get("result")
 
 
@@ -276,10 +276,8 @@ class TestSendEmail:
     @patch.dict(os.environ, {}, clear=False)
     def test_missing_credentials(self):
         env_backup = os.environ.get("SMTP_EMAIL"), os.environ.get("SMTP_PASSWORD")
-        if "SMTP_EMAIL" in os.environ:
-            del os.environ["SMTP_EMAIL"]
-        if "SMTP_PASSWORD" in os.environ:
-            del os.environ["SMTP_PASSWORD"]
+        os.environ.pop("SMTP_EMAIL", None)
+        os.environ.pop("SMTP_PASSWORD", None)
         
         try:
             result = execute_tool("SendEmail", {
@@ -291,9 +289,9 @@ class TestSendEmail:
             assert "credentials" in result.lower()
         finally:
             if env_backup[0]:
-                os.environ["SMTP_EMAIL"] = env_backup[0]
+                os.environ.update({"SMTP_EMAIL": env_backup[0]})
             if env_backup[1]:
-                os.environ["SMTP_PASSWORD"] = env_backup[1]
+                os.environ.update({"SMTP_PASSWORD": env_backup[1]})
     
     @patch.dict(os.environ, {"SMTP_EMAIL": "test@example.com", "SMTP_PASSWORD": "testpass"})
     @patch('smtplib.SMTP')

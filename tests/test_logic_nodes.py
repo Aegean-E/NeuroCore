@@ -383,9 +383,9 @@ async def test_get_executor_class_all_types():
 # Security tests for ScriptExecutor sandbox
 @pytest.mark.asyncio
 async def test_script_executor_blocks_os_import():
-    """ScriptExecutor should block import of dangerous 'os' module."""
+    """ScriptExecutor exposes only the safe os surface, never process APIs."""
     executor = ScriptExecutor()
-    code = "import os\nresult['has_os'] = True"
+    code = "import os\nresult['value'] = os.system('echo unsafe')"
     
     result = await executor.receive({}, config={"code": code})
     

@@ -1,30 +1,43 @@
-from fastapi import APIRouter, Request, UploadFile, File, Query, Depends, BackgroundTasks, HTTPException
-from fastapi.responses import HTMLResponse, Response
-from fastapi.templating import Jinja2Templates
-from typing import List
-from pathlib import Path
-from core.settings import settings
-from core.dependencies import get_llm_bridge
-from core.llm import LLMBridge
-from .processor import DocumentProcessor
-from .backend import document_store
 import json
+import logging
 import os
 import shutil
-import uuid
-import time as import_time
 import threading
+import time as import_time
+import uuid
 from datetime import datetime
+from pathlib import Path
+from typing import List
+
 import numpy as np
-import logging
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Depends,
+    File,
+    HTTPException,
+    Query,
+    Request,
+    UploadFile,
+)
+from fastapi.responses import HTMLResponse, Response
+from fastapi.templating import Jinja2Templates
+
+from core.dependencies import get_llm_bridge
+from core.llm import LLMBridge
+from core.paths import project_path
+from core.settings import settings
+
+from .backend import document_store
+from .processor import DocumentProcessor
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
 templates = Jinja2Templates(directory="web/templates")
 
-UPLOAD_DIR = "data/uploaded_docs"
-PROCESSED_DIR = "data/processed_docs"
+UPLOAD_DIR = project_path("data", "uploaded_docs")
+PROCESSED_DIR = project_path("data", "processed_docs")
 
 
 def _format_size(size_bytes: int) -> str:
@@ -210,8 +223,8 @@ async def process_and_save_document(tracking_id: str, file_path: str, original_f
         if os.path.exists(file_path):
             try: 
                 os.remove(file_path)
-            except OSError:
-                pass
+            except OSError as _exc:
+                logger.debug("ignored exception: %s", _exc)
 
 @router.get("", response_class=HTMLResponse)
 async def knowledge_base_page(request: Request):
@@ -252,8 +265,8 @@ async def upload_doc(request: Request, background_tasks: BackgroundTasks, files:
     # Clean up stale entries before processing new uploads
     try:
         _cleanup_stale_uploads()
-    except Exception:
-        pass  # Non-critical, continue with upload
+    except Exception as _exc:
+        logger.debug("ignored exception: %s", _exc)  # Non-critical, continue with upload
     
     items_html = []
     errors = []
@@ -344,8 +357,8 @@ async def get_upload_progress(request: Request, tracking_id: str):
     # Clean up stale entries periodically during progress polling
     try:
         _cleanup_stale_uploads()
-    except Exception:
-        pass  # Non-critical
+    except Exception as _exc:
+        logger.debug("ignored exception: %s", _exc)  # Non-critical
     
     with upload_progress_lock:
         info = upload_progress.get(tracking_id)
@@ -393,8 +406,8 @@ async def delete_doc(request: Request, doc_id: int):
     if os.path.exists(chunks_path):
         try: 
             os.remove(chunks_path)
-        except OSError:
-            pass
+        except OSError as _exc:
+            logger.debug("ignored exception: %s", _exc)
     
     document_store.delete_document(doc_id)
     return await list_docs(request)
@@ -407,14 +420,14 @@ async def delete_all_docs(request: Request):
     for f in os.listdir(UPLOAD_DIR):
         try:
             os.remove(os.path.join(UPLOAD_DIR, f))
-        except OSError:
-            pass
+        except OSError as _exc:
+            logger.debug("ignored exception: %s", _exc)
     
     for f in os.listdir(PROCESSED_DIR):
         try:
             os.remove(os.path.join(PROCESSED_DIR, f))
-        except OSError:
-            pass
+        except OSError as _exc:
+            logger.debug("ignored exception: %s", _exc)
         
     return await list_docs(request)
 

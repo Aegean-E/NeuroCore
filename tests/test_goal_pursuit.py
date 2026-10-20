@@ -25,7 +25,7 @@ def make_executor():
     with patch("modules.agent_loop.node.LLMBridge"):
         ex = GoalPursuitExecutor()
     ex.llm = MagicMock()
-    ex._sandbox = MagicMock()
+    setattr(ex, "_sandbox", MagicMock())
     return ex
 
 
@@ -52,6 +52,23 @@ MESSAGES = [{"role": "user", "content": "Research AI trends and summarize them"}
 # ---------------------------------------------------------------------------
 # Autouse fixture — suppress pre-step reasoning for all existing tests
 # ---------------------------------------------------------------------------
+
+@pytest.fixture(autouse=True)
+def _isolate_goal_lessons(monkeypatch):
+    """Keep the shared memory store out of planning.
+
+    Lessons saved by earlier tests would otherwise consume the precise LLM
+    response sequences these tests set up.  Tests that exercise lesson loading
+    patch the method themselves and therefore take precedence.
+    """
+    async def _no_lessons(self, config):
+        return []
+
+    monkeypatch.setattr(
+        "modules.agent_loop.node.GoalPursuitExecutor._fetch_goal_lessons",
+        _no_lessons,
+    )
+
 
 @pytest.fixture(autouse=True)
 def _stub_step_reasoning(monkeypatch):
@@ -1748,7 +1765,7 @@ async def test_rlm_loop_deduplicates_tool_calls():
     from modules.agent_loop.node import RLMAgentLoopExecutor
     with patch("modules.agent_loop.node.LLMBridge"):
         rlm = RLMAgentLoopExecutor()
-    rlm._load_tool_library = MagicMock(return_value={"Echo": "result = args.get('text', '')"})
+    setattr(rlm, "_load_tool_library", MagicMock(return_value={"Echo": "result = args.get('text', '')"}))
 
     dup_call = {"id": "c1", "function": {"name": "Echo", "arguments": '{"text": "hi"}'}}
     uniq_call = {"id": "c2", "function": {"name": "Echo", "arguments": '{"text": "unique"}'}}
@@ -3136,7 +3153,7 @@ async def test_synthesize_results_inlines_small_result():
         captured_messages.extend(llm_messages)
         return ({"choices": [{"message": {"content": "42"}}]}, 1, False)
 
-    ex._run_hybrid_loop = fake_run_hybrid_loop
+    setattr(ex, "_run_hybrid_loop", fake_run_hybrid_loop)
 
     await ex._synthesize_results(
         completed=completed,
@@ -3178,7 +3195,7 @@ async def test_synthesize_results_uses_get_variable_for_large_result():
         captured_messages.extend(llm_messages)
         return ({"choices": [{"message": {"content": "summary"}}]}, 1, False)
 
-    ex._run_hybrid_loop = fake_run_hybrid_loop
+    setattr(ex, "_run_hybrid_loop", fake_run_hybrid_loop)
 
     await ex._synthesize_results(
         completed=completed,
@@ -3219,7 +3236,7 @@ async def test_synthesize_results_includes_reasoning_history():
         captured_messages.extend(llm_messages)
         return ({"choices": [{"message": {"content": "done"}}]}, 1, False)
 
-    ex._run_hybrid_loop = fake_run_hybrid_loop
+    setattr(ex, "_run_hybrid_loop", fake_run_hybrid_loop)
 
     await ex._synthesize_results(
         completed=completed,
@@ -3257,7 +3274,7 @@ async def test_synthesize_results_no_reasoning_section_when_history_empty():
         captured_messages.extend(llm_messages)
         return ({"choices": [{"message": {"content": "done"}}]}, 1, False)
 
-    ex._run_hybrid_loop = fake_run_hybrid_loop
+    setattr(ex, "_run_hybrid_loop", fake_run_hybrid_loop)
 
     await ex._synthesize_results(
         completed=completed,

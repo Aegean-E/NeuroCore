@@ -1,6 +1,11 @@
-import os
 import asyncio
+import os
 import sys
+
+# Runtime state is stored with relative paths throughout the app. Anchor every launch to
+# the project folder so starting the app from a parent directory cannot scatter files there.
+PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
+os.chdir(PROJECT_ROOT)
 
 # On Windows, asyncio defaults to SelectorEventLoop which cannot spawn subprocesses.
 # Playwright (and any module that uses asyncio.create_subprocess_exec) requires
@@ -9,20 +14,22 @@ if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
 
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, Depends, HTTPException, Header
+
+from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.staticfiles import StaticFiles
-from core.module_manager import ModuleManager
-from core.routers import router as core_router
-from core.settings import settings
+
+from core.debug import debug_logger
 from core.flow_manager import flow_manager
 from core.flow_runner import FlowRunner
-from core.debug import debug_logger
 from core.llm import close_shared_client
+from core.module_manager import ModuleManager
 from core.observability import (
     instrument_flow_runner,
     instrument_llm_calls,
     instrument_tools,
 )
+from core.routers import router as core_router
+from core.settings import settings
 
 
 async def verify_debug_key(x_debug_key: str = Header(...)):
@@ -144,8 +151,9 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="NeuroCore", description="Modular LLM API Core", lifespan=lifespan)
 
 # Ensure static directory exists to prevent startup errors
-os.makedirs("web/static", exist_ok=True)
-app.mount("/static", StaticFiles(directory="web/static"), name="static")
+static_dir = os.path.join(PROJECT_ROOT, "web", "static")
+os.makedirs(static_dir, exist_ok=True)
+app.mount("/static", StaticFiles(directory=static_dir), name="static")
 app.include_router(core_router)
 
 # Debug Endpoint to manually fire all active flows

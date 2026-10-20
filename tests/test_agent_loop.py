@@ -55,8 +55,8 @@ def make_executor(tools: dict = None, library: dict = None) -> AgentLoopExecutor
     at the instance level so no context manager is needed.
     """
     executor = AgentLoopExecutor()
-    executor._load_tools = MagicMock(return_value=tools or {})
-    executor._load_tool_library = MagicMock(return_value=library or {})
+    setattr(executor, "_load_tools", MagicMock(return_value=tools or {}))
+    setattr(executor, "_load_tool_library", MagicMock(return_value=library or {}))
     return executor
 
 
@@ -1121,7 +1121,7 @@ class TestContextCompaction:
             compact_called["n"] += 1
             return await original_compact(msgs, keep_last)
 
-        ex._compact_messages = spy_compact
+        setattr(ex, "_compact_messages", spy_compact)
 
         final_resp = {"choices": [{"message": {"content": "Done", "tool_calls": []}}]}
         ex.llm.chat_completion = AsyncMock(return_value=final_resp)
@@ -1155,8 +1155,8 @@ class TestHybridAgentExecutor:
     def _make_executor(self):
         ex = HybridAgentExecutor.__new__(HybridAgentExecutor)
         ex.llm = AsyncMock()
-        ex._sandbox = MagicMock()
-        ex._session_manager = None
+        setattr(ex, "_sandbox", MagicMock())
+        setattr(ex, "_session_manager", None)
         return ex
 
     def _repl_state(self):
@@ -1550,8 +1550,8 @@ class TestHybridBugFixes:
 
     def _make_executor(self):
         ex = HybridAgentExecutor()
-        ex._load_tools = MagicMock(return_value={})
-        ex._load_tool_library = MagicMock(return_value={})
+        setattr(ex, "_load_tools", MagicMock(return_value={}))
+        setattr(ex, "_load_tool_library", MagicMock(return_value={}))
         return ex
 
     async def test_input_messages_not_mutated_by_hybrid_receive(self):
@@ -1589,12 +1589,13 @@ class TestHybridBugFixes:
         ex = self._make_executor()
         ex.llm = MagicMock()
         ex.llm.chat_completion = AsyncMock(side_effect=responses)
-        ex._load_tool_library = MagicMock(return_value={
+        setattr(ex, "_load_tool_library", MagicMock(return_value={
             "A": "result = 'a'",
             "B": "result = 'b'",
-        })
-        ex._sandbox = MagicMock()
-        ex._sandbox.execute = MagicMock(return_value={"result": "r"})
+        }))
+        sandbox_mock = MagicMock()
+        sandbox_mock.execute = MagicMock(return_value={"result": "r"})
+        setattr(ex, "_sandbox", sandbox_mock)
 
         result = await ex.receive(
             {"messages": [{"role": "user", "content": "go"}]},
@@ -1632,7 +1633,7 @@ class TestRLMBugFixes:
         final_response = make_llm_response("final answer")
 
         ex = RLMAgentLoopExecutor()
-        ex._load_tool_library = MagicMock(return_value={"Echo": "result = args.get('text', '')"})
+        setattr(ex, "_load_tool_library", MagicMock(return_value={"Echo": "result = args.get('text', '')"}))
         ex.llm = MagicMock()
         ex.llm.chat_completion = AsyncMock(side_effect=[tool_response, final_response])
 

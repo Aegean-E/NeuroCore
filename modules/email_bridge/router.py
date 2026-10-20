@@ -5,7 +5,6 @@ from fastapi import APIRouter, Request, Form
 from fastapi.responses import Response
 import json
 import logging
-
 from .service import email_service
 
 logger = logging.getLogger(__name__)

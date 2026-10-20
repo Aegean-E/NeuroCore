@@ -175,8 +175,8 @@ class DiscordBridge:
                     heartbeat_task.cancel()
                     try:
                         await heartbeat_task
-                    except asyncio.CancelledError:
-                        pass
+                    except asyncio.CancelledError as _exc:
+                        logger.debug("ignored exception: %s", _exc)
 
             if not running_check() or self._stop_event.is_set():
                 break

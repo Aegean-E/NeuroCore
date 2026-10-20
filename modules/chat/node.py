@@ -1,3 +1,7 @@
+import logging
+
+logger = logging.getLogger(__name__)
+
 class ChatInputExecutor:
     """
     Node to start a flow with chat data.
@@ -47,8 +51,8 @@ class ChatOutputExecutor:
                     # Fallback: Check for tool calls to give better error/info
                     if message.get("tool_calls"):
                         return {"content": f"<i>(Tool Call Generated: {message['tool_calls'][0]['function']['name']})</i>"}
-                except (IndexError, AttributeError, TypeError):
-                    pass
+                except (IndexError, AttributeError, TypeError) as _exc:
+                    logger.debug("ignored exception: %s", _exc)
             
             # 3. Fallback/Echo (if input was just messages)
             if "messages" in input_data and input_data["messages"]:

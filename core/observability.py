@@ -18,19 +18,23 @@ Usage:
 """
 
 import asyncio
-import uuid
-import time
+import contextlib
+import contextvars
 import json
 import logging
-import contextvars
-import contextlib
 import threading
-from typing import Optional, Dict, Any, List, Callable
-from datetime import datetime, timezone
-from functools import wraps
+import time
+import uuid
 from collections import defaultdict
-from dataclasses import dataclass, field, asdict
+from dataclasses import asdict, dataclass, field
+from datetime import datetime, timezone
 from enum import Enum
+from functools import wraps
+from typing import Any, Callable, Dict, List, Optional
+
+from core.paths import project_path
+
+logger = logging.getLogger(__name__)
 
 # Thread-local trace context
 _trace_ctx: contextvars.ContextVar[Optional['TraceContext']] = contextvars.ContextVar('trace_ctx', default=None)
@@ -291,7 +295,7 @@ class Metrics:
         # FIX: Use threading.Lock for sync-safe operations instead of asyncio.Lock
         self._lock = threading.Lock()
         self._max_timings_per_metric = 1000  # Keep last 1000 timings
-        self._metrics_file = "data/metrics_counters.json"
+        self._metrics_file = project_path("data", "metrics_counters.json")
         self._load_counters()
         
     def _load_counters(self):
@@ -299,12 +303,12 @@ class Metrics:
         import os
         try:
             if os.path.exists(self._metrics_file):
-                with open(self._metrics_file, 'r') as f:
+                with open(self._metrics_file, 'r', encoding="utf-8") as f:
                     data = json.load(f)
                     for k, v in data.items():
                         self._counters[k] = float(v)
-        except Exception:
-            pass  # Fail silently to avoid interrupting startup
+        except Exception as _exc:
+            logger.debug("ignored exception: %s", _exc)  # Fail silently to avoid interrupting startup
             
     def _save_counters(self):
         """Save counters to disk on updates."""
@@ -317,8 +321,8 @@ class Metrics:
                 json.dump(dict(self._counters), tf)
                 temp_name = tf.name
             os.replace(temp_name, self._metrics_file)
-        except Exception:
-            pass  # Fail silently
+        except Exception as _exc:
+            logger.debug("ignored exception: %s", _exc)  # Fail silently
     
     def increment(self, metric: str, value: float = 1.0, tags: Optional[Dict[str, str]] = None):
         """Increment a counter metric."""
@@ -579,8 +583,8 @@ class JsonFormatter(logging.Formatter):
         try:
             data = json.loads(record.getMessage())
             return json.dumps(data)
-        except (json.JSONDecodeError, TypeError):
-            pass
+        except (json.JSONDecodeError, TypeError) as _exc:
+            logger.debug("ignored exception: %s", _exc)
         
         # Otherwise, format as JSON
         log_data = {
@@ -839,7 +843,7 @@ def get_token_stats() -> Dict[str, Any]:
 
 def get_trace_file_path() -> str:
     """Get the path to the execution trace file."""
-    return "data/execution_trace.jsonl"
+    return project_path("data", "execution_trace.jsonl")
 
 
 def export_trace_to_file(trace_data: Dict[str, Any], file_path: Optional[str] = None) -> bool:
@@ -871,7 +875,7 @@ def export_trace_to_file(trace_data: Dict[str, Any], file_path: Optional[str] = 
         }
         
         # Append to file as JSON Line
-        with open(file_path, 'a') as f:
+        with open(file_path, 'a', encoding="utf-8") as f:
             f.write(json.dumps(event, default=str) + '\n')
         
         return True
@@ -933,8 +937,8 @@ def _maybe_export_span(span_data: Dict[str, Any]) -> None:
                     "session_id": session_manager.get_session_id(),
                     "tick": session_manager.get_tick()
                 }
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.debug("ignored exception: %s", _exc)
             
             # Build trace event
             event = {
@@ -950,11 +954,11 @@ def _maybe_export_span(span_data: Dict[str, Any]) -> None:
             }
             
             # Append to trace file
-            with open(trace_file, 'a') as f:
+            with open(trace_file, 'a', encoding="utf-8") as f:
                 f.write(json.dumps(event, default=str) + '\n')
-    except Exception:
+    except Exception as _exc:
         # Silently fail - this is optional functionality
-        pass
+        logger.debug("ignored exception: %s", _exc)
 
 
 # Global flag for enabling trace file export

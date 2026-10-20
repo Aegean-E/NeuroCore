@@ -64,7 +64,7 @@ async def list_memories(
         if memories is None:
             memories = []
             
-        return templates.TemplateResponse("memory_list.html", {"memories": memories, "request": request})
+        return templates.TemplateResponse(request, "memory_list.html", {"memories": memories})
     except Exception as e:
         import traceback
         traceback.print_exc()

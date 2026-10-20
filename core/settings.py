@@ -1,9 +1,14 @@
 import json
+import logging
 import os
-import threading
 import tempfile
+import threading
 
-SETTINGS_FILE = "settings.json"
+from core.paths import project_path
+
+logger = logging.getLogger(__name__)
+
+SETTINGS_FILE = project_path("settings.json")
 
 DEFAULT_SETTINGS = {
     "llm_api_url": "http://localhost:1234/v1",
@@ -37,12 +42,12 @@ class SettingsManager:
                 # If the file doesn't exist, create it with default settings
                 # and return them, avoiding the circular call to save_settings.
                 settings_to_load = DEFAULT_SETTINGS.copy()
-                with open(self.file_path, "w") as f:
+                with open(self.file_path, "w", encoding="utf-8") as f:
                     json.dump(settings_to_load, f, indent=4)
                 return settings_to_load
             
             try:
-                with open(self.file_path, "r") as f:
+                with open(self.file_path, "r", encoding="utf-8") as f:
                     loaded_settings = json.load(f)
                     merged_settings = DEFAULT_SETTINGS.copy()
                     merged_settings.update(loaded_settings)

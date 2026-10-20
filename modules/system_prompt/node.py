@@ -22,7 +22,7 @@ class SystemPromptExecutor:
                 mtime = os.path.getmtime(self._tools_path)
                 async with self._tools_lock:
                     if mtime > self._tools_cache["mtime"]:
-                        with open(self._tools_path, "r") as f:
+                        with open(self._tools_path, "r", encoding="utf-8") as f:
                             self._tools_cache["data"] = json.load(f)
                         self._tools_cache["mtime"] = mtime
                 return self._tools_cache["data"]
@@ -222,10 +222,10 @@ class SystemPromptExecutor:
             import tiktoken
             enc = tiktoken.get_encoding("cl100k_base")
             return len(enc.encode(text))
-        except ImportError:
-            pass
-        except Exception:
-            pass
+        except ImportError as _exc:
+            logger.debug("ignored exception: %s", _exc)
+        except Exception as _exc:
+            logger.debug("ignored exception: %s", _exc)
         
         # Fall back to character-based estimation with CJK support
         # Chinese: 4E00-9FFF, Japanese Hiragana/Katakana: 3040-309F, 30A0-30FF

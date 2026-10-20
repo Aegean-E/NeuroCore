@@ -28,22 +28,24 @@ Usage:
 """
 
 import json
+import logging
 import os
-import uuid
 import threading
 import time
+import uuid
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, Any, Optional, List
-from contextlib import contextmanager
-import logging
+from typing import Any, Dict, List, Optional
+
+from core.paths import project_path
 
 logger = logging.getLogger(__name__)
 
 # Configuration
-SESSION_FILE = "data/session.json"
-TRACE_FILE = "data/execution_trace.jsonl"
-EPISODE_DIR = "data/episodes"
+SESSION_FILE = project_path("data", "session.json")
+TRACE_FILE = project_path("data", "execution_trace.jsonl")
+EPISODE_DIR = project_path("data", "episodes")
 AGENT_ID = "neurocore"
 
 
@@ -80,7 +82,7 @@ class TraceWriter:
                 line = json.dumps(event, default=str) + '\n'
                 
                 # Open in append mode and write
-                with open(self.trace_file, 'a') as f:
+                with open(self.trace_file, 'a', encoding="utf-8") as f:
                     f.write(line)
                     
             except Exception as e:
@@ -93,7 +95,7 @@ class TraceWriter:
                 return []
             
             events = []
-            with open(self.trace_file, 'r') as f:
+            with open(self.trace_file, 'r', encoding="utf-8") as f:
                 for line in f:
                     line = line.strip()
                     if line:
@@ -289,7 +291,7 @@ class SessionManager:
         with self._sync_lock:
             if os.path.exists(self.session_file):
                 try:
-                    with open(self.session_file, 'r') as f:
+                    with open(self.session_file, 'r', encoding="utf-8") as f:
                         data = json.load(f)
                         self._session_id = data.get('session_id')
                         self._state = data.get('state', {})
@@ -327,7 +329,7 @@ class SessionManager:
             
             # Atomic write
             temp_file = self.session_file + ".tmp"
-            with open(temp_file, 'w') as f:
+            with open(temp_file, 'w', encoding="utf-8") as f:
                 json.dump(data, f, indent=2)
             os.replace(temp_file, self.session_file)
         except Exception as e:
@@ -617,7 +619,7 @@ class SessionManager:
             return None
         
         try:
-            with open(self.episode_file, 'r') as f:
+            with open(self.episode_file, 'r', encoding="utf-8") as f:
                 return json.load(f)
         except (json.JSONDecodeError, IOError):
             return None
@@ -627,7 +629,7 @@ class SessionManager:
         try:
             self._ensure_episode_directory()
             temp_file = self.episode_file + ".tmp"
-            with open(temp_file, 'w') as f:
+            with open(temp_file, 'w', encoding="utf-8") as f:
                 json.dump(episode_data, f, indent=2)
             os.replace(temp_file, self.episode_file)
         except Exception as e:
@@ -637,8 +639,8 @@ class SessionManager:
             if os.path.exists(temp_file):
                 try:
                     os.remove(temp_file)
-                except OSError:
-                    pass
+                except OSError as _exc:
+                    logger.debug("ignored exception: %s", _exc)
             # Re-raise to let caller handle the error
             raise e
     
@@ -681,7 +683,7 @@ class SessionManager:
             os.makedirs(self.episode_dir, exist_ok=True)
             episode_path = os.path.join(self.episode_dir, f"{episode_id}.json")
             temp_file = episode_path + ".tmp"
-            with open(temp_file, 'w') as f:
+            with open(temp_file, 'w', encoding="utf-8") as f:
                 json.dump(episode_data, f, indent=2)
             os.replace(temp_file, episode_path)
         except Exception as e:
@@ -894,7 +896,7 @@ class SessionManager:
                 if filename.endswith('.json') and filename != 'current.json':
                     episode_path = os.path.join(self.episode_dir, filename)
                     try:
-                        with open(episode_path, 'r') as f:
+                        with open(episode_path, 'r', encoding="utf-8") as f:
                             episode_data = json.load(f)
                             episodes.append({
                                 "episode_id": episode_data.get("episode_id"),
@@ -909,8 +911,8 @@ class SessionManager:
                             })
                     except (json.JSONDecodeError, IOError):
                         continue
-        except OSError:
-            pass
+        except OSError as _exc:
+            logger.debug("ignored exception: %s", _exc)
         
         # Sort by updated_at (most recent first)
         episodes.sort(key=lambda e: e.get("updated_at", ""), reverse=True)
@@ -933,7 +935,7 @@ class SessionManager:
             return None
         
         try:
-            with open(episode_path, 'r') as f:
+            with open(episode_path, 'r', encoding="utf-8") as f:
                 episode_data = json.load(f)
                 self._episode = EpisodeState.from_dict(episode_data)
                 return self._episode
@@ -955,7 +957,7 @@ class SessionManager:
             
             if os.path.exists(episode_path):
                 try:
-                    with open(episode_path, 'r') as f:
+                    with open(episode_path, 'r', encoding="utf-8") as f:
                         episode_data = json.load(f)
                         self._episode = EpisodeState.from_dict(episode_data)
                 except (json.JSONDecodeError, IOError):
@@ -977,7 +979,7 @@ class SessionManager:
             try:
                 os.makedirs(self.episode_dir, exist_ok=True)
                 temp_file = episode_path + ".tmp"
-                with open(temp_file, 'w') as f:
+                with open(temp_file, 'w', encoding="utf-8") as f:
                     json.dump(self._episode.to_dict(), f, indent=2)
                 os.replace(temp_file, episode_path)
             except Exception as e:

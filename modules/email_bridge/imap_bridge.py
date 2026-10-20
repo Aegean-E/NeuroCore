@@ -146,8 +146,8 @@ class IMAPBridge:
             if conn:
                 try:
                     conn.logout()
-                except Exception:
-                    pass
+                except Exception as _exc:
+                    logger.debug("ignored exception: %s", _exc)
         return messages
 
     def poll_loop(

@@ -1,7 +1,6 @@
 # Memory Module
 import asyncio
 import logging
-
 from .router import router
 
 logger = logging.getLogger(__name__)

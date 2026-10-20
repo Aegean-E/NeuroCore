@@ -96,7 +96,7 @@ class TestMessagingOutputExecutor:
     def executor(self):
         from modules.messaging_bridge.node import MessagingOutputExecutor
         # Clear class-level cache between tests
-        MessagingOutputExecutor._bridge_cache = {}
+        setattr(MessagingOutputExecutor, "_bridge_cache", {})
         return MessagingOutputExecutor()
 
     async def test_no_content_passes_through(self, executor):
@@ -212,7 +212,7 @@ class TestTelegramBridge:
             responses.append(text)
             return True
 
-        bridge._send_message_chunk = fake_chunk
+        setattr(bridge, "_send_message_chunk", fake_chunk)
         result = await bridge.send_message("A" * 5000)
         assert result is True
         assert len(responses) == 2  # 5000 / 3072 => 2 chunks
@@ -245,7 +245,7 @@ class TestDiscordBridge:
 
         mock_client = AsyncMock()
         mock_client.post = fake_post
-        bridge._client = mock_client
+        setattr(bridge, "_client", mock_client)
         bridge._client.is_closed = False
 
         with patch.object(bridge, "_get_client", return_value=mock_client):
@@ -378,7 +378,7 @@ class TestTelegramHandler:
     def handler(self):
         from modules.messaging_bridge.service import _TelegramHandler, _session_store
         h = _TelegramHandler()
-        h._loop = None
+        setattr(h, "_loop", None)
         # Reset session store for test isolation
         _session_store._map.clear()
         return h
@@ -446,8 +446,8 @@ class TestDiscordHandler:
     def handler(self):
         from modules.messaging_bridge.service import _DiscordHandler, _session_store
         h = _DiscordHandler()
-        h._loop = None
-        h._allowed_channel = "ch1"
+        setattr(h, "_loop", None)
+        setattr(h, "_allowed_channel", "ch1")
         _session_store._map.clear()
         return h
 
@@ -507,7 +507,7 @@ class TestSignalHandler:
     def handler(self):
         from modules.messaging_bridge.service import _SignalHandler, _session_store
         h = _SignalHandler()
-        h._loop = None
+        setattr(h, "_loop", None)
         _session_store._map.clear()
         return h
 
@@ -704,7 +704,7 @@ class TestWhatsAppHandler:
     def handler(self):
         from modules.messaging_bridge.service import _WhatsAppHandler, _session_store
         h = _WhatsAppHandler()
-        h._loop = None
+        setattr(h, "_loop", None)
         _session_store._map.clear()
         return h
 

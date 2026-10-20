@@ -33,7 +33,7 @@ def mock_chat_sessions(monkeypatch):
         return mock_sessions_dict
 
     def mock_save():
-        pass # Do nothing, keep it in memory
+        return None
 
     # Replace the manager's internal state and file operations
     monkeypatch.setattr(sessions.session_manager, "sessions", mock_sessions_dict)
