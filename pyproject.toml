@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "A powerful, modular AI agent framework with visual flow editor, persistent memory, and autonomous agent capabilities."
 readme = "README.md"
 requires-python = ">=3.12"
-license = {text = "Apache-2.0"}
+license = {text = "AGPL-3.0-only"}
 authors = [
     {name = "Aegean-E", email = "In the Future"}
 ]
@@ -12,7 +12,7 @@ keywords = ["ai", "agent", "llm", "autonomous", "memory", "rag", "faiss"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
-    "License :: OSI Approved :: Apache Software License",
+    "License :: OSI Approved :: GNU Affero General Public License v3",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.12",
 ]
