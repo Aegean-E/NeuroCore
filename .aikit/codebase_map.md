@@ -10,7 +10,7 @@
 - **Total Classes**: `280`
 - **Total Top-Level Functions**: `1156`
 - **Total Class Methods**: `1520`
-- **Total Source Lines**: `56971`
+- **Total Source Lines**: `56985`
 
 ---
 
@@ -658,7 +658,7 @@
 ### [`core/security.py`](core/security.py)
 > *Control-plane security policy for NeuroCore.*
 
-**Size**: `215` lines (`8795` bytes)
+**Size**: `225` lines (`9263` bytes)
 
 **Classes:**
 - `class ControlPlaneGuard` - *CSRF origin check plus an opt-in API token for non-loopback clients.*
@@ -2063,7 +2063,7 @@
 ### [`modules/tools/sandbox.py`](modules/tools/sandbox.py)
 > *Tool Execution Sandbox for NeuroCore*
 
-**Size**: `906` lines (`37752` bytes)
+**Size**: `909` lines (`37932` bytes)
 
 **Classes:**
 - `class SecurityError` - *Raised when sandbox security policy is violated.*
@@ -4485,7 +4485,7 @@
 ### [`tests/test_xss_escaping.py`](tests/test_xss_escaping.py)
 > *Regression tests for M5: stored content must be escaped, not rendered as HTML.*
 
-**Size**: `47` lines (`1730` bytes)
+**Size**: `48` lines (`1819` bytes)
 
 **Functions:**
 - `def test_jinja_environment_autoescapes()`
