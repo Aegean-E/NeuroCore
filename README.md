@@ -10,7 +10,7 @@
   <a href="https://htmx.org"><img src="https://img.shields.io/badge/HTMX-333333?style=for-the-badge&logo=htmx&logoColor=white" alt="HTMX"></a>
   <a href="https://tailwindcss.com"><img src="https://img.shields.io/badge/Tailwind_CSS-38B2AC?style=for-the-badge&logo=tailwind-css&logoColor=white" alt="Tailwind CSS"></a>
   <img src="https://img.shields.io/badge/tests-1141_passing-brightgreen?style=for-the-badge" alt="Tests">
-  <a href="https://github.com/Aegean-E/NeuroCore/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg?style=for-the-badge" alt="License"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-AGPL_v3-blue.svg?style=for-the-badge" alt="License"></a>
 </p>
 
 <p align="center">
@@ -732,7 +732,7 @@ ruff format .         # format
 
 ## 📄 License
 
-NeuroCore is licensed under the [Apache 2.0 License](LICENSE).
+NeuroCore is licensed under the [GNU Affero General Public License v3](LICENSE).
 
 ---
 
