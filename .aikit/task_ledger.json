@@ -1,30 +1,14 @@
 {
   "version": 1,
   "active_task": {
-    "task_id": "task-neurocore-onboarding",
+    "task_id": "task-neurocore-security-hardening",
     "last_phase": "phase 4",
     "active_phase": 5,
     "status": "completed",
-    "updated_at": 1792510174.5733795,
-    "completed_at": 1792510180.0906632
+    "updated_at": 1792522721.0057526,
+    "completed_at": 1792522792.91732
   },
   "checkpoints": [
-    {
-      "task_id": "task-neurocore-onboarding",
-      "phase": "phase 2",
-      "phase_num": 2,
-      "description": "[1/5] Phase 2 Planning: record user requirement to bring neurocore into full AIKit gate compliance, initialize project memory and configure gates in project.json",
-      "files_affected": [],
-      "status": "in_progress",
-      "timestamp": 1792440186.6961246,
-      "timestamp_str": "2026-10-19 23:03:06",
-      "impact_assessment": {
-        "why": "NeuroCore was attached to AIKit but fails test, lint, hygiene, and guidelines gates, blocking AIKit governance and verified project delivery",
-        "benefits": "NeuroCore conforms 100% to AIKit standards, passes all Phase 4 gates, and provides verified regression shielding and codebase AST mapping",
-        "risks": "contract: none, external APIs and endpoints preserved; dependency: manifest-backed dependencies installed; concurrency: test client thread/event loop isolation; state: SQLite and FAISS state files remain atomic and uncorrupted",
-        "mitigation": "Test suite verified on each milestone; deliberate hygiene discards documented with hygiene: allow <reason> as required by AIKit rules"
-      }
-    },
     {
       "task_id": "task-neurocore-onboarding",
       "phase": "phase 2",
@@ -133,6 +117,101 @@
       "status": "completed",
       "timestamp": 1792510180.0906641,
       "timestamp_str": "2026-10-20 18:29:40"
+    },
+    {
+      "task_id": "task-neurocore-security-hardening",
+      "phase": "phase 2",
+      "phase_num": 2,
+      "description": "[1/6] Phase 2 Planning: harden NeuroCore control-plane binding, ZIP extraction, sandbox escapes, secret exposure, XSS rendering, and auth/CSRF",
+      "files_affected": [],
+      "status": "in_progress",
+      "timestamp": 1792511693.9590132,
+      "timestamp_str": "2026-10-20 18:54:53",
+      "impact_assessment": {
+        "why": "The audit found remote code execution, unauthenticated control-plane access, secret exposure, stored XSS, and data-loss defects that block safe operation beyond a trusted localhost",
+        "benefits": "Eliminates the highest-impact compromise paths, preserves existing local workflows, and adds regression tests for each security boundary",
+        "risks": "contract: web routes, test clients, Docker networking, and tool code may change behavior; dependency: no new runtime dependencies required; concurrency: middleware and archive extraction must be thread-safe; state: existing flows, settings, and module data must remain readable",
+        "mitigation": "Use backward-compatible defaults, environment opt-ins for remote/reload modes, failing-first regression tests, and run python aikit.py check neurocore after each milestone"
+      }
+    },
+    {
+      "task_id": "task-neurocore-security-hardening",
+      "phase": "phase 3",
+      "phase_num": 3,
+      "description": "[1/6] Entering M1: loopback-by-default server binding, reload opt-in, trusted-host guard, and loopback Docker publish",
+      "files_affected": [],
+      "status": "in_progress",
+      "timestamp": 1792511741.9467926,
+      "timestamp_str": "2026-10-20 18:55:41"
+    },
+    {
+      "task_id": "task-neurocore-security-hardening",
+      "phase": "phase 3",
+      "phase_num": 3,
+      "description": "[milestone 1/6] M1 loopback-by-default binding, reload opt-in, trusted-host guard, loopback Docker publish; 8 tests; checklists: passed",
+      "files_affected": [],
+      "status": "in_progress",
+      "timestamp": 1792522720.179015,
+      "timestamp_str": "2026-10-20 21:58:40"
+    },
+    {
+      "task_id": "task-neurocore-security-hardening",
+      "phase": "phase 3",
+      "phase_num": 3,
+      "description": "[milestone 2/6] M2 path-confined ZIP extraction via core/archive.py; 7 tests; checklists: passed",
+      "files_affected": [],
+      "status": "in_progress",
+      "timestamp": 1792522720.3430924,
+      "timestamp_str": "2026-10-20 21:58:40"
+    },
+    {
+      "task_id": "task-neurocore-security-hardening",
+      "phase": "phase 3",
+      "phase_num": 3,
+      "description": "[milestone 3/6] M3 sandbox first-party import allowlist and dunder-traversal blocks; 10 tests; checklists: passed",
+      "files_affected": [],
+      "status": "in_progress",
+      "timestamp": 1792522720.5101354,
+      "timestamp_str": "2026-10-20 21:58:40"
+    },
+    {
+      "task_id": "task-neurocore-security-hardening",
+      "phase": "phase 3",
+      "phase_num": 3,
+      "description": "[milestone 4/6] M4 secret stripping and log-boundary redaction; 6 tests; checklists: passed",
+      "files_affected": [],
+      "status": "in_progress",
+      "timestamp": 1792522720.672422,
+      "timestamp_str": "2026-10-20 21:58:40"
+    },
+    {
+      "task_id": "task-neurocore-security-hardening",
+      "phase": "phase 3",
+      "phase_num": 3,
+      "description": "[milestone 5/6] M5 escaping of stored content in server HTML and marketplace sinks; 3 tests; checklists: passed",
+      "files_affected": [],
+      "status": "in_progress",
+      "timestamp": 1792522720.8393276,
+      "timestamp_str": "2026-10-20 21:58:40"
+    },
+    {
+      "task_id": "task-neurocore-security-hardening",
+      "phase": "phase 4",
+      "phase_num": 4,
+      "description": "[milestone 6/6] M6 CSRF origin check and opt-in API token; ADR-001..006, README, codebase map; 1384 passed/7 skipped, 4/4 Phase 4 gates; checklists: passed",
+      "files_affected": [],
+      "status": "in_progress",
+      "timestamp": 1792522721.0057526,
+      "timestamp_str": "2026-10-20 21:58:41"
+    },
+    {
+      "task_id": "task-neurocore-security-hardening",
+      "phase": "completed",
+      "phase_num": 5,
+      "description": "Task 'task-neurocore-security-hardening' completed successfully.",
+      "status": "completed",
+      "timestamp": 1792522792.9173214,
+      "timestamp_str": "2026-10-20 21:59:52"
     }
   ]
 }
