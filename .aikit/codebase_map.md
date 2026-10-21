@@ -6,11 +6,11 @@
 ---
 
 ## 📊 Codebase Metrics
-- **Total Python Modules**: `196`
-- **Total Classes**: `280`
-- **Total Top-Level Functions**: `1156`
-- **Total Class Methods**: `1520`
-- **Total Source Lines**: `56985`
+- **Total Python Modules**: `210`
+- **Total Classes**: `326`
+- **Total Top-Level Functions**: `1174`
+- **Total Class Methods**: `1728`
+- **Total Source Lines**: `61088`
 
 ---
 
@@ -813,7 +813,7 @@
 ---
 
 ### [`main.py`](main.py)
-**Size**: `190` lines (`8231` bytes)
+**Size**: `184` lines (`7889` bytes)
 
 **Functions:**
 - `async def verify_debug_key(x_debug_key)` - *Verify debug API key for protected debug endpoints.*
@@ -918,6 +918,330 @@
 
 **Functions:**
 - `async def get_executor_class(node_type_id)`
+
+---
+
+### [`modules/autonomous_agent/__init__.py`](modules/autonomous_agent/__init__.py)
+> *Autonomous Agent Module - Main entry point.*
+
+**Size**: `42` lines (`1263` bytes)
+
+**Functions:**
+- `def __getattr__(name)`
+
+---
+
+### [`modules/autonomous_agent/core/communicator.py`](modules/autonomous_agent/core/communicator.py)
+> *Communication interface for the Autonomous Agent.*
+
+**Size**: `442` lines (`16140` bytes)
+
+**Classes:**
+- `class MessagePriority`
+- `class MessageQueue` - *Priority queue for outgoing messages.*
+  - Method `.add(message)` - *Add message maintaining priority order.*
+  - Method `.pop()` - *Get highest priority message.*
+  - Method `.peek()` - *View highest priority message without removing.*
+  - Method `.__len__()`
+- `class BaseChannel` - *Base class for communication channels.*
+  - Method `.__init__(config)`
+  - Method `async def .send(message)` - *Send message through this channel.*
+  - Method `._check_rate_limit()` - *Check if rate limit allows sending.*
+  - Method `._format_message(message)` - *Format message for channel (override in subclass).*
+  - Method `async def ._send_impl(formatted)` - *Actual sending implementation (override in subclass).*
+- `class ChatChannel` - *Web chat channel (NeuroCore chat UI).*
+  - Method `.__init__(config, message_callback)`
+  - Method `async def ._send_impl(formatted)` - *Send to chat UI via callback or queue.*
+  - Method `.get_pending()` - *Get pending messages for polling.*
+- `class TelegramChannel` - *Telegram messaging channel.*
+  - Method `.__init__(config)`
+  - Method `._format_message(message)` - *Format for Telegram API.*
+  - Method `async def ._send_impl(formatted)` - *Send via Telegram Bot API.*
+- `class WebhookChannel` - *Generic webhook channel.*
+  - Method `.__init__(config)`
+  - Method `._format_message(message)`
+  - Method `async def ._send_impl(formatted)`
+- `class EmailChannel` - *Email channel (SMTP).*
+  - Method `.__init__(config)`
+  - Method `._format_message(message)`
+  - Method `async def ._send_impl(formatted)`
+- `class AgentCommunicator` - *Handles all user-facing communication for the agent.*
+  - Method `.__init__(agent_id, config)`
+  - Method `._init_channels()` - *Initialize communication channels from config.*
+  - Method `async def .send_message(message)` - *Send message through appropriate channel.*
+  - Method `async def ._process_queue()` - *Process outgoing message queue.*
+  - Method `async def .handle_incoming(incoming)` - *Process incoming user message.*
+  - Method `async def .notify_user(content, channel, priority, metadata)` - *Send proactive notification to user.*
+  - Method `async def .share_reflection(reflection_summary, channel)` - *Share self-reflection with user.*
+  - Method `async def ._on_chat_message(formatted)` - *Buffer a chat message for the NeuroCore UI to poll.*
+  - Method `._log_communication(message, result)` - *Log communication for audit trail.*
+  - Method `.get_communication_log(limit)` - *Get recent communication log.*
+  - Method `.get_pending_outgoing()` - *Get count of pending outgoing messages.*
+  - Method `.get_pending_chat_messages()` - *Drain and return buffered chat messages.*
+  - Method `async def .flush_queue()` - *Force send all queued messages.*
+- `class RateLimitExceeded` - *Raised when rate limit is exceeded.*
+
+---
+
+### [`modules/autonomous_agent/core/flow_creator.py`](modules/autonomous_agent/core/flow_creator.py)
+> *Flow Creator - Agent creates and manages its own flows dynamically.*
+
+**Size**: `334` lines (`12390` bytes)
+
+**Classes:**
+- `class FlowCreator` - *Agent creates and manages its own flows dynamically.*
+  - Method `.__init__(agent_id, sandbox, memory, config)`
+  - Method `async def .create_flow(specification)` - *Create a new flow from specification.*
+  - Method `async def ._generate_flow(spec)` - *Generate flow JSON from specification.*
+  - Method `._match_pattern(spec)` - *Match specification to a known flow pattern.*
+  - Method `async def ._build_from_pattern(pattern_name, spec)` - *Build flow from predefined pattern.*
+  - Method `async def ._build_custom_flow(spec)` - *Build custom flow using LLM (delegated to sandbox).*
+  - Method `async def ._validate_flow(flow_json)` - *Validate flow structure.*
+  - Method `async def .update_flow(flow_id, updates)` - *Update an existing flow.*
+  - Method `async def .delete_flow(flow_id)` - *Delete a flow.*
+  - Method `.get_owned_flows()` - *Get list of flows owned by this agent.*
+  - Method `.get_flow(flow_id)` - *Get a specific flow.*
+
+---
+
+### [`modules/autonomous_agent/core/memory.py`](modules/autonomous_agent/core/memory.py)
+> *Memory system for the Autonomous Agent - Three-tier memory architecture.*
+
+**Size**: `552` lines (`21560` bytes)
+
+**Classes:**
+- `class MemoryEntry` - *A single memory entry.*
+- `class BaseMemory` - *Base class for memory systems.*
+  - Method `.__init__(agent_id, memory_type)`
+  - Method `async def .store(entry)` - *Store a memory entry.*
+  - Method `async def .retrieve(memory_id)` - *Retrieve a specific memory.*
+  - Method `async def .recall_by_tags(tags, limit)` - *Recall memories by tags.*
+  - Method `async def .search(query, limit)` - *Simple text search (in production, use vector search).*
+  - Method `async def .cleanup_expired()` - *Remove expired memories.*
+  - Method `.get_stats()` - *Get memory statistics.*
+  - Method `.to_dict()` - *Serialize this memory tier to JSON-compatible data.*
+  - Method `.load_dict(data)` - *Replace this tier with entries produced by :meth:`to_dict`.*
+- `class EpisodicMemory` - *Episodic memory - specific experiences and events.*
+  - Method `.__init__(agent_id, retention_days)`
+  - Method `async def .store_experience(experience)` - *Store a full experience as episodic memory.*
+  - Method `async def .get_recent(days)` - *Get experiences from recent days.*
+- `class SemanticMemory` - *Semantic memory - facts, knowledge, concepts.*
+  - Method `.__init__(agent_id)`
+  - Method `async def .store_fact(fact, category, confidence, source_experience_id)` - *Store a fact as semantic memory.*
+  - Method `async def .get_facts_by_category(category)` - *Get all facts in a category.*
+  - Method `async def .check_conflicts(new_fact, category)` - *Check for conflicting facts.*
+  - Method `._might_conflict(fact1, fact2)` - *Simple heuristic for conflict detection.*
+  - Method `.load_dict(data)` - *Restore facts and rebuild the fact index.*
+- `class ProceduralMemory` - *Procedural memory - skills, patterns, procedures.*
+  - Method `.__init__(agent_id, min_occurrences)`
+  - Method `async def .store_pattern(pattern_name, pattern_data, occurrences, success_rate)` - *Store a learned pattern/procedure.*
+  - Method `async def .get_solidified_patterns()` - *Get all solidified patterns.*
+  - Method `async def .get_pattern_for_task(task_description)` - *Find relevant pattern for a task.*
+  - Method `.load_dict(data)` - *Restore patterns and rebuild occurrence counts.*
+- `class AgentMemory` - *Three-tier memory system for the autonomous agent.*
+  - Method `.__init__(agent_id, config)`
+  - Method `async def .store_experience(experience)` - *Store experience across all relevant memory systems.*
+  - Method `async def .recall_relevant(context, limit)` - *Retrieve relevant memories from all systems.*
+  - Method `async def ._extract_facts(experience)` - *Extract facts from experience (simplified).*
+  - Method `async def ._extract_flow_pattern(experience)` - *Extract a reusable flow pattern from execution.*
+  - Method `async def .consolidate()` - *Run memory consolidation (cleanup, promotion).*
+  - Method `.get_all_stats()` - *Get statistics for all memory systems.*
+  - Method `.to_dict()` - *Serialize all memory tiers for persistence.*
+  - Method `.load_dict(data)` - *Restore all memory tiers from :meth:`to_dict` output.*
+
+---
+
+### [`modules/autonomous_agent/core/sandbox.py`](modules/autonomous_agent/core/sandbox.py)
+> *Sandbox for the Autonomous Agent - Restricted execution environment.*
+
+**Size**: `374` lines (`16458` bytes)
+
+**Classes:**
+- `class SandboxViolation` - *Raised when agent attempts unauthorized action.*
+- `class RateLimitExceeded` - *Raised when rate limit is exceeded.*
+- `class FlowValidationError` - *Raised when flow specification is invalid.*
+- `class ActionPolicy` - *Policy for a specific action.*
+- `class AgentSandbox` - *Sandboxed execution environment for the autonomous agent.*
+  - Method `.__init__(config)`
+  - Method `._apply_config_limits(sandbox_config)` - *Apply the configured limits to the default policies.*
+  - Method `.validate_action(action_type)` - *Check if action is allowed and return its policy.*
+  - Method `.check_rate_limit(action_key, limit, window_seconds)` - *Check if rate limit allows this action.*
+  - Method `.validate_flow_spec(spec)` - *Validate flow specification against sandbox limits.*
+  - Method `.validate_tool(tool_name)` - *Check if tool is allowed.*
+  - Method `.validate_config_key(key)` - *Check if config key can be modified.*
+  - Method `.validate_inspect_field(field)` - *Check if self-inspection field is allowed.*
+  - Method `.register_flow_ownership(flow_id)` - *Register that agent owns this flow.*
+  - Method `.check_flow_ownership(flow_id)` - *Check if agent owns this flow.*
+  - Method `.check_resource_limits(action_type, **kwargs)` - *Check if action would exceed resource limits.*
+  - Method `async def .execute_action(action)` - *Execute an action with full sandbox protection.*
+  - Method `async def ._dispatch_action(action, policy)` - *Dispatch action to appropriate handler.*
+  - Method `async def ._handle_create_flow(action, policy)` - *Handle flow creation.*
+  - Method `async def ._handle_update_flow(action, policy)`
+  - Method `async def ._handle_delete_flow(action, policy)`
+  - Method `async def ._handle_execute_flow(action, policy)`
+  - Method `async def ._handle_remember(action, policy)`
+  - Method `async def ._handle_recall(action, policy)`
+  - Method `async def ._handle_search_knowledge(action, policy)`
+  - Method `async def ._handle_send_message(action, policy)`
+  - Method `async def ._handle_notify_user(action, policy)`
+  - Method `async def ._handle_inspect_self(action, policy)`
+  - Method `async def ._handle_modify_config(action, policy)`
+  - Method `async def ._handle_use_tool(action, policy)`
+  - Method `async def ._handle_reflect(action, policy)`
+  - Method `._log_action(action)` - *Log action for audit trail.*
+  - Method `._update_resource_usage(action_type, result)` - *Update resource usage tracking.*
+  - Method `.get_audit_log(limit)` - *Get recent audit log entries.*
+  - Method `.get_resource_usage()` - *Get current resource usage.*
+  - Method `.get_owned_flows()` - *Get list of flow IDs owned by agent.*
+
+---
+
+### [`modules/autonomous_agent/core/self_model.py`](modules/autonomous_agent/core/self_model.py)
+> *Self-Model and Reflection system for the Autonomous Agent.*
+
+**Size**: `399` lines (`14878` bytes)
+
+**Classes:**
+- `class NeuroCoreStatus` - *Current status of NeuroCore as perceived by agent.*
+- `class GoalProgress` - *Progress on a specific goal.*
+- `class NeuroCoreStateTracker` - *Tracks NeuroCore system state from agent's perspective.*
+  - Method `.__init__()`
+  - Method `async def .capture()` - *Capture current NeuroCore state.*
+  - Method `.get_cached()` - *Get last captured state if still fresh.*
+- `class BeliefSystem` - *Agent's belief system - what it believes about the world.*
+  - Method `.__init__()`
+  - Method `.add_belief(key, content, confidence, source)` - *Add or update a belief.*
+  - Method `.get_belief(key)` - *Get a belief.*
+  - Method `.update_confidence(key, new_confidence)` - *Update belief confidence.*
+  - Method `.get_high_confidence_beliefs(threshold)` - *Get beliefs above confidence threshold.*
+- `class SelfModel` - *Agent's internal model of itself and its environment.*
+  - Method `.__init__(agent_id, memory, sandbox, config)`
+  - Method `._initialize_core_beliefs()` - *Initialize fundamental beliefs.*
+  - Method `async def .reflect(perception)` - *Generate comprehensive reflection on current state.*
+  - Method `async def ._assess_self()` - *Comprehensive self-assessment.*
+  - Method `._compute_performance()` - *Compute performance metrics from history.*
+  - Method `._identify_limitations()` - *Identify known limitations.*
+  - Method `._compute_confidence()` - *Compute overall confidence level.*
+  - Method `._evaluate_goals()` - *Evaluate progress on goals.*
+  - Method `async def ._generate_insights(perception, neurocore_status, self_assessment)` - *Generate insights from reflection.*
+  - Method `._recommend_actions(insights, goal_progress)` - *Recommend actions based on insights.*
+  - Method `.record_execution(execution_record)` - *Record execution for performance tracking.*
+  - Method `.get_self_summary()` - *Get summary of self-model for reporting.*
+
+---
+
+### [`modules/autonomous_agent/core/service.py`](modules/autonomous_agent/core/service.py)
+> *Main Agent Service - Ties all components together and runs the cognitive loop.*
+
+**Size**: `659` lines (`26603` bytes)
+
+**Classes:**
+- `class AgentState` - *Current state of the agent.*
+- `class AgentService` - *Main service running the autonomous agent.*
+  - Method `.__init__(config)`
+  - Method `async def .initialize()` - *Initialize the agent and all components.*
+  - Method `async def .start()` - *Start the agent's cognitive loop.*
+  - Method `async def .stop()` - *Stop the agent gracefully.*
+  - Method `async def ._cognitive_loop()` - *Main cognitive loop - runs continuously.*
+  - Method `async def ._gather_perceptions()` - *Gather all perceptions for this cycle.*
+  - Method `async def ._plan_actions(reflection, perceptions)` - *Plan actions based on reflection and perceptions.*
+  - Method `async def ._plan_for_user_message(perception)` - *Plan actions for a user message.*
+  - Method `async def ._extract_flow_spec(content)` - *Extract flow specification from user message.*
+  - Method `._extract_flow_id(content)` - *Extract flow ID from user message.*
+  - Method `async def ._execute_action(action)` - *Execute an action through the sandbox.*
+  - Method `async def ._execute_create_flow(action, sandbox_result)` - *Execute flow creation.*
+  - Method `async def ._execute_flow(action, sandbox_result)` - *Execute a flow.*
+  - Method `async def ._execute_remember(action, sandbox_result)` - *Execute memory storage.*
+  - Method `async def ._execute_recall(action, sandbox_result)` - *Execute memory recall.*
+  - Method `async def ._execute_inspect_self(action, sandbox_result)` - *Execute self-inspection.*
+  - Method `async def ._execute_send_message(action, sandbox_result)` - *Execute sending a message.*
+  - Method `async def ._learn_from_action(action, result)` - *Learn from action execution.*
+  - Method `async def ._handle_action_error(action, error)` - *Handle action execution error.*
+  - Method `async def ._queue_processor()` - *Background task to process message queues.*
+  - Method `async def ._periodic_consolidation()` - *Periodic memory consolidation.*
+  - Method `async def ._on_perception(perception)` - *Record a perception so the next cycle can inspect it.*
+  - Method `._state_path()` - *Resolve the configured persistence path, if persistence is enabled.*
+  - Method `async def ._load_existing_flows()` - *Adopt flows this agent created from NeuroCore's flow store.*
+  - Method `async def ._load_memory()` - *Restore memory and aggregate counters from the persistence file.*
+  - Method `async def ._save_state()` - *Persist memory and cycle statistics atomically.*
+  - Method `async def .create_flow(spec)` - *Public API to create a flow.*
+  - Method `async def .execute_flow(flow_id, input_data)` - *Public API to execute a flow.*
+  - Method `async def .send_message(message)` - *Public API to send a message.*
+  - Method `async def .notify_user(content, channel, priority)` - *Public API to notify user.*
+  - Method `async def .get_self_status()` - *Get comprehensive agent status.*
+  - Method `async def .handle_user_message(channel, content, user_id, metadata)` - *Handle incoming user message.*
+
+**Functions:**
+- `def create_agent_service(config_dict)` - *Factory function to create agent service from config dict.*
+
+---
+
+### [`modules/autonomous_agent/core/types.py`](modules/autonomous_agent/core/types.py)
+> *Core types and data structures for the Autonomous Agent.*
+
+**Size**: `191` lines (`6330` bytes)
+
+**Classes:**
+- `class ActionType` - *Types of actions the agent can take.*
+- `class ChannelType` - *Communication channels.*
+- `class AgentConfig` - *Configuration for the autonomous agent.*
+- `class Perception` - *What the agent perceives in one cognitive cycle.*
+- `class AgentMessage` - *Outgoing message from agent to user.*
+- `class IncomingMessage` - *Incoming message from user.*
+- `class FlowSpec` - *Specification for creating a flow.*
+  - Method `.to_dict()`
+- `class Reflection` - *Result of agent's self-reflection.*
+- `class SelfAssessment` - *Agent's assessment of itself.*
+- `class ExecutionRecord` - *Record of a flow execution for learning.*
+- `class Experience` - *A complete experience for memory storage.*
+- `class AgentAction` - *An action the agent decides to take.*
+
+---
+
+### [`modules/autonomous_agent/examples/basic_usage.py`](modules/autonomous_agent/examples/basic_usage.py)
+> *Example: How to use the Autonomous Agent in NeuroCore.*
+
+**Size**: `139` lines (`4271` bytes)
+
+**Functions:**
+- `async def main()`
+- `async def simulate_user_interaction(agent)` - *Simulate user sending messages to the agent.*
+- `async def programmatic_example()` - *Using agent directly without chat.*
+
+---
+
+### [`modules/autonomous_agent/nodes/__init__.py`](modules/autonomous_agent/nodes/__init__.py)
+> *Nodes for the Autonomous Agent module.*
+
+**Size**: `11` lines (`192` bytes)
+
+---
+
+### [`modules/autonomous_agent/nodes/agent_node.py`](modules/autonomous_agent/nodes/agent_node.py)
+> *Autonomous Agent Node - Flow node that executes the agent's cognitive loop.*
+
+**Size**: `180` lines (`6613` bytes)
+
+**Classes:**
+- `class AgentNodeConfig` - *Configuration for the autonomous agent node.*
+- `class AutonomousAgentNode` - *Flow node that runs the autonomous agent.*
+  - Method `.__init__()`
+  - Method `async def .receive(input_data, config)` - *Process input through the autonomous agent.*
+  - Method `async def ._initialize(config)` - *Initialize the agent service.*
+  - Method `async def ._trigger_cycle(input_data)` - *Trigger a single cognitive cycle.*
+  - Method `async def ._process_input(input_data)` - *Process a single input through the agent.*
+  - Method `async def .send(processed_data)` - *Finalize output.*
+  - Method `async def .shutdown()` - *Shutdown the agent service.*
+
+---
+
+### [`modules/autonomous_agent/service.py`](modules/autonomous_agent/service.py)
+> *Autonomous Agent Module - Service entry point.*
+
+**Size**: `34` lines (`909` bytes)
+
+**Functions:**
+- `async def create_service(config)` - *Create and initialize the agent service.*
 
 ---
 
@@ -2337,6 +2661,25 @@
 - `def test_strips_single_root_directory(tmp_path)`
 - `async def test_import_route_refuses_zip_slip(tmp_path, monkeypatch)`
 - `async def test_import_route_extracts_safe_module(tmp_path, monkeypatch)`
+
+---
+
+### [`tests/test_autonomous_agent.py`](tests/test_autonomous_agent.py)
+> *Tests for the experimental autonomous agent runtime.*
+
+**Size**: `202` lines (`6143` bytes)
+
+**Functions:**
+- `def make_agent(tmp_path, **overrides)` - *Build an agent whose runtime files live under ``tmp_path``.*
+- `async def test_handle_user_message_records_perception_and_chat_ack(tmp_path)`
+- `async def test_memory_persists_across_service_instances(tmp_path)`
+- `async def test_corrupt_state_is_quarantined(tmp_path)`
+- `async def test_persistence_can_be_disabled(tmp_path)`
+- `async def test_flow_creation_registers_ownership(tmp_path)`
+- `async def test_sandbox_rejects_flow_over_configured_limit(tmp_path)`
+- `async def test_load_existing_flows_adopts_only_owned(tmp_path)`
+- `async def test_communicator_buffers_and_drains_chat_messages()`
+- `async def test_agent_node_processes_single_message(tmp_path)`
 
 ---
 
@@ -4152,6 +4495,63 @@
 - `def client()`
 - `def test_settings_page_accessible(client)`
 - `def test_save_settings_route(client)`
+
+---
+
+### [`tests/test_skills_module.py`](tests/test_skills_module.py)
+> *Tests for the Skills module.*
+
+**Size**: `550` lines (`18909` bytes)
+
+**Classes:**
+- `class TestSkillBackend` - *Test SkillBackend data persistence layer.*
+  - Method `.temp_storage()` - *Create temporary storage directory.*
+  - Method `.backend(temp_storage)` - *Create backend with temp storage.*
+  - Method `.test_create_skill(backend)` - *Test creating a new skill.*
+  - Method `.test_get_skill(backend)` - *Test retrieving a skill by ID.*
+  - Method `.test_get_nonexistent_skill(backend)` - *Test retrieving non-existent skill returns None.*
+  - Method `.test_list_skills(backend)` - *Test listing all skills.*
+  - Method `.test_list_skills_with_category_filter(backend)` - *Test filtering skills by category.*
+  - Method `.test_list_skills_with_tag_filter(backend)` - *Test filtering skills by tag.*
+  - Method `.test_update_skill(backend)` - *Test updating a skill.*
+  - Method `.test_delete_skill(backend)` - *Test deleting a skill.*
+  - Method `.test_delete_nonexistent_skill(backend)` - *Test deleting non-existent skill returns False.*
+  - Method `.test_import_skill(backend)` - *Test importing a skill from content.*
+  - Method `.test_get_categories(backend)` - *Test getting all unique categories from skills.*
+  - Method `.test_get_all_tags(backend)` - *Test getting all unique tags.*
+  - Method `.test_get_skill_content_only(backend)` - *Test getting only skill content.*
+  - Method `.test_skill_exists(backend)` - *Test skill existence check.*
+- `class TestSkillService` - *Test SkillService business logic layer.*
+  - Method `.temp_storage()`
+  - Method `.service(temp_storage)`
+  - Method `.test_create_skill_validates_content(service)` - *Test that skill creation validates content format.*
+  - Method `.test_update_skill_validates_content(service)` - *Test that skill update validates content.*
+  - Method `.test_import_from_file_with_yaml_frontmatter(service)` - *Test importing skill with YAML frontmatter.*
+  - Method `.test_import_from_file_without_frontmatter(service)` - *Test importing skill without frontmatter (fallback extraction).*
+  - Method `.test_export_skill_json(service)` - *Test exporting skill as JSON.*
+  - Method `.test_export_skill_markdown(service)` - *Test exporting skill as Markdown with frontmatter.*
+  - Method `.test_get_enabled_skills_content(service)` - *Test getting content for multiple enabled skills.*
+  - Method `.test_get_enabled_skills_content_ignores_missing(service)` - *Test that missing skill IDs are ignored.*
+- `class TestSkillValidation` - *Test skill content validation.*
+  - Method `.service()`
+  - Method `.test_validate_skill_content_with_headers(service)` - *Test validation passes with markdown headers.*
+  - Method `.test_validate_skill_content_with_lists(service)` - *Test validation passes with markdown lists.*
+  - Method `.test_validate_skill_content_with_numbered_lists(service)` - *Test validation passes with numbered lists.*
+  - Method `.test_validate_skill_content_rejects_empty(service)` - *Test validation rejects empty content.*
+  - Method `.test_validate_skill_content_rejects_no_structure(service)` - *Test validation rejects content without structure.*
+  - Method `.test_validate_skill_content_rejects_too_short(service)` - *Test validation rejects content under 100 chars.*
+  - Method `.test_validate_skill_content_accepts_minimum_valid(service)` - *Test validation accepts minimum valid content (100 chars + structure).*
+- `class TestSkillMetadataExtraction` - *Test metadata extraction from skill content.*
+  - Method `.service()`
+  - Method `.test_extract_title_from_h1(service)` - *Test extracting title from first H1.*
+  - Method `.test_extract_title_returns_none_when_no_h1(service)` - *Test title extraction returns None when no H1.*
+  - Method `.test_extract_description_first_paragraph(service)` - *Test extracting description from first paragraph after title.*
+  - Method `.test_clean_file_name(service)` - *Test cleaning file names to skill names.*
+  - Method `.test_generate_import_id(service)` - *Test generating unique import IDs.*
+
+**Functions:**
+- `def test_example_skill_loads()` - *Test that the example skill file loads correctly.*
+- `def test_skill_content_sanitization()` - *Test that skill content is properly handled.*
 
 ---
 

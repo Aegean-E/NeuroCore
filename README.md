@@ -50,6 +50,7 @@ pip install -r requirements.txt
 
 # 3. Run
 python main.py
+# Windows convenience: start.bat runs the same command from its own folder.
 
 # 4. Open http://localhost:8000
 ```
@@ -113,6 +114,7 @@ Workflows are directed acyclic graphs executed deterministically using Kahn's to
 - **`planner`**: Multi-step request decomposition and dependency-aware step tracking.
 - **`browser_automation`**: Headless browser automation service using Playwright.
 - **`calendar`**: Calendar event tracking and proactive deadline reminders.
+- **`autonomous_agent`** *(experimental, disabled)*: Standalone runtime with sandboxed flow creation, three-tier memory, reflection and chat buffering. It is not auto-loaded; see `ADR-008` before enabling it.
 
 ---
 
