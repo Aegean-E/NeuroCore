@@ -92,3 +92,23 @@ contract, a dependency, a data format or the architecture; IDs are consecutive a
   same-origin or absent `Origin`). A remote bind now needs `NEUROCORE_API_TOKEN`; because the host
   guard already blocks non-loopback hosts by default, both must be opted in deliberately. The
   token is checked per request so it can be rotated by restart, not mutation.
+
+### ADR-007: Integrate lattice as the evidence backend for the research module
+- **Date**: 2026-10-20
+- **Status**: Proposed
+- **Context**: NeuroCore's research module (`core/research_manager.py`) manages hypotheses, articles, study designs, and findings in a local SQLite database. Lattice (`projects/lattice/`) is a separate provenance-first research knowledge graph with quote-backed claims, deterministic evidence graphs, MCP server for AI agents, contradiction detection, consensus synthesis, and a Web Research Studio. Maintaining two separate research data stores creates duplication, limits agent access to evidence, and prevents unified synthesis.
+- **Decision**: Integrate lattice as the backend for neurocore's research entities via a `LatticeAdapter` that translates neurocore ResearchManager calls to lattice operations. **ZERO DETAIL LOSS**: Every lattice feature, data field, CLI command, MCP tool, web UI component, analytical function, token budget, and validation rule must be preserved and accessible in neurocore. NeuroCore agents will access lattice's complete evidence graph through MCP tools. A bidirectional event-sourced sync engine with field-level conflict resolution will reconcile edits from both sides. The lattice Web Research Studio will be embeddable in neurocore's research tabs with full parity. Lattice must expose a public `lattice/api.py` module for zero-overhead direct access.
+- **Consequences**:
+  - *Positive*: Single source of truth for research evidence with full provenance; AI agents get token-budgeted provenance-rich context via MCP; contradiction detection and consensus synthesis become available in neurocore; federated literature discovery (arXiv, OpenAlex, Crossref, EuropePMC) flows into neurocore articles; Web Research Studio provides advanced UI without neurocore implementation effort.
+  - *Trade-offs*: Adds dependency on lattice project availability; requires adapter layer maintenance; bidirectional sync needs field-level conflict resolution strategy; lattice's stdlib-only constraint means no heavy ML dependencies for embeddings (neurocore's FAISS remains for vector search).
+  - *Implementation*: Phase 1 (lattice/api.py + adapter + MCP client), Phase 2 (ResearchManager migration + event-sourced sync), Phase 3 (UI/agent integration + full Research Studio parity), Phase 4 (advanced features), Phase 5 (hardening). Design doc: `docs/lattice_integration_design.md`.
+
+### ADR-008: Ship the autonomous agent as a disabled experimental library
+- **Date**: 2026-10-21
+- **Status**: Accepted
+- **Context**: `modules/autonomous_agent/` arrived as an untracked ~120 KB prototype. It had no router, so `module.json` advertised an enabled module that never loaded; `AgentService.handle_user_message` raised `NameError` for `IncomingMessage`; and six lifecycle methods were stubs. The runtime is not wired into NeuroCore's flow runner, UI or service lifecycle.
+- **Decision**: Keep the runtime in-tree as an experimental, opt-in library. Mark the module `enabled: false`, fix the import and node base class, implement perception recording, flow adoption, atomic state persistence, memory serialization and chat buffering, and cover the core lifecycle with `tests/test_autonomous_agent.py`. Do not expose HTTP routes, auto-start it, or register it as a flow node until a follow-up ADR defines service lifecycle, authentication and shutdown.
+- **Consequences**:
+  - *Positive*: The work is preserved and reviewable; the gates pass; the code no longer claims to be an active module; core behavior is tested.
+  - *Trade-offs*: The agent does not appear as an available module in the UI; enabling it requires a router/service lifecycle and a security review for its sandboxed flow actions.
+  - *Persistence*: State is stored under `modules/autonomous_agent/data/` (git-ignored) using temp-file + fsync + `os.replace`; corrupt snapshots are quarantined.
