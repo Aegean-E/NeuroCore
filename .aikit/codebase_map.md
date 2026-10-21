@@ -8,9 +8,9 @@
 ## 📊 Codebase Metrics
 - **Total Python Modules**: `210`
 - **Total Classes**: `326`
-- **Total Top-Level Functions**: `1174`
+- **Total Top-Level Functions**: `1176`
 - **Total Class Methods**: `1728`
-- **Total Source Lines**: `61088`
+- **Total Source Lines**: `61137`
 
 ---
 
@@ -1133,7 +1133,7 @@
 ### [`modules/autonomous_agent/core/service.py`](modules/autonomous_agent/core/service.py)
 > *Main Agent Service - Ties all components together and runs the cognitive loop.*
 
-**Size**: `659` lines (`26603` bytes)
+**Size**: `673` lines (`27346` bytes)
 
 **Classes:**
 - `class AgentState` - *Current state of the agent.*
@@ -2667,17 +2667,19 @@
 ### [`tests/test_autonomous_agent.py`](tests/test_autonomous_agent.py)
 > *Tests for the experimental autonomous agent runtime.*
 
-**Size**: `202` lines (`6143` bytes)
+**Size**: `237` lines (`7461` bytes)
 
 **Functions:**
 - `def make_agent(tmp_path, **overrides)` - *Build an agent whose runtime files live under ``tmp_path``.*
 - `async def test_handle_user_message_records_perception_and_chat_ack(tmp_path)`
 - `async def test_memory_persists_across_service_instances(tmp_path)`
 - `async def test_corrupt_state_is_quarantined(tmp_path)`
+- `async def test_valid_json_state_with_wrong_shape_is_quarantined(tmp_path)`
 - `async def test_persistence_can_be_disabled(tmp_path)`
 - `async def test_flow_creation_registers_ownership(tmp_path)`
 - `async def test_sandbox_rejects_flow_over_configured_limit(tmp_path)`
 - `async def test_load_existing_flows_adopts_only_owned(tmp_path)`
+- `async def test_load_existing_flows_skips_malformed_metadata(tmp_path)`
 - `async def test_communicator_buffers_and_drains_chat_messages()`
 - `async def test_agent_node_processes_single_message(tmp_path)`
 

@@ -92,6 +92,19 @@ async def test_corrupt_state_is_quarantined(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_valid_json_state_with_wrong_shape_is_quarantined(tmp_path):
+    state_path = tmp_path / "state.json"
+    state_path.write_text("[]", encoding="utf-8")
+
+    agent = make_agent(tmp_path)
+    assert await agent.initialize() is True
+
+    assert any(error["phase"] == "memory_loading" for error in agent.state.errors)
+    assert not state_path.exists()
+    assert list(tmp_path.glob("state.json.corrupt-*"))
+
+
+@pytest.mark.asyncio
 async def test_persistence_can_be_disabled(tmp_path):
     agent = AgentService(
         AgentConfig(
@@ -154,6 +167,28 @@ async def test_load_existing_flows_adopts_only_owned(tmp_path):
     assert "owned-flow" in agent.flow_creator.created_flows
     assert "owned-flow" in agent.sandbox.get_owned_flows()
     assert "other-flow" not in agent.flow_creator.created_flows
+
+
+@pytest.mark.asyncio
+async def test_load_existing_flows_skips_malformed_metadata(tmp_path):
+    flows = {
+        "string-metadata": {"id": "string-metadata", "metadata": "not-a-dict"},
+        "null-metadata": {"id": "null-metadata", "metadata": None},
+        "missing-metadata": {"id": "missing-metadata"},
+        "owned-flow": {"id": "owned-flow", "metadata": {"creator": "test-agent"}},
+    }
+    (tmp_path / "ai_flows.json").write_text(
+        json.dumps(flows), encoding="utf-8"
+    )
+
+    agent = make_agent(tmp_path)
+    assert await agent.initialize() is True
+
+    assert agent.state.errors == []
+    assert "owned-flow" in agent.flow_creator.created_flows
+    assert "string-metadata" not in agent.flow_creator.created_flows
+    assert "null-metadata" not in agent.flow_creator.created_flows
+    assert "missing-metadata" not in agent.flow_creator.created_flows
 
 
 @pytest.mark.asyncio

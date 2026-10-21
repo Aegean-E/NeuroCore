@@ -528,8 +528,10 @@ class AgentService:
         for flow_id, flow in flows.items():
             if not isinstance(flow, dict):
                 continue
-            creator = flow.get("metadata", {}).get("creator")
-            if creator != self.agent_id:
+            metadata = flow.get("metadata")
+            if not isinstance(metadata, dict):
+                continue
+            if metadata.get("creator") != self.agent_id:
                 continue
             self.flow_creator.created_flows[flow_id] = flow
             self.sandbox.register_flow_ownership(flow_id)
@@ -542,12 +544,24 @@ class AgentService:
         try:
             with open(path, "r", encoding="utf-8") as handle:
                 snapshot = json.load(handle)
-            self.memory.load_dict(snapshot.get("memory", {}))
+            if not isinstance(snapshot, dict):
+                raise ValueError("state snapshot must be a JSON object")
+            memory_snapshot = snapshot.get("memory", {})
+            if not isinstance(memory_snapshot, dict):
+                raise ValueError("state memory must be a JSON object")
+            owned_flows = snapshot.get("owned_flows", [])
+            if not isinstance(owned_flows, list):
+                raise ValueError("state owned_flows must be a JSON array")
+            snapshot_errors = snapshot.get("errors", [])
+            if not isinstance(snapshot_errors, list):
+                raise ValueError("state errors must be a JSON array")
+            self.memory.load_dict(memory_snapshot)
             self.state.current_cycle = int(snapshot.get("current_cycle", 0))
             self.state.total_cycles = int(snapshot.get("total_cycles", 0))
-            self.state.errors = list(snapshot.get("errors", []))[-100:]
-            for flow_id in snapshot.get("owned_flows", []):
-                self.sandbox.register_flow_ownership(flow_id)
+            self.state.errors = list(snapshot_errors)[-100:]
+            for flow_id in owned_flows:
+                if isinstance(flow_id, str):
+                    self.sandbox.register_flow_ownership(flow_id)
         except (OSError, ValueError, TypeError) as exc:
             self.state.errors.append({
                 "timestamp": datetime.now().isoformat(),

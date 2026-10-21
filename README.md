@@ -74,6 +74,7 @@ neurocore/
 ├── Dockerfile
 ├── LICENSE
 ├── README.md
+├── start.bat
 ├── banner.jpg
 ├── docker-compose.yml
 ├── main.py                   <- FastAPI application entrypoint
