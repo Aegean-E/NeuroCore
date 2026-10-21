@@ -1,54 +1,14 @@
 {
   "version": 1,
   "active_task": {
-    "task_id": "task-neurocore-security-hardening",
+    "task_id": "task-neurocore-inflight-completion",
     "last_phase": "phase 4",
     "active_phase": 5,
     "status": "completed",
-    "updated_at": 1792522721.0057526,
-    "completed_at": 1792522792.91732
+    "updated_at": 1792588643.012649,
+    "completed_at": 1792588692.9413285
   },
   "checkpoints": [
-    {
-      "task_id": "task-neurocore-onboarding",
-      "phase": "phase 2",
-      "phase_num": 2,
-      "description": "User directed to bring projects/neurocore into full AIKit compliance (configure environment, generate codebase map, and resolve all gates for python aikit.py check neurocore)",
-      "files_affected": [],
-      "status": "in_progress",
-      "timestamp": 1792440193.7106447,
-      "timestamp_str": "2026-10-19 23:03:13"
-    },
-    {
-      "task_id": "task-neurocore-onboarding",
-      "phase": "phase 3",
-      "phase_num": 3,
-      "description": "[1/5] Phase 3 Entering implementation for environment & gate setup",
-      "files_affected": [],
-      "status": "in_progress",
-      "timestamp": 1792440199.5644422,
-      "timestamp_str": "2026-10-19 23:03:19"
-    },
-    {
-      "task_id": "task-neurocore-onboarding",
-      "phase": "phase 3",
-      "phase_num": 3,
-      "description": "[1/5] Milestone 1 completed: environment and manifest-declared packages installed, gates configured in project.json, gitignore updated",
-      "files_affected": [],
-      "status": "in_progress",
-      "timestamp": 1792440255.2437377,
-      "timestamp_str": "2026-10-19 23:04:15"
-    },
-    {
-      "task_id": "task-neurocore-onboarding",
-      "phase": "phase 3",
-      "phase_num": 3,
-      "description": "[2/5] Entering test suite stabilization: prune 4 orphaned test files and fix faiss/playwright test errors",
-      "files_affected": [],
-      "status": "in_progress",
-      "timestamp": 1792440259.850034,
-      "timestamp_str": "2026-10-19 23:04:19"
-    },
     {
       "task_id": "task-neurocore-onboarding",
       "phase": "phase 3",
@@ -212,6 +172,51 @@
       "status": "completed",
       "timestamp": 1792522792.9173214,
       "timestamp_str": "2026-10-20 21:59:52"
+    },
+    {
+      "task_id": "task-neurocore-inflight-completion",
+      "phase": "phase 1",
+      "phase_num": 1,
+      "description": "[1/3] Plan: finish the four in-flight neurocore changes - autonomous agent runtime, skills tests/metadata hygiene, marketplace template includes, and the lattice integration design as a Proposed ADR",
+      "files_affected": [],
+      "status": "in_progress",
+      "timestamp": 1792588239.5302122,
+      "timestamp_str": "2026-10-21 16:10:39",
+      "impact_assessment": {
+        "why": "The working tree carries an unreviewed 120 KB agent prototype, a polluted skills metadata file, broken marketplace includes, and an undocumented lattice design proposal. Leaving them uncommitted hides real bugs (NameError on handle_user_message, phantom enabled module, dropped chat replies) and blocks the Phase 4 gates.",
+        "benefits": "Preserves the work, makes the agent runtime importable and testable, restores metadata hygiene, keeps the design reviewable, and returns all four gates to green without adding runtime dependencies.",
+        "risks": "Contract: new optional AgentConfig.persistence field and module.json enabled=false; no existing public API changes. Dependency: stdlib only. Concurrency: shutdown persistence is single-writer with temp-file replace. State: a corrupt snapshot is quarantined rather than trusted. Design doc is committed as Proposed, not implemented.",
+        "mitigation": "Add tests/test_autonomous_agent.py for lifecycle, memory roundtrip, sandbox limits, flow adoption and node wiring; restore skills_metadata.json from HEAD; run the full pytest suite and python aikit.py check neurocore before committing."
+      }
+    },
+    {
+      "task_id": "task-neurocore-inflight-completion",
+      "phase": "phase 3",
+      "phase_num": 3,
+      "description": "[2/3] Milestone 1 completed: fixed the autonomous agent runtime (IncomingMessage import, plain node class, perception recording, flow adoption, atomic memory/state persistence, chat outbox, configurable sandbox limits), marked it disabled with ADR-008, added 9 tests, restored skills metadata, wrapped the marketplace includes in script tags, removed the redundant Windows event-loop policy, and added start.bat plus README notes.",
+      "files_affected": [],
+      "status": "in_progress",
+      "timestamp": 1792588639.5430834,
+      "timestamp_str": "2026-10-21 16:17:19"
+    },
+    {
+      "task_id": "task-neurocore-inflight-completion",
+      "phase": "phase 4",
+      "phase_num": 4,
+      "description": "[3/3] Phase 4 verification: python aikit.py check neurocore passed 4/4 (test, hygiene, guidelines, secrets); checklists: passed; full pytest suite green, including 9 autonomous-agent tests and 36 skills-module tests; skills_metadata.json restored to HEAD after verifying it stays clean.",
+      "files_affected": [],
+      "status": "in_progress",
+      "timestamp": 1792588643.012649,
+      "timestamp_str": "2026-10-21 16:17:23"
+    },
+    {
+      "task_id": "task-neurocore-inflight-completion",
+      "phase": "completed",
+      "phase_num": 5,
+      "description": "Task 'task-neurocore-inflight-completion' completed successfully.",
+      "status": "completed",
+      "timestamp": 1792588692.9413302,
+      "timestamp_str": "2026-10-21 16:18:12"
     }
   ]
 }
