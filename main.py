@@ -7,12 +7,6 @@ import sys
 PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
 os.chdir(PROJECT_ROOT)
 
-# On Windows, asyncio defaults to SelectorEventLoop which cannot spawn subprocesses.
-# Playwright (and any module that uses asyncio.create_subprocess_exec) requires
-# ProactorEventLoop on Windows. Apply this policy as early as possible.
-if sys.platform == "win32":
-    asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
-
 from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, Header, HTTPException
